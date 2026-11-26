@@ -147,6 +147,34 @@ void Stage::clearPlaybackRange() {
     playbackRangeChanged();
 }
 
+namespace {
+void normalize(PrimvarElements& elements) {
+    std::sort(elements.indices.begin(), elements.indices.end());
+    elements.indices.erase(std::unique(elements.indices.begin(), elements.indices.end()), elements.indices.end());
+    if (elements.indices.empty()) elements = PrimvarElements();
+}
+}  // namespace
+
+void Stage::setPrimvarElements(PrimvarElements elements) {
+    normalize(elements);
+    if (elements == m_primvarElements) return;
+    m_primvarElements = std::move(elements);
+    primvarElementsChanged();
+}
+
+void Stage::setPrimvarElementHover(PrimvarElements elements) {
+    normalize(elements);
+    if (elements == m_primvarElementHover) return;
+    m_primvarElementHover = std::move(elements);
+    primvarElementHoverChanged();
+}
+
+void Stage::setPrimvarFocus(const std::string& name) {
+    if (name == m_primvarFocus) return;
+    m_primvarFocus = name;
+    primvarFocusChanged(m_primvarFocus);
+}
+
 PXR_NS::TfToken Stage::targetXformOpFor(const PXR_NS::SdfPath& primPath) const {
     return primPath == m_targetPrim ? m_targetOp : PXR_NS::TfToken();
 }

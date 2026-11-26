@@ -41,8 +41,12 @@ add_executable(usdcc_tests
     validation_run_test.cpp
     validation_profile_test.cpp
     viewport_grid_test.cpp
+    viewport_overlays_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
+    primvar_colors_test.cpp
+    primvar_edit_test.cpp
+    primvar_info_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp
     rotate_tool_test.cpp
@@ -84,6 +88,10 @@ add_dependencies(usdcc_tests usdcc_node)
 # docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
 # plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
 # A feature left out of the build (docs/BUILD_OPTIONS.md) takes its tests with it.
+if(USDCC_BUILD_UV_VIEW)
+    target_sources(usdcc_tests PRIVATE uv_layout_test.cpp)
+    target_link_libraries(usdcc_tests PRIVATE usdcc_uv_view_core)
+endif()
 if(USDCC_BUILD_PHYSICS_JOLT)
     target_sources(usdcc_tests PRIVATE physics_spike_test.cpp physics_test.cpp physics_bake_joints_test.cpp)
     target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
@@ -99,6 +107,8 @@ add_executable(usdcc_ui_tests
     about_dialog_test.cpp
     usd_runtime_dialog_test.cpp
     attributes_primvar_groups_test.cpp
+    primvar_commands_test.cpp
+    primvars_panel_test.cpp
     attributes_prim_path_test.cpp
     attributes_rename_test.cpp
     attributes_tab_test.cpp
@@ -177,6 +187,10 @@ if(USDCC_BUILD_VIEWPORT_BROADCAST)
     target_sources(usdcc_ui_tests PRIVATE viewport_broadcast_test.cpp)
     target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_ui)
 endif()
+if(USDCC_BUILD_UV_VIEW)
+    target_sources(usdcc_ui_tests PRIVATE uv_view_test.cpp)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_uv_view_ui)
+endif()
 # The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)
 target_compile_definitions(usdcc_ui_tests PRIVATE USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -202,6 +216,7 @@ add_executable(usdcc_python_tests
     test_harness.cpp
     python_test_main.cpp
     assets_python_test.cpp
+    primvars_python_test.cpp
     package_environment_test.cpp
     plugin_manager_test.cpp
     plugin_native_test.cpp

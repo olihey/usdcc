@@ -484,6 +484,51 @@ def _view_panel_restore_state(panel, text):
     panel.restore_state(json.loads(text) if text else None)
 
 
+class PrimvarView:
+    """Base class for views of primvars made in Python (docs/PRIMVAR_VIEWER.md section 9.2).
+
+    Subclass it and register the class with ``usdcc.primvars.register_view()``. The view is
+    then a tab of the Primvars panel, under its list, and a panel type of its own. Each place
+    it's shown makes one instance:
+
+    - ``create_widget()`` (required) returns its widget, which the view takes ownership of.
+    - ``context_changed(context, focus_only)`` gets a ``usdcc.primvars.ViewContext`` each time
+      the selection, the primvar in focus, the time or the stage changes; ``focus_only`` when
+      only the focus did. ``self.context`` is the latest.
+    - ``save_state()`` and ``restore_state(state)``: what a session keeps (JSON values).
+
+    Exceptions raised from these methods are logged (python.exception).
+    """
+
+    widget: _QtWidgets.QWidget | None = None
+    context: Any = None
+
+    def create_widget(self) -> _QtWidgets.QWidget:
+        raise NotImplementedError("%s must implement create_widget()" % type(self).__name__)
+
+    def context_changed(self, context: Any, focus_only: bool) -> None:
+        pass
+
+    def save_state(self) -> Any:
+        return None
+
+    def restore_state(self, state: Any) -> None:
+        pass
+
+
+def _create_primvar_view(cls, host_address):
+    host = _shiboken.wrapInstance(host_address, _QtWidgets.QWidget)
+    view = cls()
+    widget = view.create_widget()
+    if not isinstance(widget, _QtWidgets.QWidget):
+        raise TypeError("%s.create_widget() returned %s, not a QWidget" % (cls.__name__, type(widget).__name__))
+    # Parenting it from Python hands its ownership to the view.
+    widget.setParent(host)
+    host.layout().addWidget(widget)
+    view.widget = widget
+    return view
+
+
 # The C++ side of a render view panel (ScriptedRenderViewPanel) calls these.
 
 

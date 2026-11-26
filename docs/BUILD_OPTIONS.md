@@ -93,6 +93,7 @@ was built with.
 |---|---|---|---|---|---|
 | Remote support | `USDCC_BUILD_REMOTE_SUPPORT` | Plugin | **On** (decided 2026-11-22) | Someone else controlling the app | Small: new, built for it |
 | Viewport Broadcast | `USDCC_BUILD_VIEWPORT_BROADCAST` | Plugin | On | Opens a port and serves a page | Small |
+| UV View | `USDCC_BUILD_UV_VIEW` | Plugin | On | Hardly; the Primvars panel's UV tab ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §18) | Small: new, built for it |
 | Remote asset protocols | `USDCC_BUILD_HTTP`, `_WEBDAV`, `_S3` | USD plugins | On | Assets only from the studio's storage | Small |
 | Jolt Physics | `USDCC_BUILD_PHYSICS_JOLT` | Plugin | On | Hardly; for completeness | Small |
 | V-Ray Render | `USDCC_BUILD_VRAY_RENDER` | Python plugin, deploy only | On | Not licensed | Small: deploy and the id |
@@ -147,7 +148,7 @@ them.
 | `build/features.json` | The configure | Name, label, included, plugin ids and folders per feature |
 | Deploy | [tools/deploy.py](../tools/deploy.py) | `SHIPPED_PLUGINS` and `SHIPPED_NATIVE_PLUGINS` stay as the candidates; those whose feature is off aren't copied or required, on Windows, Linux and macOS. They're still kept out of `examples/`, so a left-out plugin doesn't come back as an example. RTX follows its feature, and `--omit-rtx` still leaves it out |
 | `tools/build.py --without FEATURE` | [tools/build.py](../tools/build.py) | Repeatable, or `--without all`; every run passes each default-on feature as on or off, so a build without `--without` has them all again. Without Blender mesh tools it doesn't fetch their backend |
-| Tests | `tests/CMakeLists.txt` | A feature's tests are built only with it: the physics tests, `physics_timeline_test`, `viewport_broadcast_test`, the V-Ray tests, and each protocol's part of `assets_net_test.cpp` (`#ifdef` on its directory). `python_physics` checks `USDCC_FEATURE_PHYSICS_JOLT` |
+| Tests | `tests/CMakeLists.txt` | A feature's tests are built only with it: the physics tests, `physics_timeline_test`, `viewport_broadcast_test`, `uv_layout_test` and `uv_view_test`, the V-Ray tests, and each protocol's part of `assets_net_test.cpp` (`#ifdef` on its directory). `python_physics` checks `USDCC_FEATURE_PHYSICS_JOLT` |
 | CI | `build.yml`, Windows and Linux, x64 and arm64 | On pushes to `master` only, not for pull requests: after the usual build and tests, the same build with `--without all --without-rtx`. [check_features_left_out.py](../tools/ci/check_features_left_out.py) then fails if `features.json` has a feature included, or `usdcc_node --version` doesn't list each as left out. Not deployed, its tests not run |
 
 Tests: `plugin_left_out_of_the_build` (`usdcc_python_tests`: the features, a copied plugin of a

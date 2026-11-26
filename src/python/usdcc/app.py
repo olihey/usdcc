@@ -352,6 +352,12 @@ def renderer_settings_info(renderer: str) -> list[RendererSetting]:
     return result
 
 
+def primvar_colorizers() -> dict[str, str]:
+    """The ways Color By shows a primvar's values as colours, as {id: label}: the built-in
+    "ramp", "categories", "color", "uv" and "direction", and plugins'."""
+    return dict(_app().primvar_colorizers())
+
+
 class Viewport:
     """An open viewport (``viewports()``, ``active_viewport()``). Once it's closed, every call
     but ``is_open()`` raises ValueError.
@@ -440,6 +446,22 @@ class Viewport:
     def renderer(self) -> str:
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
         return _app().viewport_renderer(self._id)
+
+    def primvar_coloring(self) -> dict[str, Any]:
+        """What its geometry is coloured by (docs/PRIMVAR_VIEWER.md section 17): a dict of
+        ``primvar`` ("" for nothing), ``colorizer`` ("" for the one for its type), ``range``
+        (low, high) or None for the stage's, ``component`` (-1 for a vector's length) and
+        ``lit``."""
+        return dict(_app().viewport_primvar_coloring(self._id))
+
+    def set_primvar_coloring(self, primvar: str | None, colorizer: str = "", range: tuple[float, float] | None = None,
+                             component: int = -1, lit: bool = False) -> None:
+        """Colours its geometry by a primvar, as Color By in its options menu does; None or ""
+        for nothing. ``colorizer`` is one of ``usdcc.app.primvar_colorizers()``' ids ("ramp",
+        "categories", "color", "uv", "direction", or a plugin's); "" picks the one for the
+        primvar's type."""
+        _app().set_viewport_primvar_coloring(self._id, primvar or "", colorizer, None if range is None else (float(range[0]), float(range[1])),
+                                             int(component), bool(lit))
 
     def renderers(self) -> list[str]:
         """The renderers it can switch to: once it has drawn, those that can render here;

@@ -19,7 +19,12 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_colors.h"
+#include "usdcc/usd/primvar_commands.h"
+#include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/render/final_renderer.h"
+#include "usdcc/usd/viewport_overlays.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
 #include <exception>
@@ -152,6 +157,72 @@ struct Host {
         const std::string added = renderer->name();
         usdcc::render::FinalRenderers::instance().add(std::move(renderer));
         noted("Final renderer", added);
+    }
+
+    // A view of primvars (docs/PRIMVAR_VIEWER.md §9.2): a tab of the Primvars panel, and a panel
+    // type of its own, "primvarView.<id>". One with the id of another replaces it. Remove it in
+    // usdcc_plugin_deactivate() with usdcc::usd::PrimvarViews::instance().remove(id).
+    void addPrimvarView(usdcc::usd::PrimvarViewType type) {
+        if (type.id.isEmpty() || !type.create) throw std::invalid_argument("a primvar view has an id and makes its widget");
+        const std::string added = type.label.toStdString();
+        usdcc::usd::PrimvarViews::instance().add(std::move(type));
+        noted("Primvar view", added);
+    }
+
+    // An entry in the Primvars panel's menus (docs/PRIMVAR_VIEWER.md §19): a row's, where the
+    // context has its primvar, and the panel's own options menu, where it has none. "Group/Action"
+    // makes a submenu. `run` is one undo step; it can edit with usdcc/usd/primvar_edit.h. Remove it
+    // in usdcc_plugin_deactivate() with usdcc::usd::PrimvarCommands::instance().remove(<plugin id>.<label>).
+    void addPrimvarMenuAction(const QString& label, std::function<void(const usdcc::usd::PrimvarCommandContext&)> run,
+                              std::function<bool(const usdcc::usd::PrimvarCommandContext&)> applies = {}) {
+        usdcc::usd::PrimvarCommand command;
+        command.id = id + "." + label.toStdString();
+        command.label = label;
+        const std::string step = label.section(QLatin1Char('/'), -1).remove(QStringLiteral("...")).toStdString();
+        // One step on the panel's stage, which needn't be the current one.
+        command.run = [this, step, run = std::move(run)](const usdcc::usd::PrimvarCommandContext& context) {
+            const auto body = [&]() {
+                try {
+                    run(context);
+                    return true;
+                } catch (const std::exception& error) {
+                    log(usdcc::core::LogLevel::Error, step + " failed: " + error.what());
+                } catch (...) {
+                    log(usdcc::core::LogLevel::Error, step + " failed");
+                }
+                return false;
+            };
+            if (context.undo && context.stage) {
+                context.undo->apply(context.stage, QString::fromStdString(step), body);
+            } else {
+                body();
+            }
+        };
+        command.applies = std::move(applies);
+        usdcc::usd::PrimvarCommands::instance().add(std::move(command));
+        noted("Primvar menu action", label.toStdString());
+    }
+
+    // A way of showing a primvar's values as colours in Color By (docs/PRIMVAR_VIEWER.md §17): its
+    // `colors` is called on Hydra's threads while it syncs, so it must only read. One with the id
+    // of another replaces it. Remove it in usdcc_plugin_deactivate() with
+    // usdcc::usd::PrimvarColorizers::instance().remove(id).
+    void addPrimvarColorizer(usdcc::usd::PrimvarColorizer colorizer) {
+        if (colorizer.id.empty() || !colorizer.colors) throw std::invalid_argument("a colorizer has an id and makes colours");
+        const std::string added = colorizer.label.empty() ? colorizer.id : colorizer.label;
+        usdcc::usd::PrimvarColorizers::instance().add(std::move(colorizer));
+        noted("Primvar colorizer", added);
+    }
+
+    // Lines and triangles every viewport draws over its render, on unless a viewport's
+    // Overlays menu turns it off (docs/PRIMVAR_VIEWER.md §9.2 point 7). `build` runs for each
+    // frame. One with the id of another replaces it. Remove it in usdcc_plugin_deactivate() with
+    // usdcc::usd::ViewportOverlays::instance().remove(id).
+    void addViewportOverlay(usdcc::usd::ViewportOverlay overlay) {
+        if (overlay.id.empty() || !overlay.build) throw std::invalid_argument("a viewport overlay has an id and builds its lines");
+        const std::string added = overlay.label.toStdString();
+        usdcc::usd::ViewportOverlays::instance().add(std::move(overlay));
+        noted("Viewport overlay", added);
     }
 
     // A key of the plugin's own in usdcc::ui::appSettings().

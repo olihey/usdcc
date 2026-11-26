@@ -78,6 +78,8 @@ A plugin in your own folder wins over a shipped one with the same id; the other 
 | Create menu entries | `usdcc.usd.set_create_entry(...)` |
 | Validation rules | `usdcc.validation.rule(...)`, `stage_rule`, `layer_rule` ([VALIDATION.md](VALIDATION.md) §5) |
 | Relationship target rules | `usdcc.usd.set_relationship_targets(...)` |
+| Primvars that belong together | `usdcc.primvars.register_relation(...)` ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §13) |
+| Views of primvars | `usdcc.primvars.register_view(id, label, cls, applies=None)` with a `usdcc.ui.PrimvarView` subclass: a tab of the Primvars panel and a panel type of its own ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §15); [src/plugins/primvar_histogram_example](../src/plugins/primvar_histogram_example) is an example |
 | Schemas, render delegates | A folder named in the manifest's `"usd"` |
 | Settings | `plugin.settings.value(key, default)`, `set_value(key, value)`, JSON values, one group per plugin in `usdcc.ini` |
 | Logging | `plugin.log`, a logger with the source `plugin:<id>` in the Log panel |

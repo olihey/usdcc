@@ -172,3 +172,22 @@ builtins.v, builtins.w = usdcc.app.viewports()
     settings.reset("Renderers/HdEmbreeRendererPlugin/ty:maxBounces");
     settings.reset("Renderers/HdEmbreeRendererPlugin/ty:tileSize");
 }
+
+USDCC_TEST(python_viewport_primvar_coloring) {
+    TestSettings testSettings;
+    auto& app = pythonTestApp();
+    const AppContextScope scope({&app.stages, &app.undo, &app.tools});
+    CHECK(run("import builtins, usdcc.app\nbuiltins.app = usdcc.app\n"), "importing");
+    auto viewport = makeViewport();
+    CHECK(run("v = app.viewports()[0]\nassert v.primvar_coloring()['primvar'] == ''\n"
+              "v.set_primvar_coloring('primvars:dirt', 'ramp', (0, 5), 1, True)\n"
+              "c = v.primvar_coloring()\n"
+              "assert (c['primvar'], c['colorizer'], c['range'], c['component'], c['lit']) == ('dirt', 'ramp', (0.0, 5.0), 1, True), c\n"
+              "v.set_primvar_coloring(None)\nassert v.primvar_coloring()['primvar'] == ''\n"
+              "assert ('uv', 'UV') in app.primvar_colorizers().items()\n"),
+          "Viewport.set_primvar_coloring()");
+    CHECK(viewport->primvarColoring().primvar.empty(), "the viewport's own");
+    CHECK(raises("app.viewports()[0].set_primvar_coloring('dirt', 'nothing')", "ValueError") &&
+              raises("app.viewports()[0].set_primvar_coloring('dirt', component=7)", "ValueError"),
+          "an unknown colorizer, a component out of range");
+}

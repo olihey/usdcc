@@ -59,6 +59,18 @@ bool editTargetReaches(const PXR_NS::UsdPrim& prim);
 // at a variant, whose emptiness means something, and at anything with content.
 void removeEmptyOvers(const PXR_NS::SdfLayerHandle& layer, PXR_NS::SdfPath specPath);
 
+// Elements of one prim that a primvar is over (docs/PRIMVAR_VIEWER.md §9.2): some of its points,
+// faces, face corners, curves or instances, by index.
+struct PrimvarElements {
+    PXR_NS::SdfPath prim;
+    // What they are, as PrimvarElementCounts names them: "points", "faces", "face corners",
+    // "curves", "instances".
+    std::string domain;
+    std::vector<std::size_t> indices;  // sorted, each once
+    bool empty() const { return prim.IsEmpty() || indices.empty(); }
+    bool operator==(const PrimvarElements&) const = default;
+};
+
 // Wraps a UsdStageRefPtr together with usdcc-specific, per-stage state that
 // doesn't belong on USD's own Stage object — currently just the prim
 // selection (see docs/PLAN.md milestone M4/§6 item 21), but the point of
@@ -161,6 +173,24 @@ public:
     void clearPlaybackRange();
     usdcc::core::Signal<> playbackRangeChanged;
 
+    // The primvar the Primvars panel and its views look at (docs/PRIMVAR_VIEWER.md §9.2), by name
+    // without "primvars:"; empty for none. Shared by every panel on the stage, and kept when the
+    // selection changes, so the next prim shows the same one. View state, as the time is.
+    const std::string& primvarFocus() const { return m_primvarFocus; }
+    void setPrimvarFocus(const std::string& name);
+    usdcc::core::Signal<const std::string&> primvarFocusChanged;
+
+    // The elements picked in a primvar view (the Values table's rows), and the one under the
+    // cursor there, which the viewport outlines (docs/PRIMVAR_VIEWER.md §9.2). View state, not
+    // undoable; both are dropped when the prim selection leaves their prim. Indices are put in
+    // order and made unique.
+    const PrimvarElements& primvarElements() const { return m_primvarElements; }
+    void setPrimvarElements(PrimvarElements elements);
+    usdcc::core::Signal<> primvarElementsChanged;
+    const PrimvarElements& primvarElementHover() const { return m_primvarElementHover; }
+    void setPrimvarElementHover(PrimvarElements elements);
+    usdcc::core::Signal<> primvarElementHoverChanged;
+
     // After the Create menu made a prim: the Outliner shows it, however far down it is.
     usdcc::core::Signal<const PXR_NS::SdfPath&> primCreated;
     // After prims changed path: a rename or a move, and undoing or redoing one. What
@@ -202,6 +232,9 @@ private:
     double m_time = 0.0;
     std::optional<TimeRange> m_playbackRange;
     std::string m_pendingAssetEnvironment;
+    std::string m_primvarFocus;
+    PrimvarElements m_primvarElements;
+    PrimvarElements m_primvarElementHover;
     std::unique_ptr<ChangeListener> m_changeListener;  // after `changed`, which it fires
     // Last: it listens to `changed`, so it goes first.
     std::unique_ptr<physics::PhysicsSession> m_physics;

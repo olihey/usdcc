@@ -184,6 +184,10 @@ void StageManager::setSelectedPaths(const StageRefPtr& stage, std::vector<PXR_NS
     if (paths.empty() || paths.front() != stage->targetPrim()) {
         stage->clearTargetXformOp();
     }
+    // Primvar elements belong to one prim too.
+    const auto selected = [&paths](const PXR_NS::SdfPath& prim) { return std::find(paths.begin(), paths.end(), prim) != paths.end(); };
+    if (!stage->primvarElements().empty() && !selected(stage->primvarElements().prim)) stage->setPrimvarElements({});
+    if (!stage->primvarElementHover().empty() && !selected(stage->primvarElementHover().prim)) stage->setPrimvarElementHover({});
     selectionChanged(stage, std::move(paths));
 }
 

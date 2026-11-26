@@ -19,5 +19,7 @@ namespace usdcc::usd::python {
 void bindStageManager(pybind11::module_& m);
 // Part of it: usdcc.assets' (bind_assets.cpp).
 void bindAssets(pybind11::module_& m);
+// And usdcc.primvars' (bind_primvars.cpp).
+void bindPrimvars(pybind11::module_& m);
 
 }  // namespace usdcc::usd::python

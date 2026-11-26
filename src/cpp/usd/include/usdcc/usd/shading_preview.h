@@ -194,6 +194,8 @@ struct MaterialPrimvar {
 };
 // `network`, if given, gets the prims of the network.
 std::vector<MaterialPrimvar> primvarsReadBy(const PXR_NS::UsdShadeMaterial& material, std::set<PXR_NS::SdfPath>* network = nullptr);
+// Whether a renderer has a value for it where the geometry doesn't, so it's never missing.
+bool rendererSuppliesPrimvar(const std::string& name);
 
 // What the preview shows when `prim` is picked as its shape (§7.10): the prim, the instance's
 // root for one inside an instance, the geometry for a subset of it. Invalid, and why, for one

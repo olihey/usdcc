@@ -6,8 +6,10 @@
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/usd/camera_framing.h"
 #include "usdcc/usd/orbit_camera.h"
+#include "usdcc/usd/primvar_colors.h"
 #include "usdcc/usd/renderer_settings.h"
 #include "usdcc/usd/share/presence.h"
+#include "usdcc/usd/stage.h"
 #include "usdcc/usd/viewport_hud.h"
 
 #include <pxr/base/gf/camera.h>
@@ -31,6 +33,7 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -334,6 +337,22 @@ public:
     // Whether a dome light's map is drawn behind the scene, for renderers that can: the
     // display options' domeLightTextures.
     void setDomeLightVisible(bool visible);
+    // Color By (docs/PRIMVAR_VIEWER.md §17): the geometry coloured by a primvar, through a scene
+    // index filter in this viewport's engine, every renderer that draws displayColor alike. Its
+    // range and categories are the stage's (primvarColorStats()), worked out again by
+    // refreshPrimvarColoring(), which the panel calls after edits; the time changes them only
+    // for a primvar with time samples.
+    void setPrimvarColoring(const PrimvarColoring& coloring);
+    const PrimvarColoring& primvarColoring() const;
+    const PrimvarColorStats& primvarColorStats() const;
+    void refreshPrimvarColoring();
+    // The engine has the filter and it colours: for tests.
+    bool isColoringGeometry() const;
+    // The overlays of ViewportOverlays it draws (docs/PRIMVAR_VIEWER.md §9.2): all but those
+    // hidden, given `stage` for its per-stage state (the primvar elements). Redraws on a change.
+    void setOverlayStage(const std::shared_ptr<const Stage>& stage);
+    void setHiddenOverlays(std::set<std::string> ids);
+    const std::set<std::string>& hiddenOverlays() const { return m_hiddenOverlays; }
     bool isDomeLightVisible() const { return m_display.domeLightTextures; }
     // Paused, nothing renders: the last frame stays, fitted to the window, until resumed,
     // which renders at once with whatever changed meanwhile.
@@ -557,6 +576,13 @@ private:
     // While a line style is in use (drawSelectionOverlay()); freed with the engine.
     std::unique_ptr<SelectionOverlay> m_selectionOverlay;
     std::unique_ptr<PhysicsOverlay> m_physicsOverlay;  // made when Show Colliders is first on
+    std::weak_ptr<const Stage> m_overlayStage;
+    struct ColorBy;
+    std::unique_ptr<ColorBy> m_colorBy;
+    // Hands the coloring to the engine's filter.
+    void applyPrimvarColoring();
+    std::optional<HudLegend> primvarLegend() const;
+    std::set<std::string> m_hiddenOverlays;
     // A shared stage's Follow (docs/SHARED_STAGE.md §8): the peer's view last taken.
     std::optional<usdcc::usd::share::PeerView> m_followed;
     void followPeer();

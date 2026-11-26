@@ -37,6 +37,10 @@ USDCC_PLUGIN_EXPORT void usdcc_plugin_deactivate(usdcc::plugin::Host& host) {}
 | `addMenuAction(path, run, shortcut, tip)` | "Menu/Action". `run` is one undo step, and an exception is logged |
 | `addPrimMenuAction(label, run, applies)` | At the end of the Outliner's prim menu, one undo step |
 | `addViewportMenuAction(label, run, checked, applies, enabled)` | At the end of every viewport's options menu and tab menu; `run(viewport)` is one undo step, `checked` makes it checkable, `enabled` greys it out when false. `ViewportViewPanel::setBorderColor()` marks a viewport, and `ViewportViewPanel::addCloseGuard()` is asked before one closes |
+| `addPrimvarView(type)` | A view of the Primvars panel, and a panel type of its own ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §14): a `usdcc::usd::PrimvarViewType` with an id, a label, what makes its `PrimvarView` and when it applies |
+| `addPrimvarMenuAction(label, run, applies)` | An entry in the Primvars panel's menus ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §19): a row's, where the `usdcc::usd::PrimvarCommandContext` has its primvar, and the panel's own; one undo step on the panel's stage. `usdcc/usd/primvar_edit.h` edits a whole primvar |
+| `addPrimvarColorizer(colorizer)` | A way Color By shows a primvar's values as colours ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §17): a `usdcc::usd::PrimvarColorizer` with an id, a label, the types it applies to and its `colors(values, input)`, which runs on Hydra's threads |
+| `addViewportOverlay(overlay)` | Lines and triangles every viewport draws over its render, on unless its Overlays menu turns it off ([PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §16): a `usdcc::usd::ViewportOverlay` with an id, a label and a `build(context)` run for each frame |
 | `settingKey(key)` | A key of the plugin's own, for `usdcc::ui::appSettings()` |
 | `log(level, message)` | A record with the source `plugin:<id>` in the Log panel |
 

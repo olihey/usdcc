@@ -108,6 +108,10 @@ blank `UsdImagingGLRenderParams`, and Fit to View's bounds hard-coded default + 
    (1.0) draws a subdivision surface's cage, as usdview does; the overlay uses the same value.
 5. **Scene Materials.** For "is it the material or the geometry?" and for heavy scenes.
 6. **Cull Backfaces.** `CULL_STYLE_BACK_UNLESS_DOUBLE_SIDED`. Finds flipped normals.
+   **Color By** (added with [PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §17) colours the geometry by a primvar, with
+   a legend in the HUD.
+   **Overlays** (added with [PRIMVAR_VIEWER.md](PRIMVAR_VIEWER.md) §16) switches each registered overlay,
+   such as Primvar Elements, on or off for the viewport.
    **Show Colliders** (added with [PHYSICS.md](PHYSICS.md) phase 4) draws the stage's physics
    colliders and joint frames as wireframes over the render, where the simulation has them.
 7. **Dome Light Textures.** The display options' `domeLightTextures`;

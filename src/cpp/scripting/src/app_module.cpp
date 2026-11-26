@@ -37,6 +37,9 @@
 #include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_commands.h"
+#include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/primvar_colors.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/render/render_menu.h"
 #include "usdcc/usd/render/render_queue.h"
@@ -80,12 +83,20 @@ void bindRenderViewPanelHandle(pybind11::module_& m);
 // Final renderers from Python (scripted_final_renderer.cpp).
 void bindFinalRenderers(pybind11::module_& m);
 void removeScriptedFinalRenderers();
+// Primvar views from Python (scripted_primvar_view.cpp).
+void bindPrimvarViews(pybind11::module_& m);
+void removeScriptedPrimvarViews();
 
 namespace {
 const AppContext* s_context = nullptr;
 // What Python connected to the app, which has to end while Python is there.
 std::map<int, std::shared_ptr<void>> s_eventConnections;
 int s_nextEventConnection = 1;
+// The Primvars panel's commands Python added, by id.
+std::set<std::string>& scriptedPrimvarCommands() {
+    static std::set<std::string> ids;
+    return ids;
+}
 }  // namespace
 
 AppContextScope::AppContextScope(const AppContext& context) : m_context(context), m_outer(s_context) {
@@ -96,10 +107,14 @@ AppContextScope::~AppContextScope() {
     s_context = m_outer;
     s_eventConnections.clear();
     usdcc::usd::PrimMenuEntries::instance().clear();
+    // Python's commands call into Python; the built-ins and C++ plugins' stay.
+    for (const std::string& id : scriptedPrimvarCommands()) usdcc::usd::PrimvarCommands::instance().remove(id);
+    scriptedPrimvarCommands().clear();
     usdcc::usd::ViewportMenuEntries::instance().clear();
 #if USDCC_HAS_PYTHON
     // They call into Python, which goes next.
     if (!m_outer) removeScriptedFinalRenderers();
+    if (!m_outer) removeScriptedPrimvarViews();
 #endif
 }
 
@@ -524,6 +539,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
         py::arg("id"), py::arg("display_name"), py::arg("cls"));
     bindRenderViewPanelHandle(m);
     bindFinalRenderers(m);
+    bindPrimvarViews(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {
@@ -778,6 +794,60 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "remove_prim_menu_action", [](const std::string& id) { usdcc::usd::PrimMenuEntries::instance().remove(id); },
         py::arg("id"));
+    // The Primvars panel's menus (docs/PRIMVAR_VIEWER.md §19): callbacks get the stage's id, the
+    // selected paths and the row's primvar ("" on the panel's own menu); usdcc/primvars.py makes
+    // them a Usd.Stage and Sdf.Paths.
+    m.def(
+        "add_primvar_menu_action",
+        [](const std::string& id, const std::string& label, py::object callback, py::object applies) {
+            usdcc::usd::PrimvarCommand command;
+            command.id = id;
+            command.label = QString::fromStdString(label);
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            const QString description = QString::fromStdString(label.substr(label.rfind('/') + 1)).remove(QStringLiteral("..."));
+            command.run = [held, description](const usdcc::usd::PrimvarCommandContext& context) {
+                const auto body = [&]() {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        held->object(cacheIdOf(context.stage), pathStrings(context.prims), context.primvar);
+                        return true;
+                    } catch (py::error_already_set& error) {
+                        logPythonError(error);
+                        return false;
+                    }
+                };
+                // One step on the panel's stage, which needn't be the current one.
+                if (context.undo && context.stage) {
+                    context.undo->apply(context.stage, description, body);
+                } else {
+                    body();
+                }
+            };
+            if (!applies.is_none()) {
+                auto heldApplies = std::make_shared<PythonObject>(std::move(applies));
+                command.applies = [heldApplies](const usdcc::usd::PrimvarCommandContext& context) {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        return heldApplies->object(cacheIdOf(context.stage), pathStrings(context.prims), context.primvar).cast<bool>();
+                    } catch (py::error_already_set& error) {
+                        logPythonError(error);
+                        return false;
+                    }
+                };
+            } else {
+                command.applies = [](const usdcc::usd::PrimvarCommandContext& context) { return bool(context.stage); };
+            }
+            usdcc::usd::PrimvarCommands::instance().add(std::move(command));
+            scriptedPrimvarCommands().insert(id);
+        },
+        py::arg("id"), py::arg("label"), py::arg("callback"), py::arg("applies"));
+    m.def(
+        "remove_primvar_menu_action",
+        [](const std::string& id) {
+            scriptedPrimvarCommands().erase(id);
+            return usdcc::usd::PrimvarCommands::instance().remove(id);
+        },
+        py::arg("id"));
     // A viewport's menus (docs/PLUGINS.md): callbacks get the viewport's id, which
     // usdcc/app.py makes a Viewport.
     m.def(
@@ -909,6 +979,44 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "viewport_renderer", [](int id) { return viewportWithId(id).hydraWindow()->currentRendererPlugin().GetString(); },
         py::arg("id"));
+    // Color By (docs/PRIMVAR_VIEWER.md §17), as a dict.
+    m.def(
+        "viewport_primvar_coloring",
+        [](int id) {
+            const usdcc::usd::PrimvarColoring& coloring = viewportWithId(id).primvarColoring();
+            py::dict result;
+            result["primvar"] = coloring.primvar;
+            result["colorizer"] = coloring.colorizer;
+            result["range"] = coloring.range ? py::object(py::make_tuple(coloring.range->low, coloring.range->high)) : py::object(py::none());
+            result["component"] = coloring.component;
+            result["lit"] = coloring.lit;
+            return result;
+        },
+        py::arg("id"));
+    m.def(
+        "set_viewport_primvar_coloring",
+        [](int id, const std::string& primvar, const std::string& colorizer, std::optional<std::pair<double, double>> range,
+           int component, bool lit) {
+            if (!colorizer.empty() && !usdcc::usd::PrimvarColorizers::instance().find(colorizer)) {
+                throw py::value_error("no colorizer '" + colorizer + "'");
+            }
+            if (component < -1 || component > 3) throw py::value_error("a component is -1 (the length) or 0 to 3");
+            usdcc::usd::PrimvarColoring coloring;
+            coloring.primvar = primvar.rfind("primvars:", 0) == 0 ? primvar.substr(9) : primvar;
+            coloring.colorizer = colorizer;
+            if (range) coloring.range = usdcc::usd::PrimvarColorRange{range->first, range->second};
+            coloring.component = component;
+            coloring.lit = lit;
+            viewportWithId(id).setPrimvarColoring(coloring);
+        },
+        py::arg("id"), py::arg("primvar"), py::arg("colorizer"), py::arg("range"), py::arg("component"), py::arg("lit"));
+    m.def("primvar_colorizers", []() {
+        std::vector<std::pair<std::string, std::string>> result;
+        for (const usdcc::usd::PrimvarColorizer& colorizer : usdcc::usd::PrimvarColorizers::instance().colorizers()) {
+            result.emplace_back(colorizer.id, colorizer.label);
+        }
+        return result;
+    });
     // The ones it can switch to: once it has drawn, those that can render here; before, all.
     m.def(
         "viewport_renderers",

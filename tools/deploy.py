@@ -129,7 +129,7 @@ PYSIDE_BUILD_ONLY = ["__pycache__", "include", "typesystems", "glue", "lib", "do
 # remote assets, http, webdav and s3 (docs/REMOTE_ASSETS.md section 11): a usd/ folder each,
 # on bin's usdcc_assets, libcurl, zlib and pugixml. Not beside the plugin: OpenUSD loads
 # a plugin's library with plain LoadLibraryW, which doesn't look there.
-SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "s3", "viewport_broadcast"]
+SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "s3", "viewport_broadcast", "uv_view"]
 
 
 def _build_features():

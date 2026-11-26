@@ -3,6 +3,7 @@
 #include "usdcc/usd/time_ruler.h"
 
 #include <QFontMetricsF>
+#include <QLinearGradient>
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
@@ -266,6 +267,36 @@ HudLayout buildViewportHud(const HudInput& input, const QFont& font) {
         addPlate(topLeftText);
     }
 
+    // Under the top left's labels: what Color By shows (docs/PRIMVAR_VIEWER.md §17).
+    if (input.legend) {
+        const HudLegend& legend = *input.legend;
+        const double swatch = lineHeight * 0.8;
+        const double top = (input.showCamera && topLeftText.isValid() ? topLeftText.bottom() + platePadY : margin - platePadY) + 8.0 * s;
+        HudLegendLayout shown;
+        shown.legend = legend;
+        double contentWidth = textWidth(legend.title);
+        double rows = 1;
+        if (legend.ramp) {
+            contentWidth = std::max(contentWidth, 120.0 * s);
+            rows += 2;  // the ramp, its ends' numbers
+        } else if (!legend.categories.empty()) {
+            for (const auto& [color, label] : legend.categories) contentWidth = std::max(contentWidth, swatch + 6.0 * s + textWidth(label));
+            rows += double(legend.categories.size()) + (legend.more.isEmpty() ? 0 : 1);
+            if (!legend.more.isEmpty()) contentWidth = std::max(contentWidth, textWidth(legend.more));
+        } else if (!legend.note.isEmpty()) {
+            contentWidth = std::max(contentWidth, textWidth(legend.note));
+            rows += 1;
+        }
+        contentWidth = std::min(contentWidth, std::max(0.0, width - 2 * margin - 2 * platePadX));
+        shown.content = QRectF(margin, top + platePadY, contentWidth, rows * lineHeight);
+        shown.lineHeight = lineHeight;
+        shown.swatch = swatch;
+        if (shown.content.bottom() + platePadY < height - margin) {
+            layout.plates.push_back(shown.content.adjusted(-platePadX, -platePadY, platePadX, platePadY));
+            layout.legend = shown;
+        }
+    }
+
     // Bottom right, bottom up: the frame, then how fast.
     QStringList rightLines;
     if (input.frame) rightLines << formatHudFrame(*input.frame);
@@ -443,6 +474,46 @@ void paintViewportHud(QPainter& painter, const HudLayout& layout, const QFont& f
         }
         painter.setPen(text.color);
         painter.drawText(text.rect, Qt::AlignCenter, text.text);
+    }
+
+    // Color By's legend, on its plate.
+    if (layout.legend) {
+        const HudLegendLayout& shown = *layout.legend;
+        const HudLegend& legend = shown.legend;
+        const QFontMetricsF metrics(font);
+        const double w = shown.content.width();
+        double y = shown.content.top();
+        const auto line = [&](const QString& text, const QColor& color, double x = 0.0, Qt::Alignment align = Qt::AlignLeft) {
+            painter.setPen(color);
+            painter.drawText(QRectF(shown.content.left() + x, y, w - x, shown.lineHeight), align | Qt::AlignVCenter,
+                             metrics.elidedText(text, Qt::ElideRight, w - x));
+        };
+        line(legend.title, kPlateInk);
+        y += shown.lineHeight;
+        if (legend.ramp) {
+            QLinearGradient gradient(shown.content.left(), 0, shown.content.right(), 0);
+            for (std::size_t i = 0; i < legend.rampStops.size(); ++i) {
+                gradient.setColorAt(legend.rampStops.size() == 1 ? 0.0 : double(i) / double(legend.rampStops.size() - 1), legend.rampStops[i]);
+            }
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(gradient);
+            painter.drawRoundedRect(QRectF(shown.content.left(), y + shown.lineHeight * 0.2, w, shown.lineHeight * 0.6), 2.0 * s, 2.0 * s);
+            y += shown.lineHeight;
+            line(legend.low, kPlateDim);
+            line(legend.high, kPlateDim, 0.0, Qt::AlignRight);
+        } else if (!legend.categories.empty()) {
+            for (const auto& [color, label] : legend.categories) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(color);
+                painter.drawRoundedRect(QRectF(shown.content.left(), y + (shown.lineHeight - shown.swatch) / 2.0, shown.swatch, shown.swatch),
+                                        2.0 * s, 2.0 * s);
+                line(label, kPlateInk, shown.swatch + 6.0 * s);
+                y += shown.lineHeight;
+            }
+            if (!legend.more.isEmpty()) line(legend.more, kPlateDim);
+        } else if (!legend.note.isEmpty()) {
+            line(legend.note, kPlateDim);
+        }
     }
 
     if (!layout.axes.empty()) {
