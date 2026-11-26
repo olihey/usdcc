@@ -293,6 +293,8 @@ private:
 
 }  // namespace
 
+bool rendersRegions(const TfToken& pluginId) { return pluginId.GetString().rfind("HdMoonray", 0) != 0; }
+
 std::string hydraNamespace(const TfToken& pluginId) {
     std::string name = pluginId.GetString();
     if (name.rfind("Hd", 0) == 0) name = name.substr(2);
