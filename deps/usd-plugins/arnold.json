@@ -9,7 +9,9 @@
       "files": {"win64": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "bin/kick.exe",
                           "bin/maketx.exe", "EULA.txt"],
                 "macos-arm64": ["include/ai.h", "include/ai_version.h", "bin/libai.dylib", "bin/kick", "bin/maketx",
-                                "EULA.txt"]}
+                                "EULA.txt"],
+                "linux-x64": ["include/ai.h", "include/ai_version.h", "bin/libai.so", "bin/kick", "bin/maketx",
+                              "EULA.txt"]}
     }
   },
   "cmake": ["-Wno-dev", "-DARNOLD_LOCATION={arnold}", "-DUSD_LOCATION={usd}",
@@ -20,12 +22,13 @@
   "licenses": {
     "arnold-sdk": ["{arnold}/EULA.txt"]
   },
-  "platforms": ["win64", "macos-arm64"],
+  "platforms": ["win64", "macos-arm64", "linux-x64"],
   "license": "Apache-2.0",
   "set": "local",
   "publish": false,
   "check": {
-    "preload": {"win64": ["{arnold}/bin/ai.dll"], "macos-arm64": ["{arnold}/bin/libai.dylib"]},
+    "preload": {"win64": ["{arnold}/bin/ai.dll"], "macos-arm64": ["{arnold}/bin/libai.dylib"],
+                "linux-x64": ["{arnold}/bin/libai.so"]},
     "plugin_folders": ["plugin/arnold"],
     "plugins": ["hdArnold", "nodeRegistryArnold", "sceneIndexArnold", "usdImagingArnold"],
     "renderers": ["HdArnoldRendererPlugin"]

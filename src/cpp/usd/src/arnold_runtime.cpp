@@ -20,7 +20,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#elif defined(ARCH_OS_DARWIN)
+#else
 #include <dlfcn.h>
 #endif
 
@@ -88,10 +88,6 @@ std::string usdRootFolder() {
 ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& usdRoot) {
     ArnoldStatus status;
     if (arnoldFolder.empty()) return status;
-#if !defined(ARCH_OS_WINDOWS) && !defined(ARCH_OS_DARWIN)
-    status.message = "Settings > Renderers names an Arnold folder, but Arnold in usdcc is for Windows and macOS only for now";
-    return status;
-#else
     const std::filesystem::path root = std::filesystem::u8path(usdRoot.empty() ? usdRootFolder() : usdRoot);
     const std::filesystem::path plugins = root / "plugin" / "arnold";
     if (!std::filesystem::is_regular_file(plugins / "plugInfo.json")) {
@@ -110,8 +106,10 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
 
 #if defined(ARCH_OS_WINDOWS)
     const char* const coreName = "bin/ai.dll";
-#else
+#elif defined(ARCH_OS_DARWIN)
     const char* const coreName = "bin/libai.dylib";
+#else
+    const char* const coreName = "bin/libai.so";
 #endif
     const std::filesystem::path core = std::filesystem::u8path(arnoldFolder) / std::filesystem::u8path(coreName);
     if (!std::filesystem::is_regular_file(core)) {
@@ -135,9 +133,10 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
     const auto symbol = [module](const char* name) { return reinterpret_cast<void*>(GetProcAddress(module, name)); };
     const auto unload = [module]() { FreeLibrary(module); };
 #else
-    // By its full path, and global: the plugins ask for @rpath/libai.dylib, the
-    // install name of the one already loaded, so they get this one. Its own
-    // libraries (licensing) come from its folder through its @loader_path rpath.
+    // By its full path, and global: the plugins ask for libai (@rpath/libai.dylib,
+    // libai.so), the install name or soname of the one already loaded, so they get
+    // this one. Its own libraries (licensing) come from its folder through its
+    // @loader_path or $ORIGIN rpath.
     void* module = dlopen(utf8(core).c_str(), RTLD_NOW | RTLD_GLOBAL);
     if (!module) {
         const char* error = dlerror();
@@ -180,7 +179,6 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
     status.message = "Arnold " + status.arnoldVersion + " from " + utf8(core) + ", with " +
                      std::to_string(registered.size()) + " plugins from " + status.pluginFolder + " (Settings > Renderers)";
     return status;
-#endif
 }
 
 }  // namespace usdcc::usd

@@ -39,7 +39,7 @@ bool arnoldVersionFits(std::string_view runtime, std::string_view builtWith);
 std::string usdRootFolder();
 
 // Turns Arnold on from `arnoldFolder`, an Arnold SDK or install (the folder
-// with bin/ai.dll, or bin/libai.dylib on macOS), with the pack under `usdRoot` (default: usdRootFolder()).
+// with bin/ai.dll, bin/libai.dylib on macOS, bin/libai.so on Linux), with the pack under `usdRoot` (default: usdRootFolder()).
 // An empty folder does nothing. Logs nothing: the caller logs `message`.
 ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& usdRoot = {});
 

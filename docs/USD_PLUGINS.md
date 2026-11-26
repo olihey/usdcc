@@ -127,7 +127,7 @@ Notes:
     `<deploy>/plugin/arnold`, but `tools/deploy.py` leaves `local` packs out (§5).
   - **Turning it on.** Settings > Renderers > Arnold > Arnold folder (`USD/arnoldFolder`),
     from the next start: an Arnold SDK or install, the folder with `bin/ai.dll`
-    (`bin/libai.dylib` on macOS). Once
+    (`bin/libai.dylib` on macOS, `bin/libai.so` on Linux). Once
     Arnold is on, its 54 render settings join it in that group.
     `usdcc::usd::enableArnold()` (`arnold_runtime.h`), from
     `applyUsdEnvironmentSettings()`, then:
@@ -136,10 +136,12 @@ Notes:
        `usd-plugins/arnold.json` (the pin's `version`);
     2. loads `bin/ai.dll` by its full path (`LOAD_WITH_ALTERED_SEARCH_PATH`), so its own
        DLLs come from its own folder and nothing goes on `PATH`. That folder has Qt 6
-       DLLs of its own (3ds Max's copy and the SDK both do). On macOS `bin/libai.dylib`
-       with `dlopen(RTLD_NOW | RTLD_GLOBAL)`: the plugins ask for `@rpath/libai.dylib`,
-       the install name of the one loaded, so they get it, and its own libraries
-       (licensing) come from its folder through its `@loader_path` rpath;
+       DLLs of its own (3ds Max's copy and the SDK both do). On macOS and Linux
+       `bin/libai.dylib` or `bin/libai.so` with `dlopen(RTLD_NOW | RTLD_GLOBAL)`: the plugins
+       ask for `@rpath/libai.dylib` or `libai.so`, the install name or soname of the one
+       loaded, so they get it, and its own libraries (licensing) come from its folder
+       through its `@loader_path` or `$ORIGIN` rpath. Linux is built only by
+       [ARNOLD_CI.md](ARNOLD_CI.md)'s workflow so far, not tried in usdcc;
     3. asks the core its version (`AiGetVersion`). The plugins need the Arnold they were
        built for or a later one of the same 7.x: built against 7.5.4, they don't load
        with 3ds Max 2027's 7.5.2 ("The specified procedure could not be found"). Any

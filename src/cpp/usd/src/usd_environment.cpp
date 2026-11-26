@@ -109,7 +109,7 @@ void defineUsdEnvironmentSettings(core::Settings& settings) {
                      .category = "Renderers",
                      .group = "Arnold",
                      .label = "Arnold folder",
-                     .description = "An Arnold SDK or install (the folder with bin/ai.dll, or bin/libai.dylib on macOS), to render with Arnold in the "
+                     .description = "An Arnold SDK or install (the folder with bin/ai.dll, bin/libai.dylib on macOS, bin/libai.so on Linux), to render with Arnold in the "
                                     "viewport. Empty: Arnold is off. Needs usdcc's Arnold plugins and the Arnold they were "
                                     "built for or a later one of the same 7.x. Without an Arnold licence, renders have a "
                                     "watermark.",

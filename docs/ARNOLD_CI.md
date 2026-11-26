@@ -27,7 +27,7 @@ Arnold). `deps-usd-plugins.yml` leaves the `local` set out entirely.
   `usd_plugin_asset.py` gives (`usdplugin-arnold-<commit>-<hash>-<platform>-py313.zip`) and in a
   release named as the OpenUSD asset's tag (`deps/usd-…`), so a pack is tied to the OpenUSD it was
   built against.
-- **Platforms: `win64` and `macos-arm64`**, the pin's. Linux and Windows arm64 later (§7).
+- **Platforms: `win64`, `macos-arm64` and `linux-x64`**, the pin's. Windows arm64 later (§7).
 
 ## 2. The private repository
 
@@ -81,7 +81,8 @@ tried by the workflow's own run.
 
 `arnold.yml`, started by hand (`workflow_dispatch`) with two inputs: the `olihey/usdcc` ref
 (default `master`) and `replace` (build again over a pack already there). One job per platform,
-`windows-2022` and `macos-15`, as `deps-usd-plugins.yml`'s, whose steps it copies:
+`windows-2022`, `macos-15` and `ubuntu-24.04`, as `deps-usd-plugins.yml`'s, whose steps it copies
+(on Ubuntu its packages too, `patchelf` among them for the `$ORIGIN` RUNPATHs):
 
 1. **Check out** `olihey/usdcc` at the ref, into the workspace (public: no token).
 2. **Name the pack**: `python tools/ci/usd_plugin_asset.py arnold --github-output` gives `name`,
@@ -180,5 +181,6 @@ Not legal advice: what is above is what the texts say, read by us.
    release (a token that may only write releases there), and it ships as an optional pack
    ([USD_PLUGINS.md](USD_PLUGINS.md) §10) with a note that it needs Arnold from Autodesk. Or, with
    Autodesk's CI download, the build moves into `deps-usd-plugins.yml` itself, as Gaffer's is.
-6. **Later:** Linux x64 (the SDK exists for it; the pin, the runtime's loader and a Linux check
-   need it), Windows arm64 if Autodesk ships an arm64 SDK.
+6. **Linux x64** (2026-11-26): the pin lists it, `enableArnold()` loads `bin/libai.so`, and the
+   workflow has an `ubuntu-24.04` job. Rendering in usdcc on Linux is still to try.
+7. **Later:** Windows arm64, if Autodesk ships an arm64 SDK.
