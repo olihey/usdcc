@@ -719,6 +719,86 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
 
 ## 9. Later
 
+- **Optional packs downloaded in the app** (decided 2026-11-26; not planned in detail yet). The
+  bigger renderer packs stay separate downloads (§5), but usdcc fetches the one for its own
+  version itself, in place of an archive the user unpacks over it, and of the second disk image
+  on macOS. Not through a plugin registry: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) is parked.
+  - **An app update wipes the pack** (decided 2026-11-26). It is built against one OpenUSD and
+    wouldn't load into the next anyway. usdcc then offers the download again; there is no
+    "needs update" state and no second build kept ready.
+  - **So the pack is unpacked over usdcc's own folder,** where the user unpacks it today: a
+    Windows install (Velopack replaces the folder at an update, which is the wipe), a 7z or a
+    Linux tar.xz. It keeps the layout it was built and checked in (§4, §5), and raises no new
+    question about finding its libraries. Only new files are written, as a pack never brings a
+    file the folder has (§2); it takes effect at the next start. Removing it deletes the files
+    its list names.
+  - **Where that can't be done:** a signed macOS bundle, and the AppImage, which is one
+    read-only file. To decide, per platform: the pack in the user's data folder, with the
+    library question of PLUGIN_REGISTRY.md §7 (RUNPATHs relative to an install it is no longer
+    in); or an update channel of its own whose package is usdcc with the pack, as the second
+    disk image is today, which the app switches to. Whether Velopack moves an install to
+    another channel at the same version isn't checked.
+  - **A channel is one fixed set of packs.** With several packs and a user who wants some of
+    them, it is a channel per combination (four packs: sixteen packages a platform, each
+    release) or one "all packs" channel that gives everyone everything. So the channel only
+    serves while there is one optional pack; a choice of packs needs the data folder.
+  - **The data folder, with a link:** the pack unpacked into a folder
+    laid out as an install, `<data>/usd-packs/plugin/usd/<pack>/...`, with `lib` there a
+    symbolic link to the app's own `lib`, made again at each start, as the AppImage is mounted
+    somewhere else each time. The pack's relative RUNPATHs then lead where they did, with the
+    pack built as it is today. It needs the pack to keep all its own files under
+    `plugin/usd/<pack>`, as MoonRay's does ([MOONRAY.md](MOONRAY.md) §7.4) and Adobe's doesn't
+    (three libraries in `lib`), and usdcc to register that folder before the first stage, as
+    `enableArnold()` does.
+
+    *Tried on Linux (2026-11-26; WSL, Ubuntu 24.04), with the deploy and the MoonRay pack of
+    2026-11-24, the deploy without PySide6:*
+    - *Set up:* the deploy with MoonRay's files taken out; the pack's own folder, as
+      `tools/deploy.py --optional-packs` makes it, in a folder elsewhere, unchanged but for
+      two files added: a `plugin/usd/plugInfo.json` including `*/resources/`, and a
+      `usdcc-plugin.json` naming `plugin/usd` as a USD folder, so that usdcc's own
+      `PluginManager` registers it (`--plugin-path`).
+    - *The check:* [MOONRAY.md](MOONRAY.md) §7.4's, by `usdcc --script` under Xvfb: the three
+      plugins load, and both delegates record a frame of the test scene.
+    - *Without the link* the renderers are listed but no plugin loads: `libusd_pegtl.so: cannot
+      open shared object file`, a library of OpenUSD that usdcc hadn't loaded by then.
+    - *With the link* all three load from the data folder and both delegates render, the
+      Arras one too, whose `execComp` is a process of its own and finds everything through the
+      link. The pictures are the control's (the pack inside the deploy). The process has 57
+      MoonRay libraries from the data folder and the rest from the app or the system; none is
+      mapped twice, none is there under one name from two places, and libfreetype is the app's.
+    - *With the app's folder renamed and the link made again,* as an AppImage's next start
+      would have it: the same.
+    *Tried on macOS (2026-11-26; Apple silicon), with usdcc 26.11.10 from `/Applications` and
+    its MoonRay pack, which is older than the shader nodes (MOONRAY.md phase 5) and so has
+    three of the check's five plugins:*
+    - *With the link* the three load from the data folder and both delegates render, as in
+      the control; the pack's `@loader_path/../../../../lib` leads through the link as the
+      RUNPATH does on Linux. 57 MoonRay libraries come from the data folder; none is loaded
+      twice or under one name from two places. *With the app's folder renamed* the same.
+    - *Without the link* it doesn't fail, it hangs: the debug delegate records the right
+      picture, then the Arras one never finishes (killed after 5 minutes). dyld finds a
+      library by install name when the process already has it, so more loads than on Linux,
+      and what is missing shows only later. In the app that would be a render that never
+      comes, not an error, so the link has to be checked before the pack is offered.
+    - *Signing:* taking the pack out of the copied bundle breaks its seal (`codesign --verify`:
+      a sealed resource is missing), as expected; the programs and libraries keep their own
+      signatures and run. `--resign` wasn't tried. A pack shipped this way leaves the bundle
+      whole.
+    - *To run it again,* on Linux or macOS: `python tools/try_pack_outside_app.py --deploy
+      <a deploy with the pack in it>`. It does the four runs (the pack inside, outside without
+      the link, with it, and with the app moved) with the pin's own check scene, and says
+      where each library of the process came from. In WSL and on macOS it gives the results
+      above; with today's pack all five plugins should load.
+    - *Not tried:* the viewport, with a window (the check records frames by script); a real
+      AppImage, read-only and mounted by FUSE; macOS with a pack that has the shader nodes,
+      and a notarized bundle beside a data folder Gatekeeper may treat as downloaded. **Two usdcc at once from one AppImage** are mounted in two places and would
+      share the one link: the second start repoints it, and when that one quits the first
+      has a link into a folder that is gone, for whatever it loads after (a shader, a new
+      `execComp`). A link folder per process doesn't help as it is, since `..` in the RUNPATH
+      is followed from the pack's real folder; hard links of the pack per process would.
+  - **A folder the user can't write** (a shared install): the app says so, and an administrator
+    unpacks the archive as today.
 - **More render delegates.** AMD's Radeon ProRender (`hdRpr`) and Intel's OSPRay
   (`hdOSPRay`, a CPU renderer, so testable on hosted runners) are open source. Whether
   either still follows current OpenUSD has to be checked first. MoonRay, which doesn't
