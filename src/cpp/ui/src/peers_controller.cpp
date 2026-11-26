@@ -11,12 +11,15 @@
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/toast_manager.h"
 
+#include <QClipboard>
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
@@ -39,6 +42,13 @@ constexpr int kToastTextLength = 300;
 const QString kChat = QStringLiteral("chat");
 const QString kPresence = QStringLiteral("presence");
 const QString kTyping = QStringLiteral("typing");
+const QString kNotify = QStringLiteral("notify");
+constexpr int kNotificationsKept = 50;       // Per room, in its chat (PEERS.md §10.2)
+constexpr int kNotificationTitle = 200;
+constexpr int kNotificationBody = 2000;
+constexpr int kNotificationActions = 3;
+constexpr int kFirstRejoinMs = 5000;         // A room joined at start, lost: tried again after this,
+constexpr int kLastRejoinMs = 5 * 60 * 1000; // doubling up to this
 const QString kDoNotDisturbKey = QStringLiteral("Peers/doNotDisturb");
 constexpr int kTypingEveryMs = 2000;     // "Typing" is said at most this often
 constexpr int kTypingShownMs = 5000;     // ... and shown this long after the last
@@ -240,6 +250,23 @@ void PeersController::defineSettings() {
                      .description = "Otherwise the invite link is the invitation.",
                      .type = SettingType::Bool,
                      .defaultValue = false});
+    settings.define({.key = startRoomsKey,
+                     .category = "Peers",
+                     .group = "Rooms",
+                     .label = "Rooms joined at start",
+                     .description = "Invite links (usdcc://join/…), separated by spaces: joined whenever usdcc runs, "
+                                    "and again after a lost connection. A studio's hub goes here. A room joined by "
+                                    "a link is added from its menu in the Peers panel too.",
+                     .type = SettingType::String,
+                     .defaultValue = std::string()});
+    settings.define({.key = notificationToastsKey,
+                     .category = "Peers",
+                     .group = "Notifications",
+                     .label = "Show notifications as toasts",
+                     .description = "Notifications from a room (a render farm through the hub, a colleague's script) "
+                                    "show as toasts, and stay in the room's chat. Muted rooms and people show none.",
+                     .type = SettingType::Bool,
+                     .defaultValue = true});
     settings.define({.key = chatToastsKey,
                      .category = "Peers",
                      .group = "Chat",
@@ -311,6 +338,7 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
         m_private.remove(room);
         m_typists.removeIf([room](const Typist& typist) { return typist.room == room; });
         m_imageInboxes.remove(room);
+        m_links.remove(room);
         updateStatus();
         Q_EMIT roomsChanged();
     });
@@ -340,9 +368,13 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
             Q_EMIT roomsChanged();  // The panel shows the name
         } else if (key == lookOnNetworkKey) {
             setPanelShown(m_panelShown);
+        } else if (key == startRoomsKey && m_window) {
+            joinStartRooms();  // Those added; those taken off stay until left
         }
     });
     if (m_window) {
+        // Rooms joined at start, once the window is up.
+        QTimer::singleShot(0, this, [this] { joinStartRooms(); });
         m_status = new QToolButton(m_window);
         m_status->setAutoRaise(true);
         m_status->setToolTip(tr("The rooms you are in: open the Peers panel"));
@@ -411,7 +443,11 @@ Room* PeersController::join(const FoundRoom& room, const QString& password) {
 Room* PeersController::joinLinkOrAddress(const QString& text, const QString& password, QString* error, RoomType type) {
     const QString trimmed = text.trimmed();
     if (trimmed.startsWith(QStringLiteral("usdcc:"), Qt::CaseInsensitive)) {
-        return m_peers->joinLink(trimmed, error, type);
+        Room* room = m_peers->joinLink(trimmed, error, type);
+        if (room) {
+            m_links.insert(room, trimmed);
+        }
+        return room;
     }
     // host:port: as if found, so the host is asked.
     const qsizetype colon = trimmed.lastIndexOf(u':');
@@ -471,8 +507,8 @@ void PeersController::adopt(Room* room) {
             // What people said: the host's own notices ("You host …") are its alone.
             for (qsizetype i = std::max<qsizetype>(0, history.size() - kSnapshotLines); i < history.size(); ++i) {
                 const ChatLine& line = history[i];
-                if (!line.from.isValid() || !line.to.isEmpty()) {
-                    continue;  // The host's own notices, and one member's lines, aren't the room's
+                if (!line.from.isValid() || !line.to.isEmpty() || line.notification) {
+                    continue;  // The host's own notices, one member's lines and notifications aren't the room's
                 }
                 QJsonObject json = lineJson(line);
                 if (line.image) {
@@ -486,6 +522,10 @@ void PeersController::adopt(Room* room) {
     connect(chat, &Channel::received, this, [this, room](const Message& message) { onChat(room, message); });
     connect(room->channel(kTyping, Delivery::LatestOnly), &Channel::received, this,
             [this, room](const Message& message) { onTyping(room, message); });
+    // Notifications (PEERS.md §10.2). In a room this instance hosts, anyone in it may send
+    // them, as they may chat; a hub lets only itself and named services.
+    connect(room->channel(kNotify), &Channel::received, this,
+            [this, room](const Message& message) { onNotify(room, message); });
     connect(room, &Room::opened, this, [this, room] {
         updatePresence();
         addLine(room, {{}, tr("You joined %1").arg(room->name()), QDateTime::currentDateTime()});
@@ -1436,6 +1476,315 @@ QStringList PeersController::storedList(const QString& key) const {
 void PeersController::storeList(const QString& key, const QStringList& list) const {
     QSettings settings = appSettings();
     settings.setValue(key, list);
+}
+
+// ---------------------------------------------------------------------------------
+// Notifications (PEERS.md §10.2)
+
+namespace {
+
+std::optional<core::ToastKind> toastKind(const QString& name) {
+    if (name == u"info") return core::ToastKind::Info;
+    if (name == u"success") return core::ToastKind::Success;
+    if (name == u"warning") return core::ToastKind::Warning;
+    if (name == u"error") return core::ToastKind::Error;
+    return std::nullopt;
+}
+
+bool fail(QString* error, const QString& why) {
+    if (error) {
+        *error = why;
+    }
+    return false;
+}
+
+}  // namespace
+
+std::optional<PeersController::Notification> PeersController::parseNotification(const QJsonObject& body,
+                                                                                 QString* error) {
+    Notification result;
+    result.title = body.value("title").toString().simplified().left(kNotificationTitle);
+    if (result.title.isEmpty()) {
+        fail(error, QStringLiteral("A notification needs a title"));
+        return std::nullopt;
+    }
+    const std::optional<core::ToastKind> kind = toastKind(body.value("kind").toString(QStringLiteral("info")));
+    if (!kind) {
+        fail(error, QStringLiteral("`kind` is info, success, warning or error"));
+        return std::nullopt;
+    }
+    result.kind = *kind;
+    result.body = body.value("body").toString().left(kNotificationBody);
+    result.id = body.value("id").toString().left(128);
+    result.sticky = body.value("sticky").toBool(false);
+    const QJsonArray actions = body.value("actions").toArray();
+    for (qsizetype i = 0; i < std::min<qsizetype>(actions.size(), kNotificationActions); ++i) {
+        const QJsonObject action = actions.at(i).toObject();
+        NotificationAction parsed;
+        parsed.label = action.value("label").toString().simplified().left(40);
+        int keys = 0;
+        if (action.contains("open")) {
+            ++keys;
+            parsed.kind = NotificationAction::Kind::Open;
+            parsed.target = action.value("open").toString();
+            const QString scheme = QUrl(parsed.target).scheme().toLower();
+            if (scheme != u"http" && scheme != u"https" && scheme != u"file") {
+                fail(error, QStringLiteral("`open` is an http, https or file URL"));
+                return std::nullopt;
+            }
+        }
+        if (action.contains("openStage")) {
+            ++keys;
+            parsed.kind = NotificationAction::Kind::OpenStage;
+            parsed.target = action.value("openStage").toString();
+        }
+        if (action.contains("copy")) {
+            ++keys;
+            parsed.kind = NotificationAction::Kind::Copy;
+            parsed.target = action.value("copy").toString();
+        }
+        if (action.contains("select")) {
+            ++keys;
+            parsed.kind = NotificationAction::Kind::Select;
+            for (const QJsonValue& path : action.value("select").toArray()) {
+                if (path.toString().startsWith(u'/')) {
+                    parsed.paths.append(path.toString());
+                }
+            }
+        }
+        // Anything else (a "run") is no action of this list, and the whole notification
+        // is turned down rather than shown without it.
+        if (keys != 1 || parsed.label.isEmpty() ||
+            (parsed.kind == NotificationAction::Kind::Select ? parsed.paths.isEmpty() : parsed.target.isEmpty())) {
+            fail(error, QStringLiteral("An action has a label and one of open, openStage, select or copy"));
+            return std::nullopt;
+        }
+        result.actions.append(parsed);
+    }
+    return result;
+}
+
+QJsonObject PeersController::notificationJson(const Notification& notification) {
+    QJsonObject result{{"kind", QString::fromUtf8(core::toastKindName(notification.kind).data())},
+                       {"title", notification.title}};
+    if (!notification.body.isEmpty()) {
+        result.insert("body", notification.body);
+    }
+    if (!notification.id.isEmpty()) {
+        result.insert("id", notification.id);
+    }
+    if (notification.sticky) {
+        result.insert("sticky", true);
+    }
+    QJsonArray actions;
+    for (const NotificationAction& action : notification.actions) {
+        QJsonObject json{{"label", action.label}};
+        switch (action.kind) {
+        case NotificationAction::Kind::Open:
+            json.insert("open", action.target);
+            break;
+        case NotificationAction::Kind::OpenStage:
+            json.insert("openStage", action.target);
+            break;
+        case NotificationAction::Kind::Copy:
+            json.insert("copy", action.target);
+            break;
+        case NotificationAction::Kind::Select:
+            json.insert("select", QJsonArray::fromStringList(action.paths));
+            break;
+        }
+        actions.append(json);
+    }
+    if (!actions.isEmpty()) {
+        result.insert("actions", actions);
+    }
+    return result;
+}
+
+void PeersController::notify(Room* room, const Notification& notification, const PeerId& to) {
+    room->channel(kNotify)->send(kNotify, notificationJson(notification), {}, to);
+}
+
+void PeersController::onNotify(Room* room, const Message& message) {
+    if (message.type != kNotify) {
+        return;
+    }
+    QString error;
+    const std::optional<Notification> notification = parseNotification(message.body, &error);
+    Peer from = room->peer(message.from);
+    if (!from.isValid()) {
+        from.id = message.from;
+        from.name = tr("someone who left");
+    }
+    if (!notification) {
+        USDCC_LOG_WARNING("usdcc.peers", "A notification from {} in {} was turned down: {}", from.name.toStdString(),
+                          room->name().toStdString(), error.toStdString());
+        return;
+    }
+    ChatLine line{from, notification->title, QDateTime::currentDateTime()};
+    line.notification = notification;
+    addLine(room, line);
+    toastNotification(room, from, *notification);
+}
+
+QList<PeersController::ChatLine> PeersController::notifications(Room* room) const {
+    QList<ChatLine> result;
+    for (const ChatLine& line : m_chat.value(room)) {
+        if (line.notification) {
+            result.append(line);
+        }
+    }
+    if (result.size() > kNotificationsKept) {
+        result = result.mid(result.size() - kNotificationsKept);
+    }
+    return result;
+}
+
+void PeersController::toastNotification(Room* room, const Peer& from, const Notification& notification) {
+    if (!m_window || isDoNotDisturb() || !core::Settings::instance().get<bool>(notificationToastsKey, true) ||
+        isMuted(room) || isMuted(from)) {
+        return;
+    }
+    core::ToastRequest toast;
+    toast.kind = notification.kind;
+    toast.title = notification.title.toStdString();
+    // Who it is from, which the host sets: a sender can't pose as another.
+    const QString source = tr("%1 · %2").arg(room->name(), from.name);
+    toast.body = (notification.body.isEmpty() ? source : notification.body + u'\n' + source).toStdString();
+    if (notification.sticky) {
+        toast.durationMs = core::ToastRequest::kSticky;
+    }
+    QList<ToastAction> actions;
+    for (const NotificationAction& action : notification.actions) {
+        actions.append({action.label, [this, action] { runAction(action); }});
+    }
+    // The same id again replaces the one that is up: a job showing its progress.
+    const QString key = notification.id.isEmpty()
+                            ? QString()
+                            : QString::number(quintptr(room)) + u'\n' + from.id + u'\n' + notification.id;
+    if (!key.isEmpty()) {
+        if (const int previous = m_notificationToasts.value(key)) {
+            m_window->toasts()->dismiss(previous);
+        }
+    }
+    const int id = m_window->toasts()->show(toast, actions);
+    if (!key.isEmpty()) {
+        m_notificationToasts.insert(key, id);
+    }
+}
+
+void PeersController::runAction(const NotificationAction& action) {
+    switch (action.kind) {
+    case NotificationAction::Kind::Open: {
+        // The URL is shown before it opens, and nothing received is run.
+        const QUrl url(action.target);
+        if (m_hooks.confirmOpen ? m_hooks.confirmOpen(url) : false) {
+            QDesktopServices::openUrl(url);
+        }
+        break;
+    }
+    case NotificationAction::Kind::OpenStage:
+        if (m_hooks.openStage) {
+            m_hooks.openStage(action.target);
+        }
+        break;
+    case NotificationAction::Kind::Select:
+        if (m_hooks.selectPrims) {
+            m_hooks.selectPrims(action.paths);
+        }
+        break;
+    case NotificationAction::Kind::Copy:
+        QGuiApplication::clipboard()->setText(action.target);
+        break;
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// Rooms joined at start (PEERS.md §5.3)
+
+QStringList PeersController::startLinks() const {
+    static const QRegularExpression space(QStringLiteral("\\s+"));
+    QStringList result;
+    for (const QString& link : settingText(startRoomsKey).split(space, Qt::SkipEmptyParts)) {
+        if (parseJoinLink(link) && !result.contains(link)) {
+            result.append(link);
+        }
+    }
+    return result;
+}
+
+void PeersController::joinStartRooms() {
+    for (const QString& link : startLinks()) {
+        StartRoom& start = m_startRooms[link];
+        if (!start.room && !start.left && !start.pending) {
+            joinStartLink(link);
+        }
+    }
+}
+
+Room* PeersController::joinStartLink(const QString& link) {
+    QString error;
+    Room* room = joinLinkOrAddress(link, {}, &error);
+    if (!room) {
+        USDCC_LOG_WARNING("usdcc.peers", "A room joined at start isn't a link: {}", error.toStdString());
+        return nullptr;
+    }
+    StartRoom& start = m_startRooms[link];
+    start.room = room;
+    connect(room, &Room::opened, this, [this, link] { m_startRooms[link].retryMs = 0; });
+    connect(room, &Room::closed, this, [this, link](const QString& reason) {
+        StartRoom& entry = m_startRooms[link];
+        // Left by the user, or taken off the list: not joined again until usdcc starts.
+        if (reason == u"Left the room" || reason == u"usdcc is closing" || !startLinks().contains(link)) {
+            entry.left = reason == u"Left the room";
+            return;
+        }
+        rejoinLater(link);
+    });
+    return room;
+}
+
+void PeersController::rejoinLater(const QString& link) {
+    StartRoom& start = m_startRooms[link];
+    start.retryMs = start.retryMs == 0 ? kFirstRejoinMs : std::min(kLastRejoinMs, start.retryMs * 2);
+    start.pending = true;
+    USDCC_LOG_INFO("usdcc.peers", "A room joined at start is lost; trying again in {} s", start.retryMs / 1000);
+    QTimer::singleShot(start.retryMs, this, [this, link] {
+        StartRoom& entry = m_startRooms[link];
+        entry.pending = false;
+        if (!entry.room && !entry.left && startLinks().contains(link)) {
+            joinStartLink(link);
+        }
+    });
+}
+
+bool PeersController::joinsAtStart(Room* room) const {
+    const QString link = m_links.value(room);
+    return !link.isEmpty() && startLinks().contains(link);
+}
+
+void PeersController::setJoinsAtStart(Room* room, bool on) {
+    const QString link = m_links.value(room);
+    if (link.isEmpty()) {
+        return;
+    }
+    QStringList links = startLinks();
+    if (on && !links.contains(link)) {
+        links.append(link);
+        StartRoom& start = m_startRooms[link];
+        start.room = room;
+        start.left = false;
+        // From now on it is joined again when lost, as if joined at start.
+        connect(room, &Room::closed, this, [this, link](const QString& reason) {
+            if (reason != u"Left the room" && reason != u"usdcc is closing" && startLinks().contains(link) &&
+                !m_startRooms[link].pending) {
+                rejoinLater(link);
+            }
+        });
+    } else if (!on) {
+        links.removeAll(link);
+    }
+    core::Settings::instance().setValue(startRoomsKey, links.join(u' ').toStdString());
 }
 
 }  // namespace usdcc::ui

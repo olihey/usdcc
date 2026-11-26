@@ -558,6 +558,42 @@ endif()
 add_executable(usdcc_peers_tests test_harness.h test_harness.cpp test_main.cpp peers_test_support.h peers_test.cpp
                                  peers_rooms_test.cpp peers_discovery_test.cpp peers_transfer_test.cpp)
 target_link_libraries(usdcc_peers_tests PRIVATE usdcc_peers Qt6::Network Qt6::Test)
+
+# The Python package of PEERS.md §9 (src/usdcc_peers), tested against itself
+# (usdcc_peers_python_tests) and against the C++ library (peers_python_test.cpp, in
+# usdcc_peers_tests). Both need its two dependencies, websockets and PyNaCl, which go
+# into a virtual environment of the build's own, build/peers-venv, made by the bundled
+# uv from the pinned requirements.txt (network needed the first time).
+set(_usdcc_peers_requirements "${CMAKE_SOURCE_DIR}/src/usdcc_peers/requirements.txt")
+set(_usdcc_peers_venv "${CMAKE_BINARY_DIR}/peers-venv")
+if(WIN32)
+    set(_usdcc_peers_python "${_usdcc_peers_venv}/Scripts/python.exe")
+else()
+    set(_usdcc_peers_python "${_usdcc_peers_venv}/bin/python")
+endif()
+set(_usdcc_peers_uv "${USDCC_UV_EXE_PATH}")
+if(NOT _usdcc_peers_uv)
+    find_program(_usdcc_peers_uv uv)
+endif()
+if(_usdcc_peers_uv AND USDCC_PYTHON_EXECUTABLE)
+    add_custom_command(
+        OUTPUT "${_usdcc_peers_venv}/requirements.stamp"
+        COMMAND "${_usdcc_peers_uv}" venv --quiet --allow-existing --python "${USDCC_PYTHON_EXECUTABLE}" "${_usdcc_peers_venv}"
+        COMMAND "${_usdcc_peers_uv}" pip install --quiet --python "${_usdcc_peers_python}" -r "${_usdcc_peers_requirements}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${_usdcc_peers_requirements}" "${_usdcc_peers_venv}/requirements.stamp"
+        DEPENDS "${_usdcc_peers_requirements}"
+        COMMENT "Making build/peers-venv for usdcc_peers (websockets, PyNaCl)"
+        VERBATIM)
+    add_custom_target(usdcc_peers_python_env ALL DEPENDS "${_usdcc_peers_venv}/requirements.stamp")
+    add_dependencies(usdcc_peers_tests usdcc_peers_python_env)
+    target_sources(usdcc_peers_tests PRIVATE peers_python_test.cpp)
+    target_compile_definitions(usdcc_peers_tests PRIVATE USDCC_PEERS_PYTHON="${_usdcc_peers_python}"
+                                                         USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME usdcc_peers_python_tests
+             COMMAND "${_usdcc_peers_python}" -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/peers_python")
+else()
+    message(STATUS "No uv: usdcc_peers' Python tests are left out")
+endif()
 if(WIN32)
     # usdcc_peers.dll beside the test program on every build, as for usdcc_assets_tests.
     add_custom_target(usdcc_peers_tests_copy_libraries

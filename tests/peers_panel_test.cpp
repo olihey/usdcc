@@ -7,6 +7,7 @@
 
 #include <algorithm>
 
+#include "usdcc/peers/channel.h"
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
 #include "usdcc/ui/main_window.h"
@@ -22,6 +23,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -737,4 +740,133 @@ USDCC_TEST(peers_shared_images_ask_first) {
     QTest::qWait(500);
     CHECK(ben->imageFile(fifth).state == State::Missing, "off: not downloaded");
     ben->clearReceivedImages();
+}
+
+// Notifications (docs/PEERS.md §10.2): a toast naming the room and the sender, the same id
+// replacing the one that is up, actions from a fixed list, and a line in the room's chat.
+USDCC_TEST(peers_notifications) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    usdcc::ui::MainWindow annaWindow;
+    usdcc::ui::MainWindow benWindow;
+    for (usdcc::ui::MainWindow* window : {&annaWindow, &benWindow}) {
+        window->resize(1000, 700);
+        window->show();
+    }
+    QTest::qWait(50);
+    QTemporaryDir folder;
+    QStringList selected;
+    auto controllerFor = [&](const QString& name, usdcc::ui::MainWindow* window) {
+        Peers::Options options;
+        options.profile.name = name;
+        options.roomsFolder = folder.path();
+        options.network = std::make_unique<FakeNetworkDiscovery>(QStringLiteral("notify test"));
+        PeersController::Hooks hooks;
+        hooks.selectPrims = [&selected](const QStringList& paths) { selected += paths; };
+        return std::make_unique<PeersController>(std::make_unique<Peers>(std::move(options)), window, hooks);
+    };
+    auto anna = controllerFor(QStringLiteral("Anna"), &annaWindow);
+    auto ben = controllerFor(QStringLiteral("Ben"), &benWindow);
+    QString error;
+    Room* room = anna->host({"Dailies", Admission::Invited, {}, false}, &error);
+    CHECK(room, "couldn't host: %s", qPrintable(error));
+    if (!room) return;
+    Room* joined = ben->joinLinkOrAddress(room->link(), {}, &error);
+    CHECK(joined && QTest::qWaitFor([&] { return joined->peers().size() == 2; }, 5000), "Ben doesn't get in");
+    if (!joined) return;
+    benWindow.toasts()->dismissAll();
+    QTest::qWait(50);
+    auto benToasts = [&] {
+        QStringList list;
+        for (usdcc::ui::ToastWidget* toast : benWindow.toasts()->visibleToasts()) list << toast->title() + " | " + toast->body();
+        return list;
+    };
+
+    // Parsing: only the fixed actions; anything else turns the notification down.
+    CHECK(!PeersController::parseNotification({{"title", "x"}, {"actions", QJsonArray{QJsonObject{{"label", "Run"}, {"run", "rm"}}}}}),
+          "an action to run something was taken");
+    CHECK(!PeersController::parseNotification({{"title", "x"}, {"actions", QJsonArray{QJsonObject{{"label", "Go"}, {"open", "javascript:x"}}}}}),
+          "a javascript: URL was taken");
+    CHECK(!PeersController::parseNotification({{"title", ""}}) && !PeersController::parseNotification({{"title", "x"}, {"kind", "loud"}}),
+          "a notification without a title, or of no kind, was taken");
+
+    PeersController::Notification progress;
+    progress.id = QStringLiteral("farm/8812");
+    progress.kind = usdcc::core::ToastKind::Info;
+    progress.title = QStringLiteral("Rendering shot_012");
+    progress.body = QStringLiteral("10 of 240 frames");
+    progress.actions = {{PeersController::NotificationAction::Kind::Select, QStringLiteral("Select"), {}, {"/World/hero"}}};
+    anna->notify(room, progress, joined->me().id);
+    CHECK(QTest::qWaitFor([&] { return benToasts().size() == 1; }, 5000), "Ben has no toast");
+    CHECK(benToasts().value(0) == "Rendering shot_012 | 10 of 240 frames\nDailies · Anna", "Ben's toast: %s",
+          qPrintable(benToasts().join(" ; ")));
+    progress.body = QStringLiteral("240 of 240 frames");
+    progress.kind = usdcc::core::ToastKind::Success;
+    anna->notify(room, progress, joined->me().id);
+    CHECK(QTest::qWaitFor([&] { return benToasts().value(0).contains("240 of 240"); }, 5000), "the toast wasn't replaced");
+    QTest::qWait(400);  // The replaced one fades out
+    CHECK(benToasts().size() == 1, "the same id stacked another toast: %s", qPrintable(benToasts().join(" ; ")));
+
+    const QList<PeersController::ChatLine> kept = ben->notifications(joined);
+    CHECK(kept.size() == 2 && kept.last().notification && kept.last().notification->actions.size() == 1 &&
+              kept.last().from.name == "Anna",
+          "Ben's room keeps %lld notifications", qlonglong(kept.size()));
+    if (!kept.isEmpty() && kept.last().notification) {
+        ben->runAction(kept.last().notification->actions.first());
+        CHECK(selected == QStringList{"/World/hero"}, "Select selected %s", qPrintable(selected.join(", ")));
+    }
+    // A raw message with an action that isn't on the list: no toast, nothing kept.
+    benWindow.toasts()->dismissAll();
+    QTest::qWait(400);
+    room->channel("notify")->send("notify", {{"title", "Run me"}, {"actions", QJsonArray{QJsonObject{{"label", "Go"}, {"run", "x"}}}}});
+    QTest::qWait(300);
+    CHECK(benToasts().isEmpty() && ben->notifications(joined).size() == 2, "a notification with a \"run\" action showed");
+    // Muted: kept, no toast.
+    ben->setMuted(joined, true);
+    PeersController::Notification lunch;
+    lunch.title = QStringLiteral("Lunch");
+    anna->notify(room, lunch);
+    CHECK(QTest::qWaitFor([&] { return ben->notifications(joined).size() == 3; }, 5000), "Ben didn't keep Lunch");
+    QTest::qWait(100);
+    CHECK(benToasts().isEmpty(), "a muted room showed a toast");
+}
+
+// Rooms joined at start (docs/PEERS.md §5.3): joined from the setting, joined again when
+// lost, and not when the user left.
+USDCC_TEST(peers_rooms_joined_at_start) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir folder;
+    auto anna = makeController("Anna", folder.path());
+    auto ben = makeController("Ben", folder.path());
+    QString error;
+    Room* room = anna->host({"Studio", Admission::Invited, {}, false}, &error);
+    CHECK(room, "couldn't host: %s", qPrintable(error));
+    if (!room) return;
+    usdcc::core::Settings::instance().setValue(PeersController::startRoomsKey,
+                                               (QStringLiteral("not-a-link ") + room->link()).toStdString());
+    CHECK(ben->startLinks() == QStringList{room->link()}, "the start links are %s", qPrintable(ben->startLinks().join(" ")));
+    ben->joinStartRooms();
+    auto benRoom = [&]() -> Room* { return ben->chatRooms().isEmpty() ? nullptr : ben->chatRooms().first(); };
+    CHECK(QTest::qWaitFor([&] { return benRoom() && benRoom()->state() == Room::State::Open; }, 5000),
+          "Ben didn't join at start");
+    if (!benRoom()) return;
+    CHECK(ben->joinsAtStart(benRoom()), "Ben's room doesn't say it is joined at start");
+
+    // Removed by the host: joined again after a while.
+    const PeerId benId = benRoom()->me().id;
+    room->remove(benId, QStringLiteral("Testing"));
+    CHECK(QTest::qWaitFor([&] { return benRoom() && benRoom()->state() == Room::State::Open && room->peers().size() == 2; },
+                          15000),
+          "Ben wasn't joined again");
+
+    // Left by Ben: not joined again; and taken off the list from the room's menu.
+    QPointer<Room> left = benRoom();
+    ben->setJoinsAtStart(left, false);
+    CHECK(ben->startLinks().isEmpty(), "the link is still listed");
+    ben->setJoinsAtStart(left, true);
+    CHECK(ben->startLinks() == QStringList{room->link()}, "the link wasn't added back");
+    left->close();
+    QTest::qWait(6500);
+    CHECK(ben->chatRooms().isEmpty(), "Ben joined again after leaving");
 }

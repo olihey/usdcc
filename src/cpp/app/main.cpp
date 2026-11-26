@@ -1268,6 +1268,31 @@ int main(int argc, char** argv) {
             window.statusBar()->showMessage(QObject::tr("The current stage has no prim %1").arg(path), 5000);
         }
     };
+    // A notification's actions (PEERS.md §10.2), each only on a click.
+    peersHooks.selectPrims = [&stageManager, &window](const QStringList& paths) {
+        const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
+        std::vector<PXR_NS::SdfPath> found;
+        for (const QString& path : paths) {
+            const std::string text = path.toStdString();
+            if (stage && PXR_NS::SdfPath::IsValidPathString(text) &&
+                stage->usdStage()->GetPrimAtPath(PXR_NS::SdfPath(text))) {
+                found.emplace_back(text);
+            }
+        }
+        if (found.empty()) {
+            window.statusBar()->showMessage(QObject::tr("The current stage has none of those prims"), 5000);
+        } else {
+            stageManager.setSelectedPaths(stage, found);
+        }
+    };
+    peersHooks.openStage = [](const QString& assetPath) { usdcc::usd::openStageFile(assetPath); };
+    peersHooks.confirmOpen = [&window](const QUrl& url) {
+        // Shown before it opens: a notification could name anything.
+        return QMessageBox::question(&window, QObject::tr("Open"),
+                                     QObject::tr("A notification wants to open:\n\n%1\n\nOpen it?")
+                                         .arg(url.toDisplayString()),
+                                     QMessageBox::Open | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Open;
+    };
     peersHooks.currentStage = [&stageManager]() {
         const usdcc::usd::StageRefPtr stage = stageManager.currentStage();
         return stage ? QString::fromStdString(stage->usdStage()->GetRootLayer()->GetDisplayName()) : QString();

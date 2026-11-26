@@ -12,11 +12,13 @@ Also 2026-11-17: rooms and channels (phase 1a) are built first, for
 [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md), which also brought browser guests (§6.1).
 **Built** (2026-11-17), all in C++: phase 1a (rooms and channels, §14.1), phase 1b without
 the Python module (keys, encryption, reconnecting, shared state, several rooms, §14.2), and
-phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Until the
-hub of phase 3, a *public room* (anyone on the network may join, §6) stands in for the studio's
-room. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md). `usdcc.peers` for
-Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two machines haven't
-been tried; everything so far ran on one.
+phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Since built:
+phase 5's transfers without UI or Python (§14.4), phase 6, the shared stage
+([SHARED_STAGE.md](SHARED_STAGE.md)), and **phase 3** (2026-11-26, §14.5): the `usdcc_peers`
+Python package, the hub, rooms joined at start, and notifications. Not built: phase 4 and the
+rest of phase 5. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
+`usdcc.peers` for Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two
+machines haven't been tried; everything so far ran on one.
 
 ## 1. Can it work without a server?
 
@@ -129,7 +131,10 @@ then the link is pasted.
 
 **Rooms joined at start.** Settings > Peers keeps a list of links that are joined whenever usdcc
 runs, and joined again after a lost connection. This is how every artist is in the studio's room
-(§9) without doing anything.
+(§9) without doing anything. *As built* (§14.5): `Peers/startRooms`, links separated by spaces,
+and **Join When usdcc Starts** in a room's menu in the Peers panel for a room joined by a link. A
+room on the list that is lost after the reconnect of §6 gave up is joined again after 5 s,
+doubling to 5 minutes; one the user left isn't, until usdcc starts again.
 
 ### 5.4 The relay
 
@@ -562,6 +567,15 @@ member, or on one: a colleague's usdcc, a plugin, or a service through the hub.
 - **Python:** `room.notify(…)` to send. A plugin that wants to react to one, not only show it,
   listens on the channel.
 
+*As built* (§14.5): the body is in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §10. The list in the
+Peers panel is the room's chat, where each notification is a line with its actions as links
+(`PeersController::notifications()` gives the last 50). A notification with an action not on
+the list is turned down whole, and logged. A room this instance hosts lets everyone in it send
+them, as it lets them chat; the hub lets only itself and the services it names. Settings > Peers
+> Show notifications as toasts, and Do Not Disturb, turn the toasts off; the lines stay. The
+same id replaces the toast that is up by closing it and showing the new one. Sending from
+usdcc's own Python waits for `usdcc.peers`; from another program it is `usdcc_peers` (§9).
+
 ### 10.3 Sending things
 
 **Send to…** on things usdcc can already write out. A transfer, or a message for the small ones.
@@ -659,7 +673,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **1a. Rooms and channels** | `usdcc_peers` with hosting and joining by address, the frame, channels and their three kinds of delivery, who may send, limits, and guests with their page (§6.1). Built for [VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) phase 1, its first user; until 1b only guests join | Its tests pass on loopback: ordered messages arrive in one order on three members, a latest-only message replaces one still waiting, a slow member is dropped, a wrong secret is refused, a guest is refused a channel not opened to it |
 | **1b. The rest of the framework** | Identity, the handshake and encryption with the room key, reconnecting, shared state, several rooms, `usdcc.peers`. The protocol written down | Two peers join by address and nothing readable is on the wire; a reconnect catches up; a wrong key is refused; a map ends equal after both sides set the same key; a late joiner has the map. A test plugin shares a map from Python |
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
-| **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
+| **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list. **Built** 2026-11-26 (§14.5) | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
 | **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
 | **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | Phases 0 and A to C built (2026-11-22); see there |
@@ -915,6 +929,56 @@ The proxy that cuts a member off moved from `peers_rooms_test.cpp` to `peers_tes
   complete when a transfer resumes.
 - **Symbolic links:** a sender's bundle with one is refused (`fromDirectory`), and a receiver never
   writes through one. Not tested on Windows, where making one needs Developer Mode.
+
+### 14.5 Phase 3 as built: other programs and notifications
+
+Built 2026-11-26.
+
+- **`usdcc_peers`** ([src/usdcc_peers](../src/usdcc_peers), its README says how to use it): the
+  protocol in pure Python on asyncio, with `websockets` and `PyNaCl` (pinned in its
+  `requirements.txt`). A member (`Member.join()`) and a host (`Host`), and `usdcc_peers.join()`
+  for a script without asyncio, which runs the rooms on a thread of their own. Everything of
+  PEERS_PROTOCOL.md but guests (a connection with an Origin is refused), transfers (§9 there) and
+  discovery (§8): a program joins by link or address. A key file holds the same 64 bytes as the
+  app's identity file.
+- **The hub**, `python -m usdcc_peers.hub` (or `usdcc-hub`): one room or several from a JSON
+  file, each on its port; `notify` limited to the hub and the services named by fingerprint
+  (`--notify-sender`, a room's `notifySenders`); its key and each room's secret in its data folder,
+  so the links stay the same, and the links in `links.json` there, readable by its owner only.
+  The HTTP side: `POST /notify`, `POST /state` and `GET /rooms`, each with the token.
+- **In the app:** the `notify` channel in every chat room (§10.2), and rooms joined at start
+  (§5.3), in `PeersController`; a notification's line in the Peers panel's chat, and
+  **Join When usdcc Starts** in a room's menu. The actions' hooks (`selectPrims`, `openStage`,
+  `confirmOpen`, which asks before a URL opens) are set in `main.cpp`.
+- **Not built:** a hub that writes its maps to disk (§16 #5); the hub hosting a shared stage
+  ([SHARED_STAGE.md](SHARED_STAGE.md) §12 #4); several hub processes for one studio (§7.5).
+
+**Its tests:**
+
+| What | Where |
+|---|---|
+| The package against itself: links, key files, notifications checked, chat, `notify` refused to a member and allowed to a named service, maps and a late joiner, who gets in (wrong secret, wrong key, no invitation), a reconnect that catches up, the host closing, the hub's HTTP side and its token, the links staying the same | `tests/peers_python/test_usdcc_peers.py`, CTest `usdcc_peers_python_tests` |
+| C++ members on the Python hub: chat through it, a webhook's notification to one person and to everyone, a member's notification refused, a map the hub sets and one a member sets, a member back through a cut proxy and caught up, the hub stopping | `peers_python_hub_with_cpp_members` (`tests/peers_python_test.cpp`, in `usdcc_peers_tests`) |
+| A Python script in a room the app hosts: chat both ways, a map, a refused notification, leaving | `peers_python_member_in_cpp_room` |
+| A notification's toast naming the room and sender, replaced by the same id, its Select action, one with a `run` action turned down, a muted room | `peers_notifications` (`usdcc_ui_tests`) |
+| Rooms joined at start: from the setting, joined again after being removed, not after leaving, and the room menu's switch | `peers_rooms_joined_at_start` |
+
+The Python tests and `peers_python_test.cpp` need `build/peers-venv`, which the build makes with
+the bundled uv from `requirements.txt` (network needed the first time); without uv they are left
+out.
+
+**Load** (`tools/peers_load.py`, the hub in its own process, members spread over worker
+processes, on one Apple M-series Mac, on the loopback):
+
+| Members | Joining | A message to everyone reaches all | The hub idle |
+|---|---|---|---|
+| 500 (8 workers) | 8 s | 51 ms | 54 MB |
+| 1,000 (10 workers) | 27 s | 69 ms | 70 MB |
+
+Joining grows faster than the room: each welcome lists everyone, and each join is announced to
+everyone, so 1,000 joining at once (a studio logging in at nine) take 27 s in all; the hub's
+listen backlog is 1,024 for that. Everyone leaving at once costs the same, as each departure
+changes the room key for those still there (§6). Both are the protocol's, the C++ host's too.
 
 ## 15. Testing
 

@@ -20,6 +20,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QImageReader>
+#include <QJsonDocument>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -500,6 +501,15 @@ PeersSidePanel::PeersSidePanel(PeersController* controller, QWidget* parent)
         const QString hash = url.path();
         const PeersController::ImageFile file = m_controller->imageFile(hash);
         const bool here = file.state == PeersController::ImageFile::State::Done && QFileInfo::exists(file.path);
+        if (url.scheme() == u"naction") {
+            const QByteArray json = QByteArray::fromBase64(url.path().toLatin1(), QByteArray::Base64UrlEncoding |
+                                                                                      QByteArray::OmitTrailingEquals);
+            const auto parsed = PeersController::parseNotification(QJsonDocument::fromJson(json).object());
+            if (parsed && !parsed->actions.isEmpty()) {
+                m_controller->runAction(parsed->actions.first());
+            }
+            return;
+        }
         if (url.scheme() == u"image" || url.scheme() == u"open") {
             if (here) {
                 QDesktopServices::openUrl(QUrl::fromLocalFile(file.path));
@@ -966,7 +976,34 @@ void PeersSidePanel::appendLine(const PeersController::ChatLine& line) {
         add(QStringLiteral("<b style=\"color:%1\">%2</b>&nbsp;&nbsp;%3").arg(color, line.from.name.toHtmlEscaped(), timeHtml),
             0, gap);
     }
-    if (line.records.isEmpty()) {
+    if (line.notification) {
+        // A notification (PEERS.md §10.2): its title in its kind's colour, its text, and its
+        // actions as links; each runs from the fixed list (PeersController::runAction()).
+        const PeersController::Notification& n = *line.notification;
+        const QColor background = m_chat->palette().color(QPalette::Base);
+        const QString kind = QString::fromUtf8(core::toastKindName(n.kind).data());
+        QString html = QStringLiteral("&#x1F514;&nbsp;<b style=\"color:%1\">%2</b>")
+                           .arg(levelColor(kind == u"success" ? QStringLiteral("info") : kind, background),
+                                n.title.toHtmlEscaped());
+        if (!n.body.isEmpty()) {
+            html += QStringLiteral("<br>") + n.body.toHtmlEscaped().replace(u'\n', QStringLiteral("<br>"));
+        }
+        QStringList links;
+        for (const PeersController::NotificationAction& action : n.actions) {
+            PeersController::Notification one;
+            one.title = n.title;
+            one.actions = {action};
+            const QByteArray json = QJsonDocument(PeersController::notificationJson(one)).toJson(QJsonDocument::Compact);
+            links.append(QStringLiteral("<a href=\"naction:%1\">%2</a>")
+                             .arg(QString::fromLatin1(json.toBase64(QByteArray::Base64UrlEncoding |
+                                                                    QByteArray::OmitTrailingEquals)),
+                                  action.label.toHtmlEscaped()));
+        }
+        if (!links.isEmpty()) {
+            html += QStringLiteral("<br>") + links.join(QStringLiteral("&nbsp;&nbsp;"));
+        }
+        add(html, scaled::pixels(12), sameGroup ? scaled::pixels(3) : scaled::pixels(1));
+    } else if (line.records.isEmpty()) {
         QString html = chatHtml(line.text);
         if (line.image) {
             // A shared image under what was said (its own lines start with a break).
@@ -1144,6 +1181,16 @@ void PeersSidePanel::roomMenu(const QPoint& position) {
             });
             menu.addAction(tr("Rename Room…"), this, [this, room] { renameRoom(room); });
             menu.addSeparator();
+        }
+        if (!m_controller->linkOf(room).isEmpty()) {
+            // A room joined by a link can be joined again whenever usdcc starts (PEERS.md §5.3).
+            QAction* atStart = menu.addAction(tr("Join When usdcc Starts"), this, [this, room](bool on) {
+                if (room) {
+                    m_controller->setJoinsAtStart(room, on);
+                }
+            });
+            atStart->setCheckable(true);
+            atStart->setChecked(m_controller->joinsAtStart(room));
         }
         QAction* mute = menu.addAction(tr("Mute"), this, [this, room](bool on) {
             if (room) {
