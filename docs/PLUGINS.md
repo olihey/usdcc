@@ -326,7 +326,7 @@ C++ and Python examples. **This caught a real bug:** at first it failed to load,
 3. **C++ plugins at all:** built, as the spec asks. Most plugins should still be Python (PLUGIN_SDK.md).
 4. **Turning a plugin on or off:** at the next start (§3.4).
 5. **A newly found plugin:** it just loads, as startup scripts do. Someone had to put it in that folder.
-6. **Installing:** copying a folder, with the folder button in the panel to open it. No zip installer or store for now.
+6. **Installing:** copying a folder, with the folder button in the panel to open it. No zip installer or store for now; [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) plans both, parked until C++ plugins have a stable interface.
 7. **Manifest format:** JSON. Qt reads it with no new dependency, and USD's `plugInfo.json` is the same kind of file.
 8. **Compatibility:** `api` is a whole number, raised only when something breaks, and a plugin whose `api` doesn't match is refused with the reason. C++ also needs the exact build (§3.2).
 9. **Third-party Python modules:** declared in the manifest, installed by the app when asked into a shared folder ([PYTHON_PACKAGES.md](PYTHON_PACKAGES.md)) or carried in `deps/`, and checked before any plugin code runs (§3.10). Nothing is installed at startup.

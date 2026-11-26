@@ -14,6 +14,8 @@
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/viewport_view_panel.h"
 
+#include <QDir>
+
 #include <memory>
 #include <string>
 
@@ -64,6 +66,9 @@ USDCC_TEST(python_viewport_renderer_settings) {
     CHECK(evaluated("'HdEmbreeRendererPlugin' in app.renderers() and 'HdStormRendererPlugin' in app.renderers()") == "True",
           "Hydra's renderers: %s", evaluated("app.renderers()").c_str());
     CHECK(evaluated("v.renderer()") == "", "none before it has drawn");
+    CHECK(evaluated("v.grab(r'" + QDir::temp().filePath(QStringLiteral("usdcc_never_drawn.png")).toStdString() + "')") == "False" &&
+              evaluated("v.is_converged()") == "False",
+          "nothing to grab before it has drawn");
     CHECK(raises("v.renderer_settings()", "ValueError"), "so its settings need a renderer named");
     CHECK(raises("v.set_renderer('HdNoSuchRendererPlugin')", "ValueError"), "an unknown renderer");
     CHECK(evaluated("v.set_renderer('HdEmbreeRendererPlugin')") == "True" && evaluated("v.renderer()") == "HdEmbreeRendererPlugin",
