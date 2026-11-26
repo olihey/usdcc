@@ -4,12 +4,12 @@
 
 #include "usdcc/usd/primvar_colors.h"
 
+#include "../src/cpp/usd/src/fixed_data_sources.h"
 #include "../src/cpp/usd/src/primvar_color_filter.h"
 
 #include <pxr/imaging/hd/materialBindingsSchema.h>
 #include <pxr/imaging/hd/primvarSchema.h>
 #include <pxr/imaging/hd/primvarsSchema.h>
-#include <pxr/imaging/hd/retainedDataSource.h>
 #include <pxr/imaging/hd/retainedSceneIndex.h>
 #include <pxr/imaging/hd/sceneIndexObserver.h>
 #include <pxr/imaging/hd/tokens.h>
@@ -118,24 +118,24 @@ USDCC_TEST(primvar_color_filter) {
     // A mesh with a primvar and a material, one without the primvar, a cube, and a material.
     const auto primvar = [](VtValue values, const TfToken& interpolation) {
         return HdPrimvarSchema::Builder()
-            .SetPrimvarValue(HdRetainedSampledDataSource::New(values))
+            .SetPrimvarValue(hd::FixedSampledDataSource::New(values))
             .SetInterpolation(HdPrimvarSchema::BuildInterpolationDataSource(interpolation))
             .Build();
     };
     const auto mesh = [&](bool withHeat) {
-        std::vector<TfToken> names{HdMaterialBindingsSchema::GetSchemaToken()};
-        std::vector<HdDataSourceBaseHandle> sources{HdRetainedTypedSampledDataSource<SdfPath>::New(SdfPath("/Look"))};
+        hd::FixedContainerDataSource::Children children{{HdMaterialBindingsSchema::GetSchemaToken(), hd::FixedTypedDataSource<SdfPath>::New(SdfPath("/Look"))}};
         if (withHeat) {
-            names.push_back(HdPrimvarsSchema::GetSchemaToken());
-            sources.push_back(HdRetainedContainerDataSource::New(TfToken("heat"), primvar(VtValue(VtFloatArray{0, 10}), HdPrimvarSchemaTokens->vertex)));
+            children.emplace_back(HdPrimvarsSchema::GetSchemaToken(),
+                                  hd::FixedContainerDataSource::New(hd::FixedContainerDataSource::Children{
+                                      {TfToken("heat"), primvar(VtValue(VtFloatArray{0, 10}), HdPrimvarSchemaTokens->vertex)}}));
         }
-        return HdRetainedContainerDataSource::New(names.size(), names.data(), sources.data());
+        return hd::FixedContainerDataSource::New(std::move(children));
     };
     const HdRetainedSceneIndexRefPtr input = HdRetainedSceneIndex::New();
     input->AddPrims({{SdfPath("/Hot"), HdPrimTypeTokens->mesh, mesh(true)},
                      {SdfPath("/Plain"), HdPrimTypeTokens->mesh, mesh(false)},
                      {SdfPath("/Box"), HdPrimTypeTokens->cube, mesh(false)},
-                     {SdfPath("/Look"), HdPrimTypeTokens->material, HdRetainedContainerDataSource::New()}});
+                     {SdfPath("/Look"), HdPrimTypeTokens->material, hd::FixedContainerDataSource::New()}});
     const PrimvarColorSceneIndex::RefPtr filter = PrimvarColorSceneIndex::New(input);
     CHECK(filter->geometryCount() == 3, "what's there already: meshes and the cube, not the material (%zu)", filter->geometryCount());
     Counter counter;

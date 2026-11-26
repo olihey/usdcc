@@ -105,7 +105,7 @@ USDCC_TEST(uv_layout_seams_and_tiles) {
     const UvLayout split = layoutOf(stage, "/Grid", "split");
     CHECK(split.seams.size() == 2, "one seam edge, its two sides: %zu", split.seams.size());
     if (split.seams.size() == 2) {
-        const auto points = [&](const std::pair<std::size_t, std::size_t>& edge) {
+        const auto points = [&](const std::pair<std::size_t, std::size_t>& edge) -> std::pair<int, int> {
             return std::minmax(split.cornerPoints[edge.first], split.cornerPoints[edge.second]);
         };
         CHECK(points(split.seams[0]) == std::make_pair(1, 4) && points(split.seams[1]) == std::make_pair(1, 4), "between points 1 and 4");

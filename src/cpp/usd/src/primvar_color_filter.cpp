@@ -1,5 +1,7 @@
 #include "primvar_color_filter.h"
 
+#include "fixed_data_sources.h"
+
 #include <pxr/base/vt/array.h>
 #include <pxr/base/vt/value.h>
 #include <pxr/imaging/hd/dataSource.h>
@@ -8,7 +10,6 @@
 #include <pxr/imaging/hd/overlayContainerDataSource.h>
 #include <pxr/imaging/hd/primvarSchema.h>
 #include <pxr/imaging/hd/primvarsSchema.h>
-#include <pxr/imaging/hd/retainedDataSource.h>
 #include <pxr/imaging/hd/sceneIndexPluginRegistry.h>
 #include <pxr/imaging/hd/tokens.h>
 
@@ -72,7 +73,7 @@ HdContainerDataSourceHandle colorsOf(const HdPrimvarSchema& source, const std::s
 HdContainerDataSourceHandle missing() {
     static const HdContainerDataSourceHandle primvar =
         HdPrimvarSchema::Builder()
-            .SetPrimvarValue(HdRetainedTypedSampledDataSource<VtVec3fArray>::New(VtVec3fArray{primvarMissingColor()}))
+            .SetPrimvarValue(hd::FixedTypedDataSource<VtVec3fArray>::New(VtVec3fArray{primvarMissingColor()}))
             .SetInterpolation(HdPrimvarSchema::BuildInterpolationDataSource(HdPrimvarSchemaTokens->constant))
             .SetRole(colorRole())
             .Build();
@@ -158,9 +159,9 @@ HdSceneIndexPrim PrimvarColorSceneIndex::GetPrim(const SdfPath& primPath) const 
     }
     if (!color) color = missing();
     prim.dataSource = HdOverlayContainerDataSource::New(
-        HdRetainedContainerDataSource::New(HdPrimvarsSchema::GetSchemaToken(),
-                                           HdRetainedContainerDataSource::New(HdTokens->displayColor, color),
-                                           HdMaterialBindingsSchema::GetSchemaToken(), HdBlockDataSource::New()),
+        hd::FixedContainerDataSource::New(hd::FixedContainerDataSource::Children{
+            {HdPrimvarsSchema::GetSchemaToken(), hd::FixedContainerDataSource::New(hd::FixedContainerDataSource::Children{{HdTokens->displayColor, color}})},
+            {HdMaterialBindingsSchema::GetSchemaToken(), HdBlockDataSource::New()}}),
         prim.dataSource);
     return prim;
 }

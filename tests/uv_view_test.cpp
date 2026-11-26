@@ -12,6 +12,7 @@
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 
+#include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/stage.h>
 
 #include <QApplication>
