@@ -174,8 +174,16 @@ Not legal advice: what is above is what the texts say, read by us.
    `olihey/usdcc` a line in [USD_PLUGINS.md](USD_PLUGINS.md) §4 pointing here. Done when a manual
    run builds and checks both packs and they are in the private release for the current OpenUSD
    asset.
-3. **Try a pack from it** on the Mac (§4) and render with `tests/renderer_viewport_check.py`
-   (`RV_RENDERER=HdArnoldRendererPlugin`), as for the local build.
+3. **Try a pack from it** on the Mac. **Done 2026-11-26:** the macOS pack from the private release,
+   unzipped over CI's OpenUSD asset (`tools/fetch_usd.py`) with usdcc built against that, renders
+   in all six steps of `tests/renderer_viewport_check.py` (`RV_RENDERER=HdArnoldRendererPlugin`;
+   first frame 2.8 s), the same pictures as the local build. A local usdcc built against the CI
+   asset needs three things the asset doesn't give a developer's Mac: its `pxrConfig.cmake` and
+   `libusd_python.dylib` name the runner's Python (`/Users/runner/.local/share/uv/python/…`), so
+   CMake has to be given `Python3_EXECUTABLE`, `_LIBRARY` and `_INCLUDE_DIR` (else usdcc builds
+   without Python and says nothing more), and the app `DYLD_FALLBACK_LIBRARY_PATH` set to that
+   Python's `lib` (else it doesn't start); after the first build without Python, the scripting
+   library's `*_autogen` folders have to go (stale `moc` output, undefined `staticMetaObject`).
 4. **Ask Autodesk** (you): the CI download (§5 item 2), and in the same message whether usdcc may
    publish hdArnold binaries, Apache-2.0, built against the SDK, without the core (§6.3).
 5. **Only if Autodesk agrees in writing:** the pin's `set` becomes `optional` with `"publish":
