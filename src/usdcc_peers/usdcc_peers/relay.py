@@ -36,7 +36,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import secrets
 import signal
 import ssl
