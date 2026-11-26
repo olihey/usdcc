@@ -446,3 +446,49 @@ USDCC_TEST(peers_transfer_cancel) {
     QTest::qWait(300);
     CHECK(first->bytesSent() == sentAtCancel, "pieces went after the cancel");
 }
+
+// The receiver is asked (TransferInboxOptions::ask), and answers after the sender would
+// otherwise have offered again: "wait" keeps it waiting. A no fails it with "Declined".
+USDCC_TEST(peers_transfer_asks_first) {
+    QTemporaryDir dir;
+    const QString source = dir.path() + "/source";
+    writeFile(source, "session.json", "{\"panels\": []}");
+    auto host = hostRoom();
+    auto sender = joinRoom(*host, "Sender");
+    auto receiver = joinRoom(*host, "Receiver");
+    TransferInbox::Options options = inboxIn(dir);
+    QList<std::function<void(bool)>> questions;
+    QStringList askedAbout;
+    options.ask = [&](const Peer& from, const TransferManifest& manifest, std::function<void(bool)> answer) {
+        askedAbout.append(from.name + ": " + manifest.files.first().path);
+        questions.append(std::move(answer));
+    };
+    auto* inbox = new TransferInbox(receiver.get(), "transfer", options, receiver.get());
+    InboxWatch inboxWatch(inbox);
+
+    Transfer::Options quickStall = quick();
+    quickStall.stallMs = 300;  // It offers again often, and hears "wait"
+    quickStall.giveUpMs = 1500;
+    QString error;
+    Transfer* yes = Transfer::send(sender.get(), "transfer", receiver->me().id, manifestOf(source), quickStall,
+                                   sender.get(), &error);
+    Watch yesWatch(yes);
+    CHECK(waitUntil([&] { return questions.size() == 1; }), "the receiver wasn't asked");
+    CHECK(askedAbout == QStringList{"Sender: session.json"} && inbox->isAsking(yes->id()), "asked about %s",
+          qPrintable(askedAbout.join(", ")));
+    QTest::qWait(2500);  // Longer than the sender would wait without hearing "wait"
+    CHECK(!yesWatch.ended() && yes->state() == Transfer::State::Offered, "the sender stopped waiting: %s",
+          qPrintable(yesWatch.reason));
+    questions.first()(true);
+    CHECK(waitUntil([&] { return yesWatch.finished && inboxWatch.received.size() == 1; }), "it didn't arrive after yes");
+
+    writeFile(source, "other.txt", "no thanks");
+    Transfer* no = Transfer::send(sender.get(), "transfer", receiver->me().id, manifestOf(source), quickStall,
+                                  sender.get(), &error);
+    Watch noWatch(no);
+    CHECK(waitUntil([&] { return questions.size() == 2; }), "the receiver wasn't asked again");
+    questions.last()(false);
+    CHECK(waitUntil([&] { return noWatch.failed; }) && noWatch.reason == "Declined", "a no ended it with \"%s\"",
+          qPrintable(noWatch.reason));
+    CHECK(inboxWatch.received.size() == 1, "a declined bundle arrived");
+}

@@ -407,6 +407,8 @@ add_library(usdcc_usd_ui SHARED
     src/share/shared_stages.cpp
     include/usdcc/usd/share/shared_stages_section.h
     src/share/shared_stages_section.cpp
+    include/usdcc/usd/share/prim_text.h
+    src/share/prim_text.cpp
     include/usdcc/usd/share/presence.h
     src/share/presence.cpp
     include/usdcc/usd/render/render_menu.h

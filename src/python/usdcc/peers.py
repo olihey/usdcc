@@ -305,6 +305,25 @@ class Room:
                 target = found[0].id
         _app().room_notify(self._handle, _dumps(notification), target)
 
+    def send_file(self, channel: str, path: str, to: str | Peer | None = None) -> int:
+        """Sends a file, or a folder with everything in it, on a channel of the plugin's own
+        (PEERS.md §7.3): to one member, or to each. In pieces, checked against their hashes,
+        resuming after a lost connection. Returns how many it was offered to."""
+        return _app().room_send_files(self._handle, channel, str(path), _id_of(to))
+
+    def on_file(self, channel: str, callback: Callable[[str, list[str], Peer], Any],
+                accept: Callable[[Peer, list[str], int], bool] | None = None) -> Connection:
+        """Takes files sent on `channel`: `callback(folder, files, sender)` once they arrived,
+        `folder` holding them at their paths. `accept(sender, files, bytes)` says whether to take
+        an offer (without it, every one up to Settings > Peers > Receive up to). A bundle that is
+        here already isn't sent again."""
+        native_accept = None
+        if accept is not None:
+            native_accept = lambda peer, files, size: bool(accept(Peer._of(peer), files, size))  # noqa: E731
+        return _track(_app().room_on_files(self._handle, channel,
+                                           lambda folder, files, peer: callback(folder, files, Peer._of(peer)),
+                                           native_accept), callback)
+
     def on(self, event: str, callback: Callable[..., Any]) -> Connection:
         """"peer_joined" (peer), "peer_left" (peer, reason) or "closed" (reason)."""
         if event == "peer_joined":

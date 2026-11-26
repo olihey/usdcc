@@ -27,6 +27,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QList>
 #include <QObject>
@@ -99,6 +100,11 @@ struct USDCC_PEERS_API TransferInboxOptions {
     int maxFiles = 100000;
     // Asked about each offer that fits the limits; empty: every one is accepted.
     std::function<bool(const Peer& from, const TransferManifest& manifest)> accept;
+    // Or asked of someone who answers later (a toast with Accept and Decline): `answer` is
+    // called once, with yes or no. Meanwhile the sender hears "wait" and keeps waiting. Asked
+    // about a bundle already in the inbox too, so nobody learns what is there without a yes.
+    // Unanswered after giveUpMs, a no.
+    std::function<void(const Peer& from, const TransferManifest& manifest, std::function<void(bool yes)> answer)> ask;
     int ackIntervalMs = 20;  // Acknowledgements are gathered this long
     // Nothing heard from the sender this long: failed (what arrived is kept).
     int giveUpMs = 120000;
@@ -186,6 +192,8 @@ public:
     bool hasBundle(const QString& bundleHash) const;
     // The incoming transfers, ended ones included until deleted.
     QList<Transfer*> transfers() const;
+    // An offer waiting for its answer (Options::ask).
+    bool isAsking(const QString& transferId) const;
 
 Q_SIGNALS:
     // An offer was accepted and pieces are coming.
@@ -199,6 +207,9 @@ private:
     friend class Transfer;
     void onMessage(const Message& message);
     void onOffer(const Message& message);
+    void begin(const Peer& from, const QString& id, const TransferManifest& manifest, qint64 chunk);
+    void wait(const PeerId& to, const QString& id);
+    void answer(const QString& id, bool yes);
     void refuse(const PeerId& to, const QString& id, const QString& reason, const Peer& from);
 
     QPointer<Room> m_room;
@@ -206,6 +217,13 @@ private:
     Options m_options;
     QString m_directory;
     QHash<QString, QPointer<Transfer>> m_transfers;  // By id
+    struct Pending {
+        Peer from;
+        TransferManifest manifest;
+        qint64 chunk = 0;
+        QElapsedTimer since;
+    };
+    QHash<QString, Pending> m_pending;  // Offers asked about, by id
 };
 
 }  // namespace usdcc::peers

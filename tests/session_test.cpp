@@ -7,6 +7,9 @@
 #include "trash_temp_dir.h"
 #include "test_settings.h"
 
+#include "peers_send.h"
+#include "usdcc/peers/peers.h"
+#include "usdcc/peers/room.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -15,6 +18,7 @@
 #include "usdcc/scripting/sessions_dialog.h"
 #include "usdcc/scripting/code_editor.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/usd/layer_actions.h"
 #include "usdcc/usd/outliner_view_panel.h"
@@ -35,6 +39,8 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QListWidget>
+#include <QMenu>
+#include <QTest>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTreeView>
@@ -496,4 +502,70 @@ USDCC_TEST(session_dialog) {
     dialog.select("Second");
     CHECK(dialog.loadSelected(), "loads");
     CHECK(sessions.currentName() == "Second" && dialog.result() == QDialog::Accepted, "and closes");
+}
+
+// Send to… > This Session (docs/PEERS.md §10.3, phase 5's "a session sent from one instance
+// loads on the other"): Anna's File > Send To sends the app as it is; Ben accepts it, and it is
+// imported and loaded. One app plays both: what crosses is the session, through a room.
+USDCC_TEST(session_sent_to_a_peer) {
+    TestSettings settings;
+    usdcc::ui::PeersController::defineSettings();
+    QTemporaryDir folder;
+    Scene scene;
+    App app;
+    SessionController sessions(app.context(), folder.filePath("sessions"));
+    const StageRefPtr root = app.stages.openStage(scene.root.toStdString());
+    CHECK(root, "the stage opens");
+    if (!root) return;
+
+    const auto controller = [&](const QString& name) {
+        usdcc::peers::Peers::Options options;
+        options.profile.name = name;
+        options.roomsFolder = folder.filePath("rooms");
+        return std::make_unique<usdcc::ui::PeersController>(std::make_unique<usdcc::peers::Peers>(std::move(options)),
+                                                            nullptr, usdcc::ui::PeersController::Hooks{});
+    };
+    auto anna = controller("Anna");
+    auto ben = controller("Ben");
+    QMenu annaMenu, benMenu;
+    usdcc::app::setUpSendTo({anna.get(), nullptr, &app.stages, app.undo.get(), &sessions, nullptr}, &annaMenu);
+    usdcc::app::setUpSendTo({ben.get(), nullptr, &app.stages, app.undo.get(), &sessions, nullptr}, &benMenu);
+    QString error;
+    usdcc::peers::Room* room = anna->host({"Review", usdcc::peers::Admission::Invited, {}, false}, &error);
+    CHECK(room, "couldn't host: %s", qPrintable(error));
+    if (!room) return;
+    usdcc::peers::Room* joined = ben->joinLinkOrAddress(room->link(), {}, &error);
+    CHECK(joined && QTest::qWaitFor([&] { return joined->peers().size() == 2; }, 5000), "Ben didn't join");
+
+    // File > Send To > This Session > Everyone in Review, as a click does.
+    QMenu* sessionMenu = nullptr;
+    for (QAction* action : annaMenu.actions()) {
+        if (action->menu() && action->text() == "This Session") sessionMenu = action->menu();
+    }
+    CHECK(sessionMenu, "Send To has no This Session");
+    if (!sessionMenu) return;
+    Q_EMIT sessionMenu->aboutToShow();
+    QAction* everyone = nullptr;
+    for (QAction* action : sessionMenu->actions()) {
+        if (action->text().startsWith("Everyone in Review")) everyone = action;
+    }
+    CHECK(everyone, "the room isn't in the menu");
+    if (!everyone) return;
+    everyone->trigger();
+    CHECK(QTest::qWaitFor([&] { return ben->pendingItems().size() == 1; }, 5000), "Ben wasn't offered the session");
+    const usdcc::ui::PeersController::ReceivedItem offer = ben->pendingItems().value(0);
+    CHECK(offer.kind == "session" && offer.title == "Anna's session" && offer.from.name == "Anna",
+          "the offer: %s %s", qPrintable(offer.kind), qPrintable(offer.title));
+
+    // Ben's side: nothing open, then the session comes and loads.
+    app.stages.closeStage(root);
+    CHECK(app.stages.stages().empty(), "the stage didn't close");
+    bool opened = false;
+    QObject::connect(ben.get(), &usdcc::ui::PeersController::itemOpened, ben.get(),
+                     [&](const usdcc::ui::PeersController::ReceivedItem&) { opened = true; });
+    ben->acceptItem(offer.id);
+    CHECK(QTest::qWaitFor([&] { return opened; }, 10000), "the session didn't arrive");
+    CHECK(sessions.store().read("Anna's session").has_value(), "it wasn't imported");
+    CHECK(QTest::qWaitFor([&] { return stageFiles(app.stages).contains(QFileInfo(scene.root).canonicalFilePath()); }, 10000),
+          "it didn't load: the stages are %s", qPrintable(stageFiles(app.stages).join(", ")));
 }
