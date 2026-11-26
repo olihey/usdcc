@@ -571,9 +571,7 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
         ground mesh is there, but **the Sphere and the Cube aren't seen**. Why isn't known:
         Cycles counted three meshes, and its source has nothing about implicit surfaces,
         so the gap Gatling's patch fills is one guess.*
-      - *In usdcc: "Cycles" is among the viewport's renderers, and `set_renderer()` to it
-        returned, with the app still running 25 s later. **What it draws there isn't known:**
-        the pictures taken showed other panels, which said "No stage open".*
+      - *In usdcc: see §7.1, which supersedes the rest of this item.*
       - *Install: 126 MB, with GPU kernel sources and runtime DLLs a pack doesn't need.*
    2. `deps/usd-plugins/cycles.json` (`win64` and `linux-x64`, `optional`,
       `"publish": false`). The pack check renders a small scene on the CPU and fails on a
@@ -701,6 +699,43 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
     XPU mode needs no extra SDK.
 11. **MoonRay's GPU mode on Linux** (CUDA/OptiX), once its licences are read (§5), checked
     on the self-hosted RTX runner.
+
+
+### 7.1 Cycles in usdcc's viewport (2026-11-26)
+
+Checked on Windows with `tests/renderer_viewport_check.py`, which writes a scene (a textured ground
+mesh; a sphere, cube, cylinder and cone, which are implicit shapes; a distant and a dome light; a red
+UsdPreviewSurface; display colors) and takes the viewport's own picture after each step with
+`Viewport.grab()`, new for this. Cycles from `blender/cycles` at `3eb35f859` with
+`patches/cycles-usdcc.patch`, CPU only, against the local OpenUSD of the pin.
+
+| Step | Cycles | Embree (the same check) |
+|---|---|---|
+| First frame, converged | 2.1 s; every shape, the texture, both lights' shadows, the red material | 9.7 s |
+| Camera moved, an edit (a color, a translate), the window resized | each redrawn, 0.9 to 2.3 s | 4 to 11 s |
+| To Storm and back | yes | yes |
+| The app quits | yes, exit code 0 | yes |
+
+What the patch changes in Cycles:
+
+- **Implicit shapes.** hdCycles draws meshes only, and nothing turned USD's sphere, cube, cylinder,
+  cone, capsule and plane into meshes, so they weren't drawn (cycles.exe has its own chain of scene
+  indices). `src/hydra/implicit_surfaces.cpp` registers OpenUSD's `HdsiImplicitSurfaceSceneIndex` for
+  the Cycles renderer, as hdEmbree and the Gatling patch do.
+- **The white picture.** hdCycles multiplied every light but the distant one by π, "from intensity to
+  radiant flux". A dome light is Cycles' background, whose strength is radiance, as UsdLux's
+  intensity is: a sky of 0.4 was 1.26, white. The dome light isn't multiplied now, and the sky has
+  Embree's grey. The distant light's ×4 ("approximately matches Karma") and the area lights' ×π are
+  upstream's choices and stay.
+- **Embree.** Cycles' standalone build tests `WITH_EMBREE`, which only Blender's build sets; its own
+  option is `WITH_CYCLES_EMBREE`. So Embree was never compiled in and Cycles used its BVH2. The patch
+  tests the right one, and lets `-DEMBREE_ROOT_DIR` name another Embree on Windows, as the other
+  platforms could. Cycles is built against **OpenUSD's Embree 4.3.3**, which its code supports (it
+  checks `RTC_VERSION`), so one `embree4.dll` serves both. CMake searches Cycles' own library folders
+  before that hint, so the build names `EMBREE_INCLUDE_DIR` and `EMBREE_EMBREE4_LIBRARY` too.
+
+**Not checked:** textures other than a PNG, MaterialX, Cycles' own nodes (the Material Editor has none
+yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the GPU.
 
 ## 8. Open questions
 

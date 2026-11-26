@@ -425,6 +425,18 @@ class Viewport:
             end = last if end is None else end
         return list(_app().viewport_playblast(self._id, str(pattern), float(start), float(end), float(step)))
 
+    def grab(self, path: str | os.PathLike[str]) -> bool:
+        """Writes the last frame it drew, without its overlays (the grid, gizmos, the HUD), to
+        `path`: PNG, JPEG or TIFF by the extension. The viewport's own picture, whatever is
+        in front of it on the screen. False before it has drawn, or if the file can't be
+        written. A progressive renderer may not be done: see ``is_converged()``."""
+        return _app().viewport_grab(self._id, str(path))
+
+    def is_converged(self) -> bool:
+        """Whether it has drawn, and its renderer had nothing more to add to the last
+        frame: Storm at once, a path tracer when it's done."""
+        return _app().viewport_converged(self._id)
+
     def renderer(self) -> str:
         """Its renderer's id ("HdStormRendererPlugin"), or "" before it has one."""
         return _app().viewport_renderer(self._id)

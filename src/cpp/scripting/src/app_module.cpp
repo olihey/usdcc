@@ -865,6 +865,25 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
             return result;
         },
         py::arg("id"), py::arg("pattern"), py::arg("start"), py::arg("end"), py::arg("step"));
+    // Its last frame, as drawn, into a file: what a check of a renderer looks at.
+    m.def(
+        "viewport_grab",
+        [](int id, const std::string& path) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            if (!viewport.hydraWindow()) throw py::value_error("the viewport has no picture");
+            const QImage image = viewport.hydraWindow()->grabFrame();
+            if (image.isNull()) return false;
+            return image.save(QString::fromStdString(path));
+        },
+        py::arg("id"), py::arg("path"));
+    m.def(
+        "viewport_converged",
+        [](int id) {
+            ViewportViewPanel& viewport = viewportWithId(id);
+            return viewport.hydraWindow() && viewport.hydraWindow()->hasRenderedFirstFrame() &&
+                   viewport.hydraWindow()->isConverged();
+        },
+        py::arg("id"));
     // The stage camera it looks through, "" for its own (docs/VIEWPORT_CAMERA.md §3).
     m.def(
         "viewport_camera", [](int id) { return viewportWithId(id).hydraWindow()->stageCamera().GetString(); },

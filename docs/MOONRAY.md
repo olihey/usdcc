@@ -247,7 +247,7 @@ Work:
 | **4. Pack** | `moonray.json` (`linux-x64`, `optional`, `"publish": false`), the build hook, a pack check that renders a frame on the CPU, the library list check | Built by CI and kept with the run |
 | **5. Nodes** | §5, MATERIAL_EDITOR.md §3.3, tests | A DwaBaseMaterial network made in the editor renders in MoonRay |
 | **6. Settings and final render** | hdMoonray's render settings under Settings > Renderers, FINAL_RENDER.md checks | A final frame is written |
-| **7. Publish** | Licence list read, real size noted, download offered in Settings | On a release as its own asset |
+| **7. Publish** | Licence list read, real size noted, download offered in Settings | On a release as its own asset. **The download in Settings is set aside** (2026-11-26): the release's separate archive (§7.5) is how MoonRay is installed |
 | **Later** | Open Image Denoise, XPU (CUDA/OptiX, Metal), MaterialX surfaces | |
 
 Phase 1 decides the rest and is the cheapest. Phase 2 is the largest risk.
