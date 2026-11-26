@@ -55,6 +55,11 @@ public:
     // after a lost connection (PEERS.md §5.3).
     static constexpr auto startRoomsKey = "Peers/startRooms";
     static constexpr auto notificationToastsKey = "Peers/notificationToasts";
+    // A relay for rooms with people on other networks (PEERS.md §5.4): its URL, and the
+    // token it asks of a host.
+    static constexpr auto relayUrlKey = "Peers/relayUrl";
+    static constexpr auto relayTokenKey = "Peers/relayToken";
+    static QString relayUrl();
     static void defineSettings();
 
     struct Hooks {
@@ -171,6 +176,8 @@ public:
         bool onNetwork = true;
         // The Peers panel hosts chat rooms; the Swarm panel render queues.
         usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat;
+        // Through the relay of Settings > Peers: on the loopback, members coming through it.
+        bool throughRelay = false;
     };
     // On every network address (Windows asks whether to let it through, the first
     // time), on the port of Settings > Peers or any free one.

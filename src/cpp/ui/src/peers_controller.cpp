@@ -259,6 +259,22 @@ void PeersController::defineSettings() {
                                     "a link is added from its menu in the Peers panel too.",
                      .type = SettingType::String,
                      .defaultValue = std::string()});
+    settings.define({.key = relayUrlKey,
+                     .category = "Peers",
+                     .group = "Rooms",
+                     .label = "Relay",
+                     .description = "For rooms with people on other networks: a relay's URL (wss://relay.example), "
+                                    "which a studio or you run (python -m usdcc_peers.relay). Host Room can then "
+                                    "host through it. It passes on what is said without being able to read it.",
+                     .type = SettingType::String,
+                     .defaultValue = std::string()});
+    settings.define({.key = relayTokenKey,
+                     .category = "Peers",
+                     .group = "Rooms",
+                     .label = "Relay token",
+                     .description = "What the relay asks of a host, if it asks anything.",
+                     .type = SettingType::String,
+                     .defaultValue = std::string()});
     settings.define({.key = notificationToastsKey,
                      .category = "Peers",
                      .group = "Notifications",
@@ -433,7 +449,35 @@ Room* PeersController::host(const HostRequest& request, QString* error) {
     options.password = request.password;
     options.askBeforeLinkJoin = core::Settings::instance().get<bool>(askBeforeLinkJoinKey, false);
     options.trustedFingerprints = storedList(kTrustedKey);
-    return m_peers->host(options, error);
+    if (request.throughRelay) {
+        const QUrl relay(relayUrl());
+        if (!relay.isValid() || (relay.scheme() != u"wss" && relay.scheme() != u"ws")) {
+            if (error) {
+                *error = tr("Settings > Peers > Relay isn't a ws:// or wss:// URL");
+            }
+            return nullptr;
+        }
+        options.relay = relay;
+        options.relayToken = settingText(relayTokenKey);
+        options.admission = Admission::Invited;  // Nobody finds it: the link is the way in
+    }
+    Room* room = m_peers->host(options, error);
+    if (room && room->isRelayed() && m_window) {
+        connect(room, &Room::relayFailed, this, [this, room](const QString& reason) {
+            if (m_window) {
+                core::ToastRequest toast;
+                toast.kind = core::ToastKind::Warning;
+                toast.title = tr("%1: the relay").arg(room->name()).toStdString();
+                toast.body = tr("%1. Trying again; members reconnect once it is back.").arg(reason).toStdString();
+                m_window->toasts()->show(toast);
+            }
+        });
+    }
+    return room;
+}
+
+QString PeersController::relayUrl() {
+    return settingText(relayUrlKey).trimmed();
 }
 
 Room* PeersController::join(const FoundRoom& room, const QString& password) {

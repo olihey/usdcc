@@ -19,6 +19,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src", "u
 
 from usdcc_peers.frame import JoinLink, make_link, parse_link
 from usdcc_peers.hub import Hub, HubConfig, RoomConfig
+from usdcc_peers.relay import Relay
+from usdcc_peers.relay_bridge import RelayBridge
+
+CERTS = os.path.join(os.path.dirname(__file__), "..", "..", "test_data", "peers")
 
 import usdcc_peers
 from usdcc_peers import Host, Identity, JoinError, Member, NotificationError, Senders, notification
@@ -212,6 +216,114 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
                          [entry["link"].split("#")[1] for entry in after])
         with open(os.path.join(self.folder.name, "links.json"), encoding="utf-8") as file:
             self.assertEqual(json.load(file), after)
+
+
+class RelayTests(unittest.IsolatedAsyncioTestCase):
+    """A host and its members on a relay (PEERS.md §5.4): the relay forwards what it can't read."""
+
+    async def asyncSetUp(self):
+        self.relay = Relay(token="relay-token")
+        await self.relay.start("127.0.0.1", 0)
+        self.host = Host(name="Far Away")
+        await self.host.start("127.0.0.1", 0)
+        self.bridge = RelayBridge(self.host, f"ws://127.0.0.1:{self.relay.port}", token="relay-token")
+        await self.bridge.start()
+        self.members = []
+
+    async def asyncTearDown(self):
+        for member in self.members:
+            await member.close()
+        await self.bridge.close()
+        await self.host.close()
+        await self.relay.close()
+
+    async def test_chat_through_the_relay(self):
+        link = self.bridge.link()
+        self.assertTrue(link.startswith(f"usdcc://join?relay=ws://127.0.0.1:{self.relay.port}/r/"), link)
+        anna = await Member.join(link, name="Anna")
+        ben = await Member.join(link, name="Ben")
+        cara = await Member.join(link, name="Cara")
+        self.members += [anna, ben, cara]
+        said = []
+        ben.channel("chat").on_message(lambda m: said.append(m.body["text"]))
+        cara.channel("chat").on_message(lambda m: said.append(m.body["text"]))
+        anna.channel("chat").send("say", {"text": "secret plans"})
+        self.assertTrue(await until(lambda: len(said) == 2))
+        self.assertEqual(said, ["secret plans", "secret plans"])
+        self.assertEqual(len(self.host.peers()), 4)
+        # Sealed once for the room, sent to the relay once for Anna, Ben and Cara.
+        self.assertGreater(self.bridge.copies_saved, 0)
+        room = self.relay.rooms[self.bridge.room_id]
+        self.assertGreater(room.bytes_in, 0)
+
+    async def test_wrong_token_and_no_room(self):
+        other = RelayBridge(self.host, f"ws://127.0.0.1:{self.relay.port}", token="wrong")
+        with self.assertRaises(asyncio.TimeoutError):
+            await other.start(timeout=1.5)
+        await other.close()
+        with self.assertRaisesRegex(JoinError, "Couldn't reach"):
+            await Member.join(f"usdcc://join?relay=ws://127.0.0.1:{self.relay.port}/r/nosuchroom#k=a&s=b",
+                              name="Lost", timeout=5)
+
+    async def test_back_after_the_relay_restarts(self):
+        anna = await Member.join(self.bridge.link(), name="Anna", reconnect_for=30)
+        ben = await Member.join(self.bridge.link(), name="Ben")
+        self.members += [anna, ben]
+        resumed, said = [], []
+        anna.on("resumed", resumed.append)
+        anna.channel("chat").on_message(lambda m: said.append(m.body["text"]))
+        port, room_id = self.relay.port, self.bridge.room_id
+        await self.relay.close()
+        self.relay = Relay(token="relay-token")
+        await self.relay.start("127.0.0.1", port)
+        # The bridge gets the same room id back, so the link still works.
+        self.assertTrue(await until(lambda: room_id in self.relay.rooms, 15))
+        self.assertTrue(await until(lambda: resumed, 20))
+        ben.channel("chat").send("say", {"text": "you're back"})
+        self.assertTrue(await until(lambda: said == ["you're back"], 10))
+
+    async def test_hub_through_the_relay(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = HubConfig(rooms=[RoomConfig(name="Studio")], address="127.0.0.1", data=folder,
+                               relay=f"ws://127.0.0.1:{self.relay.port}", relay_token="relay-token")
+            hub = Hub(config)
+            await hub.start()
+            try:
+                links = hub.links()
+                self.assertIn("relayLink", links[0])
+                anna = await Member.join(links[0]["relayLink"], name="Anna")
+                self.members.append(anna)
+                self.assertEqual(anna.name, "Studio")
+                room_id = hub.bridges["Studio"].room_id
+            finally:
+                await hub.close()
+            # Started again, it asks for the same id on the relay, and gets it: the link holds.
+            hub = Hub(config)
+            await hub.start()
+            try:
+                self.assertEqual(hub.bridges["Studio"].room_id, room_id)
+            finally:
+                await hub.close()
+
+    async def test_wss(self):
+        import ssl
+
+        await self.relay.close()
+        server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server.load_cert_chain(os.path.join(CERTS, "relay.pem"), os.path.join(CERTS, "relay.key"))
+        client = ssl.create_default_context(cafile=os.path.join(CERTS, "relay_ca.pem"))
+        self.relay = Relay()
+        await self.relay.start("127.0.0.1", 0, server)
+        bridge = RelayBridge(self.host, f"wss://127.0.0.1:{self.relay.port}", ssl=client)
+        await bridge.start()
+        try:
+            anna = await Member.join(bridge.link(), name="Anna", ssl=client)
+            self.members.append(anna)
+            self.assertEqual([p.name for p in anna.peers()], ["Far Away", "Anna"])
+            with self.assertRaises(JoinError):  # Without the CA, the certificate isn't trusted
+                await Member.join(bridge.link(), name="Untrusting", timeout=5)
+        finally:
+            await bridge.close()
 
 
 if __name__ == "__main__":

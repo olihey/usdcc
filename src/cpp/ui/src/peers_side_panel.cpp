@@ -8,6 +8,7 @@
 #include "usdcc/ui/settings.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
@@ -1077,9 +1078,23 @@ Room* hostRoomDialog(PeersController* controller, QWidget* parent, RoomType type
                             &dialog);
     note->setWordWrap(true);
     note->setObjectName(QStringLiteral("propertyNote"));
+    // Through the relay of Settings > Peers (PEERS.md §5.4): for people on other networks.
+    auto* relay = new QCheckBox(tr("Through the relay, for people on other networks"), &dialog);
+    const QString relayUrl = PeersController::relayUrl();
+    relay->setVisible(!relayUrl.isEmpty());
+    relay->setToolTip(tr("Members connect to %1, which passes on what they say without being able to read it. "
+                         "Only those with the invite link can join.")
+                          .arg(relayUrl));
+    QObject::connect(relay, &QCheckBox::toggled, &dialog, [who](bool on) {
+        if (on) {
+            who->setCurrentIndex(0);  // Nobody finds a relayed room: the link is the way in
+        }
+        who->setEnabled(!on);
+    });
     form->addRow(tr("Name"), name);
     form->addRow(tr("Who can join"), who);
     form->addRow(tr("Password"), password);
+    form->addRow(relay);
     form->addRow(note);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Host"));
@@ -1092,12 +1107,19 @@ Room* hostRoomDialog(PeersController* controller, QWidget* parent, RoomType type
     QString error;
     PeersController::HostRequest request{name->text(), Admission(who->currentData().toInt()), password->text()};
     request.type = type;
+    request.throughRelay = relay->isChecked();
     Room* room = controller->host(request, &error);
     if (!room) {
         QMessageBox::warning(parent, dialog.windowTitle(), tr("Couldn't host the room: %1").arg(error));
         return nullptr;
     }
-    QApplication::clipboard()->setText(room->link());
+    if (room->isRelayed()) {
+        // The link names the room's id on the relay, which comes once the relay answers.
+        QObject::connect(room, &Room::relayReady, room, [room] { QApplication::clipboard()->setText(room->link()); },
+                         Qt::SingleShotConnection);
+    } else {
+        QApplication::clipboard()->setText(room->link());
+    }
     return room;
 }
 

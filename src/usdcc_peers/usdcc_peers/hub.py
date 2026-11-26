@@ -61,6 +61,8 @@ class HubConfig:
     token: str = ""
     data: str = ""
     max_members: int = 2000
+    relay: str = ""  # Reached through this relay too (PEERS.md §5.4): its links name it
+    relay_token: str = ""
 
 
 class Hub:
@@ -69,6 +71,7 @@ class Hub:
         os.makedirs(config.data, exist_ok=True)
         self.identity = crypto.Identity.load_or_create(os.path.join(config.data, "hub.key"))
         self.rooms: list[Host] = []
+        self.bridges: dict[str, object] = {}  # Room name -> its RelayBridge
         self._http = None
         self._saved = _read_json(os.path.join(config.data, "rooms.json"))
 
@@ -84,6 +87,14 @@ class Hub:
             await room.start(self.config.address, room_config.port)
             self._saved[room_config.name] = {"secret": room.secret, "instance": room.instance}
             self.rooms.append(room)
+            if self.config.relay:
+                from .relay_bridge import RelayBridge
+
+                bridge = RelayBridge(room, self.config.relay, self.config.relay_token)
+                bridge.room_id = saved.get("relayRoom", "")  # The same id as before, if the relay has it free
+                await bridge.start(30)
+                self._saved[room_config.name]["relayRoom"] = bridge.room_id
+                self.bridges[room.name] = bridge
         _write_private(os.path.join(self.config.data, "rooms.json"), self._saved)
         _write_private(os.path.join(self.config.data, "links.json"), self.links())
         if self.config.http_port is not None and self.config.token:
@@ -99,7 +110,13 @@ class Hub:
 
     def links(self) -> list[dict]:
         address = self.config.link_address or _this_machine(self.config.address)
-        return [{"room": room.name, "port": room.port, "link": room.link(address)} for room in self.rooms]
+        links = []
+        for room in self.rooms:
+            entry = {"room": room.name, "port": room.port, "link": room.link(address)}
+            if room.name in self.bridges:
+                entry["relayLink"] = self.bridges[room.name].link()
+            links.append(entry)
+        return links
 
     def room(self, name: str | None) -> Host | None:
         if not name:
@@ -115,6 +132,10 @@ class Hub:
             await self._http.wait_closed()
         for room in self.rooms:
             await room.close("The hub stopped")
+        if self.bridges:
+            await asyncio.sleep(0.2)  # The rooms' "closed" goes out through the relay first
+        for bridge in self.bridges.values():
+            await bridge.close()
 
     # --- HTTP ----------------------------------------------------------------------------
 
@@ -253,7 +274,11 @@ def _config(arguments) -> HubConfig:
     if not rooms:
         rooms.append(RoomConfig(name=arguments.name, port=arguments.port, admission=arguments.admission,
                                 notify_senders=list(arguments.notify_sender)))
-    return HubConfig(rooms=rooms, address=arguments.address or file.get("address", "0.0.0.0"),
+    relay_token = ""
+    if arguments.relay_token_file:
+        with open(arguments.relay_token_file, encoding="utf-8") as handle:
+            relay_token = handle.read().strip()
+    return HubConfig(rooms=rooms, relay=arguments.relay or file.get("relay", ""), relay_token=relay_token, address=arguments.address or file.get("address", "0.0.0.0"),
                      link_address=arguments.link_address or file.get("linkAddress", ""),
                      http_port=arguments.http if arguments.http is not None else file.get("http"),
                      http_address=file.get("httpAddress", arguments.address or "0.0.0.0"), token=token, data=data,
@@ -275,6 +300,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token-file", help="a file holding the HTTP side's token")
     parser.add_argument("--data", help="where the hub keeps its key and rooms (default: ~/.local/share/usdcc_peers/hub)")
     parser.add_argument("--max-members", type=int, default=2000, help="members per room (default: 2000)")
+    parser.add_argument("--relay", help="also reachable through this relay (wss://relay.example): each room's "
+                                         "links.json entry gets a relayLink")
+    parser.add_argument("--relay-token-file", help="a file holding the token the relay asks of a host")
     parser.add_argument("--print-links", action="store_true",
                         help="print the rooms' links and ports as JSON on standard output (for tests)")
     parser.add_argument("--stop-on-eof", action="store_true",

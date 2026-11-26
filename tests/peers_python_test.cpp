@@ -16,6 +16,8 @@
 #include <QNetworkReply>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QSslCertificate>
+#include <QSslConfiguration>
 #include <QTemporaryDir>
 
 using namespace usdcc::peers;
@@ -265,4 +267,197 @@ room.close()
               saw.value("peers").toArray() == QJsonArray({"Hosting Hilda", "Render Farm"}),
           "Python saw %s", QJsonDocument(saw).toJson(QJsonDocument::Compact).constData());
     CHECK(waitUntil([&] { return host->peers().size() == 1; }), "Python didn't leave");
+}
+
+namespace {
+
+// The relay (PEERS.md §5.4), started for one test: python -m usdcc_peers.relay.
+struct PythonRelay {
+    QTemporaryDir folder;
+    QProcess process;
+    int port = 0;
+    QString token = QStringLiteral("relay-test-token");
+    QByteArray log;
+
+    bool start(int atPort = 0, bool tls = false) {
+        QFile tokenFile(folder.filePath(QStringLiteral("relay.token")));
+        if (!tokenFile.open(QIODevice::WriteOnly)) {
+            return false;
+        }
+        tokenFile.write(token.toUtf8());
+        tokenFile.close();
+        QStringList arguments{QStringLiteral("-m"), QStringLiteral("usdcc_peers.relay"), QStringLiteral("--address"),
+                              QStringLiteral("127.0.0.1"), QStringLiteral("--port"), QString::number(atPort),
+                              QStringLiteral("--token-file"), tokenFile.fileName(), QStringLiteral("--print-port"),
+                              QStringLiteral("--stop-on-eof")};
+        if (tls) {
+            arguments << QStringLiteral("--certfile") << QStringLiteral(USDCC_SOURCE_DIR "/test_data/peers/relay.pem")
+                      << QStringLiteral("--keyfile") << QStringLiteral(USDCC_SOURCE_DIR "/test_data/peers/relay.key");
+        }
+        process.setProcessEnvironment(pythonEnvironment());
+        QObject::connect(&process, &QProcess::readyReadStandardError, &process,
+                         [this] { log += process.readAllStandardError(); });
+        process.start(QStringLiteral(USDCC_PEERS_PYTHON), arguments);
+        if (!waitUntil([this] { return process.canReadLine() || process.state() == QProcess::NotRunning; }, 20000) ||
+            !process.canReadLine()) {
+            std::printf("    the relay didn't start: %s\n", log.constData());
+            return false;
+        }
+        port = QJsonDocument::fromJson(process.readLine()).object().value("port").toInt();
+        return port > 0;
+    }
+    void stop() {
+        process.closeWriteChannel();
+        waitUntil([this] { return process.state() == QProcess::NotRunning; }, 10000);
+    }
+    ~PythonRelay() {
+        if (process.state() != QProcess::NotRunning) {
+            stop();
+        }
+        if (process.state() != QProcess::NotRunning) {
+            process.kill();
+            process.waitForFinished(2000);
+        }
+    }
+};
+
+std::unique_ptr<Room> hostThroughRelay(const QString& relay, const QString& token) {
+    HostOptions options;
+    options.name = QStringLiteral("Far Away");
+    options.profile.name = QStringLiteral("Hosting Hilda");
+    options.relay = QUrl(relay);
+    options.relayToken = token;
+    auto host = hostRoom(options);
+    if (host) {
+        waitUntil([&] { return host->isOnRelay(); }, 15000);
+    }
+    return host;
+}
+
+}  // namespace
+
+USDCC_TEST(peers_relay_with_cpp_and_python) {
+    PythonRelay relay;
+    if (!relay.start()) {
+        CHECK(false, "the Python relay didn't start");
+        return;
+    }
+    const QString base = QStringLiteral("ws://127.0.0.1:%1").arg(relay.port);
+    // A wrong token: the relay turns the host down, and the room says so.
+    {
+        HostOptions options;
+        options.name = QStringLiteral("Stranger");
+        options.relay = QUrl(base);
+        options.relayToken = QStringLiteral("wrong");
+        auto stranger = hostRoom(options);
+        QString failure;
+        QObject::connect(stranger.get(), &Room::relayFailed, stranger.get(), [&](const QString& r) { failure = r; });
+        CHECK(waitUntil([&] { return !failure.isEmpty(); }, 10000) && !stranger->isOnRelay() && stranger->link().isEmpty(),
+              "a host with the wrong token got a room on the relay");
+    }
+
+    auto host = hostThroughRelay(base, relay.token);
+    CHECK(host && host->isOnRelay(), "the host didn't get a room on the relay: %s", relay.log.constData());
+    if (!host || !host->isOnRelay()) {
+        return;
+    }
+    const QString link = host->link();
+    const std::optional<JoinLink> parsed = parseJoinLink(link);
+    CHECK(parsed && parsed->address.isEmpty() && parsed->relay.startsWith(base + "/r/") &&
+              parsed->fingerprint == host->me().fingerprint && parsed->secret == host->secret(),
+          "the relay link is %s", qPrintable(link));
+    CHECK(makeJoinLink(*parsed) == link, "the relay link doesn't come back: %s", qPrintable(makeJoinLink(*parsed)));
+    Inbox hostChat;
+    hostChat.listen(host->channel("chat"));
+
+    // Two C++ members, through the relay.
+    JoinOptions options;
+    options.profile.name = QStringLiteral("Anna");
+    options.secret = parsed->secret;
+    options.expectedFingerprint = parsed->fingerprint;
+    std::unique_ptr<Room> anna(Room::join(parsed->target(), options));
+    options.profile.name = QStringLiteral("Ben");
+    std::unique_ptr<Room> ben(Room::join(parsed->target(), options));
+    CHECK(waitUntil([&] { return anna->state() == Room::State::Open && ben->state() == Room::State::Open; }, 10000),
+          "the members didn't join through the relay");
+    Inbox benChat;
+    benChat.listen(ben->channel("chat"));
+    anna->channel("chat")->send("say", {{"text", "pineapple through the relay"}});
+    CHECK(waitUntil([&] { return benChat.messages.size() == 1 && hostChat.messages.size() == 1; }),
+          "Ben has %lld, the host %lld", qlonglong(benChat.messages.size()), qlonglong(hostChat.messages.size()));
+
+    // A Python member, through the same relay.
+    const QString script = QStringLiteral(R"(
+import json, sys, usdcc_peers
+room = usdcc_peers.join(sys.argv[1], name="Farm", key_file=sys.argv[2])
+room.channel("chat").send("say", {"text": "hello via relay"})
+print(json.dumps(sorted(p.name for p in room.peers())), flush=True)
+room.close()
+)");
+    QTemporaryDir folder;
+    QProcess python;
+    python.setProcessEnvironment(pythonEnvironment());
+    python.start(QStringLiteral(USDCC_PEERS_PYTHON), {"-c", script, link, folder.filePath("farm.key")});
+    CHECK(waitUntil([&] { return python.state() == QProcess::NotRunning; }, 20000) && python.exitCode() == 0 &&
+              QJsonDocument::fromJson(python.readAllStandardOutput().trimmed()).array() ==
+                  QJsonArray({"Anna", "Ben", "Farm", "Hosting Hilda"}),
+          "Python through the relay: %s", python.readAllStandardError().constData());
+    CHECK(waitUntil([&] { return benChat.messages.size() == 2; }), "Ben didn't hear Python");
+
+    // The relay passes on what it can't read: none of what was said is in its log, which
+    // has connections and byte counts.
+    CHECK(!relay.log.contains("pineapple") && !relay.log.contains("hello via relay") && relay.log.contains("joined room"),
+          "the relay's log: %s", relay.log.constData());
+
+    // The relay goes and comes back on the same port: the room gets the same id there, and
+    // the members come back through it, caught up.
+    bool resumed = false;
+    QObject::connect(ben.get(), &Room::resumed, ben.get(), [&](bool) { resumed = true; });
+    const QString roomUrl = parsed->relay;
+    const int port = relay.port;
+    relay.stop();
+    CHECK(waitUntil([&] { return ben->state() == Room::State::Reconnecting && !host->isOnRelay(); }, 10000),
+          "nobody noticed the relay going");
+    PythonRelay again;
+    CHECK(again.start(port), "the relay didn't start again on port %d", port);
+    CHECK(waitUntil([&] { return host->isOnRelay(); }, 20000) && parseJoinLink(host->link())->relay == roomUrl,
+          "the room isn't on the relay again as %s", qPrintable(roomUrl));
+    CHECK(waitUntil([&] { return resumed && anna->state() == Room::State::Open; }, 30000), "the members didn't come back");
+    anna->channel("chat")->send("say", {{"text", "back"}});
+    CHECK(waitUntil([&] { return benChat.messages.size() == 3; }), "Ben didn't hear Anna after the relay came back");
+}
+
+USDCC_TEST(peers_relay_wss) {
+    // The test CA, trusted by this process only (test_data/peers/README.md).
+    QSslConfiguration tls = QSslConfiguration::defaultConfiguration();
+    const QList<QSslCertificate> ca =
+        QSslCertificate::fromPath(QStringLiteral(USDCC_SOURCE_DIR "/test_data/peers/relay_ca.pem"));
+    CHECK(ca.size() == 1, "no test CA");
+    const QSslConfiguration before = tls;
+    tls.addCaCertificates(ca);
+    QSslConfiguration::setDefaultConfiguration(tls);
+    struct Restore {
+        QSslConfiguration configuration;
+        ~Restore() { QSslConfiguration::setDefaultConfiguration(configuration); }
+    } restore{before};
+
+    PythonRelay relay;
+    if (!relay.start(0, true)) {
+        CHECK(false, "the relay didn't start with TLS");
+        return;
+    }
+    auto host = hostThroughRelay(QStringLiteral("wss://127.0.0.1:%1").arg(relay.port), relay.token);
+    CHECK(host && host->isOnRelay(), "the host didn't get a room on the wss:// relay: %s", relay.log.constData());
+    if (!host || !host->isOnRelay()) {
+        return;
+    }
+    const std::optional<JoinLink> parsed = parseJoinLink(host->link());
+    CHECK(parsed && parsed->relay.startsWith("wss://"), "the link: %s", qPrintable(host->link()));
+    JoinOptions options;
+    options.profile.name = QStringLiteral("Anna");
+    options.secret = parsed->secret;
+    options.expectedFingerprint = parsed->fingerprint;
+    std::unique_ptr<Room> anna(Room::join(parsed->target(), options));
+    CHECK(waitUntil([&] { return anna->state() == Room::State::Open; }, 10000) && anna->peers().size() == 2,
+          "Anna didn't join through wss://");
 }

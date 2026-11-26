@@ -38,10 +38,10 @@ def worker(link: str, first: int, count: int, total: int, connection) -> None:
     async def run() -> None:
         identity = Identity.generate()
         members = []
-        for start in range(first, first + count, 25):
+        for start in range(first, first + count, 10):
             members += await asyncio.gather(*(Member.join(link, name=f"Load {i}", identity=identity,
                                                           instance=f"load{i}", timeout=120)
-                                              for i in range(start, min(start + 25, first + count))))
+                                              for i in range(start, min(start + 10, first + count))))
         arrivals: dict[int, list[float]] = {}
         for member in members:
             member.channel("load").on_message(

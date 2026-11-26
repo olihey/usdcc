@@ -30,6 +30,8 @@ add_library(usdcc_peers SHARED
     src/mdns_discovery.cpp
     src/page_server.cpp
     src/peers.cpp
+    src/relay_bridge.cpp
+    src/relay_bridge.h
     src/page_server.h
     src/room.cpp
     src/room_private.h
