@@ -335,7 +335,9 @@ and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new nam
    older usdcc tag's pins name them, and `release.yml` can be run again for that tag.
 
 A pack marked `local` (§5) is built only when its SDK is there (a secret URL, or the
-self-hosted runner) and is kept as a workflow artifact, never published.
+self-hosted runner) and is kept as a workflow artifact, never published. For Arnold the plan is a
+private repository that holds the SDK and runs the build with these tools, so the public one
+never touches it: [ARNOLD_CI.md](ARNOLD_CI.md).
 
 ### `build.yml`, `release.yml`, `tools/deploy.py`
 
