@@ -18,9 +18,10 @@ at each update.
   download before an app update, and `release.yml` packing every plugin at every release (§4,
   §7, phase 4). `built_for` would name an SDK version, or a range of them, in place of the usdcc
   version. They are left in as written, as the record of why it is parked.
-- **The renderer packs are no longer part of this.** MoonRay, Cycles and the like get a download
-  of their own in the app ([USD_PLUGINS.md](USD_PLUGINS.md) §9), without a registry. Where this
-  plan names them (§2, §7, phase 5), that is what was considered.
+- **The optional packs are no longer part of this.** A pack, of plugins of any kind, gets a
+  download of its own in the app ([USD_PLUGINS.md](USD_PLUGINS.md) §9), without a registry. The
+  first are the renderers (MoonRay, Cycles), which is why this plan calls them the renderer
+  packs; where it names them (§2, §7, phase 5), that is what was considered.
 - **Still decided, for when it comes back:** the official registry holds only what usdcc builds
   (§1), and where it is hosted is left for later (§11 item 1).
 
@@ -107,8 +108,9 @@ So taking the shipped plugins out saves about 4 MB of 225. What the registry is 
 
 - **The renderer packs,** which are larger than usdcc and today are unpacked over it by hand. On
   macOS that can't be done to a signed bundle at all, so there is a second disk image, and that
-  copy can't update itself (UPDATES.md §9). *Since 2026-11-26 these get their own download in
-  the app instead (Status), which leaves the three points below as the registry's reasons.*
+  copy can't update itself (UPDATES.md §9). *Since 2026-11-26 these, and optional packs of any
+  other kind, get their own download in the app instead (Status), which leaves the three
+  points below as the registry's reasons.*
 - **Licences.** A GPL plugin as its own download, chosen by the user, rather than a second
   distribution of the whole app. Whether usdcc may publish one is still USD_PLUGINS.md §8
   item 2; the registry makes it practical, not allowed.
@@ -431,7 +433,7 @@ from registries that are trusted: there is nobody to ask.
 | V-Ray Render | Registry (phase 2) | Python; only useful with a V-Ray licence |
 | RTX Render | Registry (phase 4) | Off by default today; needs NVIDIA's SDK |
 | Blender mesh tools | Registry (phase 4), after the licence question | GPL: its own download instead of a second distribution |
-| MoonRay, Cycles, Gatling | **Not the registry:** their own download in the app (Status) | The size; and on macOS, a signed bundle nothing can be unpacked into |
+| Optional packs: MoonRay, Cycles, Gatling, and any kind that follows | **Not the registry:** their own download in the app (Status) | The size; and on macOS, a signed bundle nothing can be unpacked into |
 | Arnold, FBX | A studio's registry | `local` packs, never published by usdcc |
 
 **A USD pack as a plugin** is a folder with a manifest and the pack's files under `usd/`, which
