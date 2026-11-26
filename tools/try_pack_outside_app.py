@@ -8,9 +8,9 @@ own, laid out as an install, with `lib` there a link to the app's own `lib`?
   python tools/try_pack_outside_app.py --deploy <a deploy that has the pack> [--pack moonray]
 
 `--deploy` is a deploy with the pack unpacked into it: a Linux deploy's folder, or on macOS
-usdcc.app or the folder it is in. It is only read. The trial copies it into `--work` (a new
-folder; in the temporary folder if not given), by hard links on Linux and as clones on
-macOS, takes the pack's folders out of the copy into `<work>/data/usd-packs`, and starts
+usdcc.app or the folder it is in. It is only read. The trial copies it (on macOS the bundle
+alone, not what else is in its folder) into `--work` (a new folder; in the temporary folder
+if not given), by hard links on Linux and as clones on macOS, takes the pack's folders out of the copy into `<work>/data/usd-packs`, and starts
 usdcc four times with a script that loads the pack's plugins, records a frame with each of
 its render delegates, and lists where every library of the process came from:
 
@@ -134,7 +134,7 @@ class App:
         given = Path(given).resolve()
         if MACOS:
             bundle = given if given.suffix == ".app" else given / "usdcc.app"
-            self.top = bundle.parent  # what is copied and renamed
+            self.top = bundle.parent  # renamed; only the bundle in it is copied
             self.inside = Path(bundle.name)
             self.exe = bundle / "Contents/MacOS/usdcc"
             self.root = bundle / "Contents/Resources"
@@ -240,7 +240,9 @@ def main(argv=None):
 
     passed = {"control": _run("control", given, work, work / "data", spec, args.platform, args.timeout_seconds)}
 
-    _copy(given.top, work / "app")
+    # The bundle alone: its folder may be /Applications.
+    (work / "app" / given.inside).parent.mkdir(parents=True, exist_ok=True)
+    _copy(given.top / given.inside, work / "app" / given.inside)
     app = given.at(work / "app")
     packs = work / "data" / "usd-packs"
     (packs / "plugin/usd").mkdir(parents=True)
