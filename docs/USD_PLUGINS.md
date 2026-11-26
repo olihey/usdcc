@@ -754,12 +754,20 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the G
 
 ## 9. Later
 
-- **Optional packs downloaded in the app** (decided 2026-11-26; not planned in detail yet). The
-  bigger renderer packs stay separate downloads (§5), but usdcc fetches the one for its own
+- **Optional packs downloaded in the app** (decided 2026-11-26; not planned in detail yet). An
+  optional pack stays a separate download (§5), but usdcc fetches the one for its own
   version itself, in place of an archive the user unpacks over it, and of the second disk image
   on macOS. Not through a plugin registry: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) is parked.
-  - **An app update wipes the pack** (decided 2026-11-26). It is built against one OpenUSD and
-    wouldn't load into the next anyway. usdcc then offers the download again; there is no
+  - **A pack is plugins of any kind,** not only a renderer. The first ones are render
+    delegates (MoonRay; Cycles and Gatling after it) because those are the big ones, but the
+    same download serves whatever is too large or too special to ship with usdcc: file
+    formats, asset resolvers, schemas, and usdcc's own plugins, in Python or C++
+    ([PLUGINS.md](PLUGINS.md)). Nothing below depends on what is in the pack, except where
+    it says "render".
+  - **A pack with a C++ plugin of usdcc's** loads into one usdcc build only (PLUGINS.md §3.2),
+    as a pack of USD plugins loads into one OpenUSD. The next point covers both.
+  - **An app update wipes the pack** (decided 2026-11-26). It is built against one OpenUSD, or
+    one usdcc, and wouldn't load into the next anyway. usdcc then offers the download again; there is no
     "needs update" state and no second build kept ready.
   - **So the pack is unpacked over usdcc's own folder,** where the user unpacks it today: a
     Windows install (Velopack replaces the folder at an update, which is the wipe), a 7z or a
@@ -784,7 +792,10 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the G
     pack built as it is today. It needs the pack to keep all its own files under
     `plugin/usd/<pack>`, as MoonRay's does ([MOONRAY.md](MOONRAY.md) §7.4) and Adobe's doesn't
     (three libraries in `lib`), and usdcc to register that folder before the first stage, as
-    `enableArnold()` does.
+    `enableArnold()` does. In the trials below the pack's folder is a usdcc plugin, with a
+    `usdcc-plugin.json` naming its USD folder, found by the plugin manager; a pack with
+    Python or a C++ plugin would be the same folder with those parts in its manifest. Only a
+    pack of render delegates has been tried.
 
     *Tried on Linux (2026-11-26; WSL, Ubuntu 24.04), with the deploy and the MoonRay pack of
     2026-11-24, the deploy without PySide6:*
@@ -815,7 +826,8 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the G
       picture, then the Arras one never finishes (killed after 5 minutes). dyld finds a
       library by install name when the process already has it, so more loads than on Linux,
       and what is missing shows only later. In the app that would be a render that never
-      comes, not an error, so the link has to be checked before the pack is offered.
+      comes, not an error (for another kind of pack, whatever it does that never finishes),
+      so the link has to be checked before what the pack adds is offered.
     - *Signing:* taking the pack out of the copied bundle breaks its seal (`codesign --verify`:
       a sealed resource is missing), as expected; the programs and libraries keep their own
       signatures and run. `--resign` wasn't tried. A pack shipped this way leaves the bundle
@@ -825,7 +837,8 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the G
       the link, with it, and with the app moved) with the pin's own check scene, and says
       where each library of the process came from. In WSL and on macOS it gives the results
       above; with today's pack all five plugins should load.
-    - *Not tried:* the viewport, with a window (the check records frames by script); a real
+    - *Not tried:* a pack that isn't render delegates (file formats, a usdcc plugin in Python
+      or C++); the viewport, with a window (the check records frames by script); a real
       AppImage, read-only and mounted by FUSE; macOS with a pack that has the shader nodes,
       and a notarized bundle beside a data folder Gatekeeper may treat as downloaded. **Two usdcc at once from one AppImage** are mounted in two places and would
       share the one link: the second start repoints it, and when that one quits the first

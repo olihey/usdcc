@@ -2,8 +2,11 @@
 """Tries a USD plugin pack outside the app's folder (docs/USD_PLUGINS.md section 9).
 
 A trial, not part of a build or of CI. It answers one question, on Linux and macOS: does
-an optional pack (MoonRay) still load and render when its files are in a folder of their
-own, laid out as an install, with `lib` there a link to the app's own `lib`?
+an optional pack still load and work when its files are in a folder of their own, laid out
+as an install, with `lib` there a link to the app's own `lib`? A pack may hold plugins of
+any kind; MoonRay's, of render delegates, is the first and the default here. What is tried
+is what the pack's pin has under "check": its plugins load, and each "render" entry records
+a frame. A pack without render delegates gets the first only; "open" entries aren't tried.
 
   python tools/try_pack_outside_app.py --deploy <a deploy that has the pack> [--pack moonray]
 
@@ -12,7 +15,7 @@ usdcc.app or the folder it is in. It is only read. The trial copies it (on macOS
 alone, not what else is in its folder) into `--work` (a new folder; in the temporary folder
 if not given), by hard links on Linux and as clones on macOS, takes the pack's folders out of the copy into `<work>/data/usd-packs`, and starts
 usdcc four times with a script that loads the pack's plugins, records a frame with each of
-its render delegates, and lists where every library of the process came from:
+its render delegates if it has any, and lists where every library of the process came from:
 
   control   the deploy as given, the pack inside it
   nolink    the pack outside, nothing else: expected to fail, or the link isn't needed
