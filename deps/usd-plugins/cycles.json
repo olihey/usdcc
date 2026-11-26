@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/blender/cycles",
+  "commit": "3eb35f85996baa6c1b2e19bf297b22745c85e321",
+  "version": "5.3 (3eb35f8)",
+  "patches": ["patches/cycles-usdcc.patch"],
+  "hook": "cycles.py",
+  "platforms": ["win64", "linux-x64", "macos-arm64"],
+  "license": "Apache-2.0",
+  "set": "optional",
+  "publish": false,
+  "check": {
+    "plugins": ["hdCycles"],
+    "renderers": ["HdCyclesPlugin"],
+    "libraries": ["OpenImageDenoise", "OpenImageDenoise_core", "OpenImageDenoise_device_cpu"],
+    "render": [
+      {"file": "test_data/cycles/check.usda", "renderer": "HdCyclesPlugin", "min_mean": 0.05}
+    ]
+  }
+}

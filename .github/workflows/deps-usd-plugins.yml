@@ -25,6 +25,7 @@ on:
       - tools/ci/usd_plugin_asset.py
       - tools/ci/check_usd_plugin.py
       - test_data/moonray/**
+      - test_data/cycles/**
       - .github/workflows/deps-usd-plugins.yml
   # A new OpenUSD asset gives every pack a new name: build them against it.
   workflow_run:
@@ -279,6 +280,13 @@ jobs:
       - name: Install MoonRay's packages
         if: steps.published.outputs.found != 'true' && matrix.pack == 'moonray'
         run: sudo apt-get install -y -q --no-install-recommends uuid-dev libfreetype-dev bison flex
+
+      # Cycles is C++20, and OpenUSD's headers have a constructor GCC 13 refuses there
+      # (HdRetainedTypedSampledDataSource<bool>(...)); GCC 14 warns. deps/usd-plugins/cycles.py
+      # uses g++-14 when it's there.
+      - name: Install Cycles' compiler
+        if: steps.published.outputs.found != 'true' && matrix.pack == 'cycles'
+        run: sudo apt-get install -y -q --no-install-recommends g++-14
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true'

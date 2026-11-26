@@ -62,7 +62,7 @@ there; no pin yet (§7 phase 6). The rest is a plan.
 |---|---|---|---|
 | `adobe-fileformats` | `adobe/USD-Fileformat-plugins` 2026.07, Apache-2.0 | Fetches its own small dependencies (TinyGLTF, fmt, Happly, spz, ...). FBX needs Autodesk's FBX SDK, SBSAR needs Adobe's Substance SDK | **Proven:** builds unpatched against the published asset and passes the pack check, on Windows (§7 phase 1) and on Linux (phase 8), though its README only names USD 23.08–25.11 |
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
-| `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (`make update`, Git LFS, several GB). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | **Builds** on Windows, CPU only, against phase 4's OpenUSD. Rendering in usdcc isn't proven (§7 phase 5) |
+| `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (Git LFS, several GB; the pack takes six folders of them). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | **Proven:** `deps/usd-plugins/cycles.json` (commit `3eb35f8`, `cycles-usdcc.patch`) builds on CI for Windows x64, Linux x64 and macOS arm64, CPU only, and each pack passes its check, rendering included; about 45 MB zipped. Renders in usdcc's viewport on Windows (§7.1). Not published yet (§5) |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
 | `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
 | `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Proven** on Ubuntu 24.04: `deps/usd-plugins/moonray.json` builds a pack against the published asset that passes its check, rendering included, and renders in usdcc's viewport ([MOONRAY.md](MOONRAY.md) §7.4); CI hasn't built it ([MOONRAY.md](MOONRAY.md) §7.1) |
@@ -93,17 +93,18 @@ Notes:
   so it is the one renderer besides Storm and Embree that every platform gets (MoonRay
   has no Windows build).
   - **Its libraries.** `make update` fetches Blender's precompiled libraries for the
-    platform (Git LFS, several GB; CI caches them). With `PXR_ROOT` set, Cycles takes
-    OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX, TBB and Python from the USD
-    install (`USD_OVERRIDE_*` in `src/cmake/external_libs.cmake`), but **not Embree**, and
-    Blender's libraries have an `embree4.dll` too. That is the first thing the
-    duplicate-DLL rule has to settle: the asset's Embree if it is Embree 4, otherwise
-    Blender's linked statically. What the pack keeps from Blender's libraries is only
-    what hdCycles links and the asset lacks, Open Image Denoise above all.
-  - **TBB.** Blender's libraries are built with oneTBB, and current Cycles expects it; the
-    asset has TBB 2020 (§6). Two TBBs can't share a process, so `--onetbb` in the OpenUSD
-    build comes first (§7 phase 4), and OpenVDB with it (`--openvdb`), so Cycles shares
-    the asset's instead of bringing its own.
+    platform (Git LFS, 7 GB on Windows). The pack's hook (`deps/usd-plugins/cycles.py`)
+    checks out only the folders it needs instead (sparse, with their LFS files):
+    Open Image Denoise, pugixml, zstd, epoxy's headers, and on Windows zlib and pthreads,
+    under 100 MB. With `PXR_ROOT` set, Cycles takes OpenImageIO, OpenVDB, OpenColorIO,
+    OpenSubdiv, MaterialX and TBB from the USD install (`USD_OVERRIDE_*` in
+    `src/cmake/external_libs.cmake`); the hook points OpenEXR, Imath and Embree there too,
+    so one copy of each is loaded. The pack ships Open Image Denoise's base library, core
+    and CPU device, nothing else of Blender's; the others are linked in.
+  - **TBB.** Blender's libraries are built with oneTBB 2022.3, the asset has oneTBB
+    2021.12 (§7 phase 4). Open Image Denoise is the one shipped library that uses it: the
+    18 TBB functions its core and CPU device import on Windows are all in the asset's
+    `tbb12.dll`.
   - **CPU first.** The CPU renderer needs no SDK, so the pack check renders a frame on a
     hosted runner. The GPU devices each need a vendor SDK at build time and come after,
     one at a time (§7 phase 5): Metal on macOS needs none; CUDA and OptiX need NVIDIA's
@@ -111,8 +112,8 @@ Notes:
     compiling kernels for many GPU generations is slow against the 6-hour job limit, so
     the pin names a few; HIP and oneAPI last.
   - **Material Editor nodes.** Cycles has no Sdr plugin; the Material Editor's Cycles
-    nodes need the generator in MATERIAL_EDITOR.md §3.4, which this pack builds, so
-    `cycles_shaders.usda` ships with it.
+    nodes need the generator in MATERIAL_EDITOR.md §3.4. That is MATERIAL_EDITOR's phase 6,
+    not the pack's: the pack has none yet.
 - **Aurora.** Whether hdAurora's DirectX backend builds against a stock OpenUSD, rather
   than Autodesk's fork, is not known. It decides whether this pack exists at all (§8).
 - **Arnold.** Its Sdr plugin starts the Arnold core at discovery (`AiBegin`), so the pack
@@ -417,10 +418,13 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   - Cycles' own `third_party/`: small permissive libraries (Apache, MIT, zlib, BSD);
     licence texts only.
   - Blender's precompiled libraries: a mix, with GPL ones such as FFmpeg among them.
-    **Only what hdCycles links is shipped**, and Cycles doesn't use FFmpeg. A new step in
-    `tools/ci/check_usd_plugin.py` fails the pack on a library the pin doesn't list, found from what the binaries load
-    (`dumpbin /dependents` on Windows, `ldd` on Linux), so nothing GPL comes in by
-    accident.
+    **Only what hdCycles links is shipped**, and Cycles doesn't use FFmpeg. The pin's
+    check lists the libraries the pack may have outside `plugin/` (`"libraries"`), and
+    `tools/ci/check_usd_plugin.py` fails it on any other, so nothing GPL comes in by
+    accident: today the three of Open Image Denoise. The ones linked in (pugixml, zstd,
+    zlib and pthreads on Windows) and epoxy, whose headers are used, have their licence
+    texts in the pack, downloaded by the hook at the versions Blender's `deps.md` names,
+    since Blender's library folders carry none.
   - Open Image Denoise, OpenVDB, Embree: Apache-2.0; licence texts only.
   - The GPU devices, each read before it ships: compiled CUDA kernels (NVIDIA's CUDA
     EULA, which generally allows redistributing compiled kernels), OptiX (its SDK
@@ -575,8 +579,33 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
       - *Install: 126 MB, with GPU kernel sources and runtime DLLs a pack doesn't need.*
    2. `deps/usd-plugins/cycles.json` (`win64` and `linux-x64`, `optional`,
       `"publish": false`). The pack check renders a small scene on the CPU and fails on a
-      library the pin doesn't list (§5). The pack builds the Material Editor's
-      `cycles_shaders.usda` too.
+      library the pin doesn't list (§5).
+      *Done (2026-11-26), for `win64`, `linux-x64` and `macos-arm64`:*
+      - *The hook, `deps/usd-plugins/cycles.py`, checks out six folders of Blender's
+        libraries for the platform at the commit the Cycles checkout names (sparse, Git LFS
+        for those only), builds hdCycles against the OpenUSD asset (its OpenEXR, Imath and
+        Embree too) with the GPU devices, OSL and Alembic off, and puts `hdCycles` with its
+        resources in `plugin/usd` and Open Image Denoise's base library, core and CPU device
+        in `bin/` (Windows) or `lib/`. Linux binaries get RUNPATHs relative to `$ORIGIN`.*
+      - *What each platform needed: on Windows OpenUSD's `include/boost-1_86` through MSVC's
+        `CL` (Cycles sets `CMAKE_CXX_FLAGS` itself); on Linux Blender's zlib, since Cycles
+        hides the system's headers once it uses Blender's libraries, and **GCC 14**: Cycles
+        is C++20, and GCC 13 refuses a constructor in OpenUSD's `retainedDataSource.h` there
+        (the job installs `g++-14`; its libstdc++ is Ubuntu 24.04's own); on macOS
+        `sse2neon` from Blender's libraries.*
+      - *projects.blender.org refused the Linux runner's fetch (403) on two runs of five and
+        served it on the others; the hook tries four times, a minute apart.*
+      - *The check (`check.usda`: a mesh, a sphere and a cube, which only the patch's scene
+        index draws, two lights, a UsdPreviewSurface) renders on each in 2 to 3 s, mean
+        0.519 on all three. 22 files on Windows and Linux, 20 on macOS; 44 to 46 MB zipped,
+        47 MB of it Open Image Denoise's core. `"libraries"` in the pin's check lists Open
+        Image Denoise's three, and `check_usd_plugin.py` fails on any other library.*
+      - *Windows arm64 isn't in the pin: Cycles' `util/half.h` uses NEON intrinsics in a
+        form MSVC for ARM64 doesn't compile (Blender builds that platform with clang-cl).
+        Linux arm64: Blender has no libraries for it.*
+      - *In usdcc's viewport on Windows, from the pack (not the build): the same as §7.1,
+        each step converged in about 2 s. Linux and macOS in the app aren't checked.
+        Implicit shapes are tessellated coarsely (the scene index's defaults).*
    3. In usdcc's viewport on both platforms, and the Material Editor's Cycles nodes.
    4. The licence list read (§5), then `"publish": true`, CI publishes the pack, and only
       then `"set": "standard"`, so `release.yml` requires it and the smoke test expects it.
@@ -735,7 +764,7 @@ What the patch changes in Cycles:
   before that hint, so the build names `EMBREE_INCLUDE_DIR` and `EMBREE_EMBREE4_LIBRARY` too.
 
 **Not checked:** textures other than a PNG, MaterialX, Cycles' own nodes (the Material Editor has none
-yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS (the pack, next), the GPU.
+yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs pass their checks, §7 phase 5), the GPU.
 
 ## 8. Open questions
 

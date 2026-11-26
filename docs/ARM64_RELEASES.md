@@ -137,7 +137,7 @@ who has the SDK.
 |---|---|---|---|
 | Adobe file formats (glTF, OBJ, PLY, STL, SPZ) | **Ships** | All four | Apache-2.0, under 3 MB, self-contained. arm64 built on the Arm runners since 2026-11-23 |
 | Embree render delegate | **Ships** | All four | In the OpenUSD asset. Apache-2.0. The one CPU path tracer that every package has today |
-| Cycles | **Should ship next, not ready** | x64 first; Windows arm64 plausible; Linux arm64 doubtful | Apache-2.0. Blocked by TBB: x64 assets have TBB 2020 and Cycles wants oneTBB, which only `win-arm64` has (`--onetbb`). Needs the list of Blender libraries it ships read. Blender's prebuilt libraries for Linux arm64 have to be checked for |
+| Cycles | **Should ship next, not ready** | x64 and macOS arm64; not Windows arm64 for now; not Linux arm64 | Apache-2.0. The pack builds for Windows x64, Linux x64 and macOS arm64 ([USD_PLUGINS.md](USD_PLUGINS.md) §7 phase 5). Windows arm64: Cycles' `half.h` doesn't compile with MSVC for ARM64 (Blender uses clang-cl there). Linux arm64: Blender has no prebuilt libraries for it |
 | MoonRay | **Later, Linux only** | Linux x64 | Apache-2.0, but no Windows build. Not proven against our OpenUSD, and its libraries' licences are unread. Upstream supports Linux x64 and macOS arm64, not Linux arm64 |
 | Aurora | **Don't ship** | Windows x64 at most | Apache-2.0, but built on Autodesk's own USD fork and DXR; unproven with ours. Quiet upstream |
 | Gatling | **Not in the standard package; optional after a review** | x64; Linux arm64 possible | GPL-3.0: in-process it makes the whole package GPL. Works and is built in CI, unpublished. The MDL SDK 2026.0.2 has a Linux aarch64 download, none for Windows arm64. Needs a ray tracing GPU |
