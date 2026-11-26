@@ -8,8 +8,10 @@ way it already builds OpenUSD itself, and which of them a release ships. This is
 Python 3.13 with the Adobe pack for Windows; its Linux pack, and usdcc's Linux build and
 deploy with it, are built and checked locally (phase 8). Phase 3, Gatling, is built and checked locally on Windows
 and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
-Phase 7, Arnold, is built locally on Windows and macOS (arm64) and renders in usdcc's viewport when
-Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds.
+Phase 7, Arnold, renders in usdcc's viewport on Windows and macOS (arm64) when Settings >
+Renderers > Arnold names an Arnold folder. It is a `local` pack: `olihey/usdcc`'s CI never builds
+it, but a private repository's does, for Windows x64, macOS arm64 and Linux x64, and keeps the packs
+there, unpublished ([ARNOLD_CI.md](ARNOLD_CI.md)).
 Phase 6, Aurora, was tried locally (2026-11-23): hdAurora **builds against our OpenUSD** with a
 small patch, no Autodesk fork needed, and registers in usdcc, but its renderer fails to start
 there; no pin yet (§7 phase 6). Optional packs are installed in the app, and updated with it
@@ -65,7 +67,7 @@ there; no pin yet (§7 phase 6). Optional packs are installed in the app, and up
 | `gatling` | `pablode/gatling`, **GPL-3.0** | NVIDIA's MDL SDK binaries; many submodules. A Vulkan ray tracing GPU to run | **Proven:** commit `945f47d` with MDL SDK 2026.0.2 builds unpatched against the published asset and renders (§7 phase 3). 110 MB installed, 109 of them `libmdl_sdk.dll`; 58 MB zipped |
 | `cycles` | `blender/cycles`, Apache-2.0 | Blender's precompiled libraries (Git LFS, several GB; the pack takes six folders of them). `-DPXR_ROOT=<usd>`; USD 25.11 or newer. With an external USD it builds without OSL and NanoVDB | **Proven:** `deps/usd-plugins/cycles.json` (commit `3eb35f8`, `cycles-usdcc.patch`) builds on CI for Windows x64, Linux x64 and macOS arm64, CPU only, and each pack passes its check, rendering included; about 45 MB zipped. Renders in usdcc's viewport on Windows (§7.1). Not published yet (§5) |
 | `aurora` | `Autodesk/Aurora` v25.08-beta, Apache-2.0 | Its `installExternals.py` builds its own USD, an Autodesk fork (`autodesk-forks/USD`, tag `v25.08-Aurora-v25.08`); Slang, the DirectX shader compiler. A DXR GPU to run | **Builds** against our OpenUSD with `aurora-openusd-26.08.patch`, its externals script told not to build what OpenUSD has (`aurora-externals-from-usd.patch`). **Doesn't render yet:** creating the renderer fails in usdcc (§7 phase 6) |
-| `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack |
+| `arnold` | `Autodesk/arnold-usd`, Apache-2.0 | The Arnold SDK, which is proprietary and behind an Autodesk Account login. Its docs name USD 20.08–25.11 and the dev branch | **Proven:** tag `Arnold-7.5.4.0` with the Arnold SDK 7.5.4.0 builds against our OpenUSD with one patch, in about a minute, and renders in usdcc's viewport (§7 phase 7). 13 files, 5.6 MB; the Arnold core (`ai.dll`, 174 MB) isn't in the pack. Since 2026-11-26 built with the 7.5.4.2 SDKs in `olihey/usdcc-arnold`'s private CI for Windows x64, macOS arm64 and Linux x64, each passing the pack check; the macOS pack renders in usdcc ([ARNOLD_CI.md](ARNOLD_CI.md)) |
 | `moonray` | `OpenMoonRay/openmoonray` (DreamWorks' MoonRay, an ASWF project since May 2026), Apache-2.0 | Linux x64 and macOS on Apple silicon; **no Windows** ([MOONRAY.md](MOONRAY.md)). ISPC, OpenVDB, Lua, JsonCpp, log4cplus, libunwind, Open Image Denoise, and the libraries OpenUSD has too (Boost, TBB, Embree 4, OpenImageIO, OpenEXR, OpenColorIO, OpenSubdiv, MaterialX). OptiX 7.6 headers and CUDA only for its GPU mode | **Proven** on Ubuntu 24.04: `deps/usd-plugins/moonray.json` builds a pack against the published asset that passes its check, rendering included, and renders in usdcc's viewport ([MOONRAY.md](MOONRAY.md) §7.4); CI hasn't built it ([MOONRAY.md](MOONRAY.md) §7.1) |
 
 Notes:
@@ -346,9 +348,10 @@ and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new nam
    older usdcc tag's pins name them, and `release.yml` can be run again for that tag.
 
 A pack marked `local` (§5) is built only when its SDK is there (a secret URL, or the
-self-hosted runner) and is kept as a workflow artifact, never published. For Arnold the plan is a
-private repository that holds the SDK and runs the build with these tools, so the public one
-never touches it: [ARNOLD_CI.md](ARNOLD_CI.md).
+self-hosted runner) and is kept as a workflow artifact, never published. Arnold's is built in a
+private repository, `olihey/usdcc-arnold`, that holds the trimmed SDKs and runs the build with
+these tools and this repository's pin, so the public one never touches the SDK; its packs are
+release assets there, named as here ([ARNOLD_CI.md](ARNOLD_CI.md)).
 
 ### `build.yml`, `release.yml`, `tools/deploy.py`
 
@@ -416,7 +419,7 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
 - On macOS `--optional-packs DIR` makes `DIR/<pack>/<deploy's name>/usdcc.app`, a copy of the
   deployed bundle with the pack in it, checked and signed as a whole: files unpacked over a signed
   bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
-| `local` | Built on a machine that has the SDK; never published | `arnold`, `usdfbx`, `usdsbsar` |
+| `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never published | `arnold`, `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,
   the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
@@ -435,10 +438,10 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   distributed "as an integrated part of" an application, only embedded in it, only to
   those the application is licensed to, under terms "no less protective" of Autodesk
   than its Terms of Use, and renders from it have the watermark. It refers to Autodesk's
-  general Terms of Use, which haven't been read here (the page refuses automated
-  fetches). usdcc's BSD-3-Clause doesn't meet the "no less protective" condition by
-  itself, so shipping Arnold would need terms of its own for that part. Until that is
-  decided the pack stays `local`.
+  general Terms of Use, read on 2026-11-26 with the rest ([ARNOLD_CI.md](ARNOLD_CI.md) §6).
+  usdcc's BSD-3-Clause doesn't meet the "no less protective" condition by itself, so the core
+  is never shipped; the plugins alone could be, as Gaffer ships its own, once Autodesk confirms
+  it in writing. Until then the pack stays `local`.
 - **Standard packs are Apache-2.0**, but each brings libraries of its own (Cycles: OpenVDB,
   Open Image Denoise; Aurora: Slang, the DirectX shader compiler's `dxil.dll`). Step 5 of
   the build collects their licences, and a pack isn't `standard` until that list is read.
@@ -678,8 +681,10 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
    - *Not done: the pin. Aurora's build isn't plain CMake (its externals script first),
      which needs §4's "small Python hook next to the JSON", not built yet; and there's no
      point publishing a pack that can't start its renderer.*
-7. **Arnold**, as a `local` pack on the self-hosted runner.
-   *Built, and checked locally on Windows; never built by CI (`local`).*
+7. **Arnold**, as a `local` pack.
+   *Built, and checked locally on Windows, then macOS. Not built by this repository's CI
+   (`local`); since 2026-11-26 built and checked for Windows x64, macOS arm64 and Linux x64 by
+   a private repository's ([ARNOLD_CI.md](ARNOLD_CI.md)).*
    - *The SDK. 3ds Max 2027's Arnold (MAXtoA) has the core, 7.5.2, but no headers and no
      `ai.lib`, and its own `hdArnold.dll` is built against 3ds Max's OpenUSD
      (`3dsmax_usd.dll`, oneTBB's `tbb12.dll`), so none of it can be used here. The SDK
@@ -804,7 +809,7 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
-| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. Arnold's `EULA.txt` allows shipping even the core inside an application, on conditions (§5); Autodesk's general Terms of Use and the FBX SDK's licence are still to read |
+| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word before publishing. The FBX SDK's licence is still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |

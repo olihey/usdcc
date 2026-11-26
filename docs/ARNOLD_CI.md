@@ -1,12 +1,23 @@
 # Arnold pack in CI
 
 Building the Arnold pack (hdArnold and its three sibling plugins, `deps/usd-plugins/arnold.json`)
-in CI, without the Arnold SDK ever reaching the public repository. A plan: nothing here is set up
-yet.
+in CI, without the Arnold SDK ever reaching the public repository.
 
-**Status (2026-11-26):** the pack is `local`. It builds by hand on Windows (7.5.4.0) and on macOS
-arm64 (7.5.4.2) and renders in usdcc's viewport on both ([USD_PLUGINS.md](USD_PLUGINS.md) §3,
-Arnold). `deps-usd-plugins.yml` leaves the `local` set out entirely.
+**Status (2026-11-26): set up and working.** The private repository `olihey/usdcc-arnold` holds
+the three trimmed 7.5.4.2 SDKs and a workflow, run by hand, that builds the pack for Windows x64,
+macOS arm64 and Linux x64 with this repository's tools and pin, refuses a pack holding any SDK
+file, checks each over CI's OpenUSD and keeps them in a private release named as that OpenUSD
+asset (`deps/usd-70c45e83b-76ce049f`). The macOS pack renders in usdcc's viewport. The pack stays
+`local`: `deps-usd-plugins.yml` leaves it out and nothing of it is published. What's left:
+phase 4, asking Autodesk (§7).
+
+| Phase | State |
+|---|---|
+| 1. The private repository and its SDKs | Done |
+| 2. The workflow, all three platforms | Done |
+| 3. A CI-built pack in usdcc (macOS) | Done; Windows and Linux not tried in usdcc |
+| 4. Ask Autodesk: CI download, and publishing the plugins | Open, for the maintainer |
+| 5. Publish as an optional pack | Only after 4 |
 
 ## 1. Decisions
 
