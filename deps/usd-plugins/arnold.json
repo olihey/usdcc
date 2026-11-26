@@ -33,6 +33,7 @@
                 "linux-x64": ["{arnold}/bin/libai.so"]},
     "plugin_folders": ["plugin/arnold"],
     "plugins": ["hdArnold", "nodeRegistryArnold", "sceneIndexArnold", "usdImagingArnold"],
-    "renderers": ["HdArnoldRendererPlugin"]
+    "renderers": ["HdArnoldRendererPlugin"],
+    "render": [{"file": "test_data/arnold/check.usda", "renderer": "HdArnoldRendererPlugin", "min_mean": 0.05}]
   }
 }
