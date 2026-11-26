@@ -179,9 +179,8 @@ Not legal advice: what is above is what the texts say, read by us.
    in all six steps of `tests/renderer_viewport_check.py` (`RV_RENDERER=HdArnoldRendererPlugin`;
    first frame 2.8 s), the same pictures as the local build. Building usdcc against the CI asset
    took setting Python by hand then: its `pxrConfig.cmake` names the runner's Python. Since fixed
-   in `FindUSD.cmake`, which finds this machine's ([MACOS.md](MACOS.md) §3); a build that was once
-   configured without Python still needs its scripting library's `*_autogen` folders deleted
-   (stale `moc` output, undefined `staticMetaObject`).
+   in `FindUSD.cmake`, which finds this machine's ([MACOS.md](MACOS.md) §3); and so is the stale `moc` output after
+   Python was turned on in a build configured without it ([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §10).
 4. **Ask Autodesk** (you): the CI download (§5 item 2), and in the same message whether usdcc may
    publish hdArnold binaries, Apache-2.0, built against the SDK, without the core (§6.3).
 5. **Only if Autodesk agrees in writing:** the pin's `set` becomes `optional` with `"publish":

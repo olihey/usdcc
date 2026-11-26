@@ -413,3 +413,6 @@ set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT usdcc)
 # Last, once every target exists: keep each build's PDBs and binaries.
 include(UsdccSymbols)
 usdcc_archive_symbols()
+# And run AUTOMOC again when Python or an option changes which headers a target has.
+include(UsdccAutogenState)
+usdcc_autogen_state()
