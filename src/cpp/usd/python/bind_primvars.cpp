@@ -4,12 +4,18 @@
 
 #include <pybind11/stl.h>
 
+#include "usdcc/usd/primvar_edit.h"
 #include "usdcc/usd/primvar_info.h"
 
+#include <pxr/base/tf/pyObjWrapper.h>
 #include <pxr/external/boost/python/extract.hpp>
+#include <pxr/external/boost/python/object.hpp>
+#include <pxr/usd/sdf/schema.h>
+#include <pxr/usd/usd/pyConversions.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/stage.h>
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -168,6 +174,83 @@ void bindPrimvars(py::module_& m) {
     m.def(
         "remove_primvar_relation", [](const std::string& id) { return PrimvarRelations::instance().remove(id); },
         py::arg("id"));
+    // Editing (docs/PRIMVAR_VIEWER.md §19): (ok, error, notes). usdcc/primvars.py makes each one
+    // undo step and raises on a refusal.
+    m.def(
+        "primvar_edit",
+        [](const std::string& command, py::object stage, const std::string& path, const std::string& name, py::dict args) {
+            const PXR_NS::UsdPrim prim = primOf(stage, path);
+            const auto text = [&args](const char* key) { return args.contains(key) ? py::str(args[key]).cast<std::string>() : std::string(); };
+            const auto type = [&](const char* key) {
+                const PXR_NS::SdfValueTypeName found = PXR_NS::SdfSchema::GetInstance().FindType(text(key));
+                if (!found) throw py::value_error("it isn't a type: " + text(key));
+                return found;
+            };
+            const auto number = [&args](const char* key, int otherwise) { return args.contains(key) ? args[key].cast<int>() : otherwise; };
+            std::function<PrimvarEdit()> edit;
+            if (command == "create") {
+                edit = [=, t = type("type"), how = PXR_NS::TfToken(text("interpolation")), size = number("element_size", 1)]() {
+                    return createPrimvar(prim, name, t, how, size);
+                };
+            } else if (command == "remove") {
+                edit = [=]() { return removePrimvar(prim, name); };
+            } else if (command == "block") {
+                edit = [=]() { return blockPrimvar(prim, name); };
+            } else if (command == "rename") {
+                edit = [=, to = text("to")]() { return renamePrimvar(prim, name, to); };
+            } else if (command == "duplicate") {
+                edit = [=, to = text("to")]() { return duplicatePrimvar(prim, name, to); };
+            } else if (command == "set_type") {
+                edit = [=, t = type("type")]() { return setPrimvarType(prim, name, t); };
+            } else if (command == "set_interpolation") {
+                edit = [=, how = PXR_NS::TfToken(text("interpolation"))]() { return setPrimvarInterpolation(prim, name, how); };
+            } else if (command == "add_indices") {
+                edit = [=]() { return indexPrimvar(prim, name); };
+            } else if (command == "flatten") {
+                edit = [=]() { return flattenPrimvarIndices(prim, name); };
+            } else if (command == "set_element_size") {
+                edit = [=, size = number("element_size", 1)]() { return setPrimvarElementSize(prim, name, size); };
+            } else if (command == "copy") {
+                edit = [=, target = primOf(stage, text("to"))]() { return copyPrimvar(prim, target, name); };
+            } else if (command == "author") {
+                PrimvarData data;
+                data.type = type("type");
+                data.interpolation = PXR_NS::TfToken(text("interpolation"));
+                data.elementSize = number("element_size", 1);
+                // Python's values as USD's Python API would set them on an attribute of the type.
+                const PXR_NS::pxr_boost::python::object values{
+                    PXR_NS::pxr_boost::python::handle<>(PXR_NS::pxr_boost::python::borrowed(py::object(args["values"]).ptr()))};
+                data.values = PXR_NS::UsdPythonToSdfType(PXR_NS::TfPyObjWrapper(values), data.type);
+                if (data.values.IsEmpty() || data.values.GetType() != data.type.GetType()) {
+                    throw py::value_error("the values aren't " + data.type.GetAsToken().GetString());
+                }
+                if (args.contains("indices") && !args["indices"].is_none()) {
+                    const std::vector<int> indices = args["indices"].cast<std::vector<int>>();
+                    data.indices = PXR_NS::VtIntArray(indices.begin(), indices.end());
+                }
+                edit = [=]() { return authorPrimvar(prim, name, data); };
+            } else {
+                throw py::value_error("there's no primvar command " + command);
+            }
+            PrimvarEdit result;
+            {
+                // Reading a material's network may load plugins, which take the GIL on their threads.
+                const py::gil_scoped_release release;
+                result = edit();
+            }
+            return py::make_tuple(result.ok, result.error, result.notes);
+        },
+        py::arg("command"), py::arg("stage"), py::arg("path"), py::arg("name"), py::arg("args"));
+    m.def(
+        "primvar_types_like",
+        [](const std::string& type) {
+            std::vector<std::string> like;
+            for (const PXR_NS::SdfValueTypeName& each : primvarTypesLike(PXR_NS::SdfSchema::GetInstance().FindType(type))) {
+                like.push_back(each.GetAsToken().GetString());
+            }
+            return like;
+        },
+        py::arg("type"));
     m.def("primvar_relations", []() {
         py::list relations;
         for (const PrimvarRelation& relation : PrimvarRelations::instance().relations()) relations.append(relationDict(relation));

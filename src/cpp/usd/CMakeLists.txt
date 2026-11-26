@@ -22,6 +22,7 @@ add_library(usdcc_usd SHARED
     include/usdcc/usd/stage.h
     include/usdcc/usd/prim_creation_catalog.h
     include/usdcc/usd/primvar_colors.h
+    include/usdcc/usd/primvar_edit.h
     include/usdcc/usd/primvar_info.h
     include/usdcc/usd/property_categorizer.h
     include/usdcc/usd/relationship_targets.h
@@ -92,6 +93,7 @@ add_library(usdcc_usd SHARED
     src/prim_creation_catalog.cpp
     src/prim_selection.cpp
     src/primvar_colors.cpp
+    src/primvar_edit.cpp
     src/primvar_info.cpp
     src/property_categorizer.cpp
     src/relationship_targets.cpp
@@ -232,6 +234,7 @@ add_library(usdcc_usd_ui SHARED
     include/usdcc/usd/schema_generator.h
     include/usdcc/usd/hydra_viewport_window.h
     include/usdcc/usd/primvar_values_view.h
+    include/usdcc/usd/primvar_commands.h
     include/usdcc/usd/primvar_views.h
     include/usdcc/usd/viewport_overlays.h
     include/usdcc/usd/primvars_view_panel.h
@@ -328,6 +331,7 @@ add_library(usdcc_usd_ui SHARED
     src/promote_schema_dialog.cpp
     src/hydra_viewport_window.cpp
     src/primvar_values_view.cpp
+    src/primvar_commands.cpp
     src/primvar_views.cpp
     src/viewport_overlays.cpp
     src/primvars_view_panel.cpp

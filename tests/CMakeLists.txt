@@ -45,6 +45,7 @@ add_executable(usdcc_tests
     prim_move_test.cpp
     prim_delete_test.cpp
     primvar_colors_test.cpp
+    primvar_edit_test.cpp
     primvar_info_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp
@@ -106,6 +107,7 @@ add_executable(usdcc_ui_tests
     about_dialog_test.cpp
     usd_runtime_dialog_test.cpp
     attributes_primvar_groups_test.cpp
+    primvar_commands_test.cpp
     primvars_panel_test.cpp
     attributes_prim_path_test.cpp
     attributes_rename_test.cpp

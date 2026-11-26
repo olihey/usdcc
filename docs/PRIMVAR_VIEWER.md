@@ -1,9 +1,9 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 to 6 are built** (the model, its Python calls and the validation rules: §13; the panel:
+Status: **phases 1 to 7 are built** (the model, its Python calls and the validation rules: §13; the panel:
 §14; the Values view, Python views and the histogram example: §15; element selection and viewport overlays:
-§16; Color By: §17; the UV View plugin: §18), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has
-the recommendation, §12 the questions.
+§16; Color By: §17; the UV View plugin: §18; editing a primvar's structure: §19), after the phase 0 spike
+(§5.2.1). The rest is a plan: §10 has the recommendation, §12 the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -393,8 +393,8 @@ calls are the API"): an interface the built-ins can't live with is found out at 
 | 1 | **Data** (no registry; built, §13) | `usdcc/usd/primvar_info.h`, Qt-free, exported | `usdcc.primvars.info(prim)`, `.values(prim, name, flattened=False)`, `.element_count(prim, interpolation)` | The records of §4.6: validity, expected counts, source, relations, readers |
 | 2 | **Shared state** (built, §14, §16; no events yet) | on `Stage`, with signals | `usdcc.primvars.focus()`, `set_focus()`, `element_selection()`, `set_element_selection()`; events `primvar_focus_changed`, `element_selection_changed` | Which primvar is picked for a stage; which elements (prim, domain, indices) are selected or hovered |
 | 3 | **Primvar views** (built, §14, §15) | `addPrimvarView(type)` | `usdcc.primvars.register_view(id, label, cls, applies=None)`, `cls` a `usdcc.ui.PrimvarView` | A tab in the Primvars panel: a widget told the stage, prims, primvar and time, with session state. `applies(context)` decides when the tab shows (the UV view: two float components) |
-| 4 | **Primvar commands** | `addPrimvarMenuAction(label, run, applies)` | `usdcc.primvars.add_menu_action(label, callback, applies=None)` | An entry in the list's context menu and the panel's options, one undo step, as the prim menu's entries are. The context has the prims, the primvars and the element selection |
-| 5 | **Authoring** (no registry) | `usdcc/usd/primvar_edit.h` | `usdcc.primvars.author(prim, name, values, indices=None, interpolation=..., element_size=1)` | Writes a whole primvar as a group (§4.6 point 4): refuses what §4.1 would call broken, blocks weaker indices |
+| 4 | **Primvar commands** (built, §19) | `addPrimvarMenuAction(label, run, applies)` | `usdcc.primvars.add_menu_action(label, callback, applies=None)` | An entry in the list's context menu and the panel's options, one undo step, as the prim menu's entries are. The context has the prims, the primvars and the element selection |
+| 5 | **Authoring** (no registry; built, §19) | `usdcc/usd/primvar_edit.h` | `usdcc.primvars.author(prim, name, values, indices=None, interpolation=..., element_size=1)` | Writes a whole primvar as a group (§4.6 point 4): refuses what §4.1 would call broken, blocks weaker indices |
 | 6 | **Colorizers** (built in C++, §17) | `addPrimvarColorizer(...)` | `usdcc.primvars.register_colorizer(id, label, function, applies=None, options=...)` | A Color By mode (§5): values in, colors out, with options described as data, as a tool's are |
 | 7 | **Viewport overlays** (built in C++, §16) | `addViewportOverlay(overlay)` | `usdcc.app.add_viewport_overlay(id, label, build)` | World-space lines and triangles over the frame, switched per viewport like Show Colliders, without being the active tool. `build(stage, time, selection)` returns what a tool's gizmo does |
 | 8 | **Relations** (built, §13) | `PrimvarRelations::instance().set(...)` | `usdcc.primvars.register_relation(id, label, members, ...)` | A row for §4.2's table: a studio's or a renderer's own groups (`primvars:groom:*`), shown as one row and checked together |
@@ -471,7 +471,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **4. Element selection and overlays** — **done** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
 | **5. Color By** — **done** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
 | **6. UV view plugin** — **done** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
-| **7. Editing: structure** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
+| **7. Editing: structure** — **done** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
 | **8. Editing: values** | Cell edits and bulk operations | M | UI tests |
 | Later | Checker in the viewport, vector lines, face picking in the viewport, UV transforms, overlaps and stretch, Unwrap from Mesh Tools | | |
 
@@ -737,3 +737,63 @@ of every face (only problems and picks are filled), points for uniform and const
 material reads, the `faceVaryingLinearInterpolation` note, overlaps, stretch and texel density, editing (§7),
 the other way of linking (picking faces in the viewport). **Not tried:** Linux, a mesh of millions of faces
 (laid out on a worker, but drawn whole on each paint), textures through a package or a remote resolver.
+
+## 19. As built: phase 7
+
+- **Editing a primvar as one thing** (`primvar_edit.h`, Qt-free, in `usdcc_usd`): each call takes a whole
+  primvar, checks everything first and then writes all its parts to the edit target (values, indices,
+  interpolation, element size, type), so a refusal writes nothing. Where it writes no indices, a weaker
+  layer's are blocked (§4.1), and the edit target's own are removed.
+  - **Refused**, with a sentence: an instance proxy; a locked edit target; a variant edit target that
+    doesn't reach the prim; time samples (any, even one: §7 doesn't guess between this sample and all); a
+    **stronger layer's opinion** on the values, indices, interpolation or element size, which the edit
+    wouldn't show over; and a result §4.1 calls broken (the count the interpolation needs, every index
+    inside the values, values of the type).
+  - **Noted**: what it overrides in weaker layers ("Overrides st from base.usda"), what's left there
+    ("base.usda still has dirt: Block hides it"), and for a rename or a removal the materials that read
+    the old name.
+- **The commands of §7 level 1**: `createPrimvar` (default values, as many as the interpolation needs),
+  `removePrimvar` (the edit target's opinions only; refused where it has none), `blockPrimvar`,
+  `duplicatePrimvar`, `renamePrimvar` (the old one removed here, or blocked where a weaker layer has it),
+  `setPrimvarType` (another type with the same data, `primvarTypesLike()`: `float2[]` for `texCoord2f[]`),
+  `setPrimvarInterpolation`, `indexPrimvar` (equal values merged), `flattenPrimvarIndices`,
+  `setPrimvarElementSize` (not for an indexed one) and `copyPrimvar` (to a prim with as many elements, and
+  the same faces for faces and corners); `authorPrimvar` writes a whole primvar given (§9.2 point 5).
+- **Interpolation with conversion**: on a mesh, through its faces' corners. To more elements (vertex,
+  uniform or constant to faceVarying, constant to anything) the values stay and indices point into them;
+  to fewer (faceVarying to vertex or uniform, anything to constant) only where every element's parts
+  agree, refused otherwise with how many don't: on the shader ball, "235 of the 5914 points would need
+  more than one value: st differs between their parts (a seam?)". Elsewhere only from or to constant, or
+  between interpolations with as many elements. A result is indexed when the source was or when it grew;
+  flat otherwise. Points on no face get the first value, noted.
+- **The command registry** (§9.2 point 4, `primvar_commands.h`): `PrimvarCommands`, the built-in commands
+  first, each with an id, a label ("Interpolation/vertex" makes a submenu), when it applies and when it's
+  greyed out with a reason ("It's vertex already"). They're in a row's menu, after Copy Name, for the
+  selected prims that have that primvar; the panel's options menu has Create Primvar.... A command over
+  several prims is one undo step, and a refusal on any undoes them all and names the prim. Rename,
+  Duplicate, Change Type and Element Size ask with a small dialog; Create Primvar with one of its own (a
+  name, a type, an interpolation, an element size); Copy to Other Selected Prims copies from the first
+  selected prim that has it.
+- **The report line**, under the panel's toolbar: "Duplicate st: done.", the notes, or in red "Make st vertex
+  wasn't done: ..." until the next command.
+- **Plugins**: `Host::addPrimvarMenuAction(label, run, applies)` in C++, `usdcc.primvars.add_menu_action(label,
+  callback, applies=None, id=None)` and `remove_menu_action(id)` in Python; `callback(stage, paths,
+  primvar)`, one undo step on the panel's stage.
+- **Python**: `usdcc.primvars.create`, `author`, `remove`, `block`, `rename`, `duplicate`, `types_like`,
+  `set_type`, `set_interpolation`, `add_indices`, `flatten`, `set_element_size` and `copy`. Each is one undo
+  step on a stage open in usdcc (and works on any other stage), raises `ValueError` with the reason when
+  refused, and returns the notes.
+
+**Checked:** `primvar_edit_test` (each command on a stage whose primvars are in a weaker sublayer:
+creating, removing and blocking, a rename that blocks and one that removes, types, each conversion and
+the refusal across a seam, merging and flattening indices, element sizes, copying; refusals for a
+stronger session layer, an instance proxy, a locked layer, time samples, counts, indices and value
+types), `primvar_commands_test` (the row menu and what's greyed out, one undo step, undone, the report, a
+refusal that pushes no step, two prims at once, a plugin's command in its submenu) and
+`python_primvars_editing` (each call, refusals that write nothing, an undo step in the app, a menu
+action). In the app, on the shader ball (its `st` is in `subdiv.usda`): the row menu, Duplicate through it
+and its dialog, st to vertex refused across its seams, a Python `create()`, and undo of both. **Not built:**
+editing time samples; copying metadata other than the parts (a primvar's `doc`, `customData`); renaming
+the readers' `varname` with a primvar (a note says which read it); converting curves' and points'
+interpolations beyond equal counts. **Not tried:** Linux; a stage with a stronger layer in the app (the
+tests cover it).

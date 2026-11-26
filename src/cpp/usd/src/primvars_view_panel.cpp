@@ -14,6 +14,8 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
+#include <QPointer>
+#include <QStyle>
 #include <QSettings>
 #include <QSplitter>
 #include <QTabBar>
@@ -160,6 +162,14 @@ PrimvarsViewPanel::PrimvarsViewPanel(StageManager* stageManager, StageRefPtr sta
     m_splitter->setStretchFactor(1, 2);
 
     layout->addWidget(toolbar);
+    // How the last command went: what it overrode, or why it was refused.
+    m_report = new QLabel(container);
+    m_report->setObjectName(QStringLiteral("primvarsReport"));
+    m_report->setWordWrap(true);
+    m_report->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_report->setContentsMargins(6, 2, 6, 2);
+    m_report->hide();
+    layout->addWidget(m_report);
     layout->addWidget(m_splitter, 1);
     setContentWidget(container);
 
@@ -195,9 +205,37 @@ void PrimvarsViewPanel::setShowInherited(bool show) { m_showInherited->setChecke
 
 void PrimvarsViewPanel::populateOptionsMenu(QMenu* menu) {
     menu->setToolTipsVisible(true);
+    addPrimvarCommands(menu, commandContext({}));
+    if (!menu->isEmpty()) menu->addSeparator();
     menu->addAction(m_showInherited);
     menu->addAction(tr("Refresh"), m_tracker, &PrimvarContextTracker::refresh);
 }
+
+PrimvarCommandContext PrimvarsViewPanel::commandContext(const std::string& primvar) const {
+    PrimvarCommandContext context;
+    context.undo = m_undoManager.get();
+    context.stageManager = stageManager();
+    context.stage = currentStage();
+    context.prims = m_tracker->context().prims;
+    context.primvar = primvar;
+    context.dialogParent = const_cast<PrimvarsViewPanel*>(this);
+    QPointer<QLabel> report(m_report);
+    context.report = [report](const QString& what, const PrimvarEdit& edit) {
+        if (!report) return;
+        QStringList parts;
+        for (const std::string& note : edit.notes) parts << QString::fromStdString(note);
+        const QString text = edit.ok ? (parts.isEmpty() ? tr("%1: done.").arg(what) : tr("%1: done. %2").arg(what, parts.join(QLatin1Char(' '))))
+                                     : tr("%1 wasn't done: %2").arg(what, QString::fromStdString(edit.error));
+        report->setText(text);
+        report->setProperty("severity", edit.ok ? (parts.isEmpty() ? "info" : "warning") : "error");
+        report->style()->unpolish(report);
+        report->style()->polish(report);
+        report->show();
+    };
+    return context;
+}
+
+QString PrimvarsViewPanel::lastReport() const { return m_report->isHidden() ? QString() : m_report->text(); }
 
 void PrimvarsViewPanel::onStageChanged(const StageRefPtr& stage) { m_tracker->setStage(stage); }
 
@@ -465,6 +503,13 @@ void PrimvarsViewPanel::showRowMenu(const QPoint& pos) {
     QTreeWidgetItem* item = m_list->itemAt(pos);
     if (!item) return;
     QMenu menu(this);
+    fillRowMenu(&menu, item);
+    if (menu.isEmpty()) return;
+    menu.exec(m_list->viewport()->mapToGlobal(pos));
+}
+
+void PrimvarsViewPanel::fillRowMenu(QMenu* menuPointer, QTreeWidgetItem* item) {
+    QMenu& menu = *menuPointer;
     const QString name = item->data(Name, kNameRole).toString();
     const QString source = item->data(Name, kSourceRole).toString();
     if (!source.isEmpty() && (m_tracker->context().prims.empty() || SdfPath(source.toStdString()) != m_tracker->context().prims.front())) {
@@ -481,9 +526,10 @@ void PrimvarsViewPanel::showRowMenu(const QPoint& pos) {
         menu.addAction(tr("Copy Name"), this, [name]() { QGuiApplication::clipboard()->setText(name); });
         menu.addAction(tr("Copy Property Name"), this,
                        [name]() { QGuiApplication::clipboard()->setText(QStringLiteral("primvars:") + name); });
+        // The editing commands, the built-in ones and plugins'.
+        menu.addSeparator();
+        addPrimvarCommands(&menu, commandContext(name.toStdString()));
     }
-    if (menu.isEmpty()) return;
-    menu.exec(m_list->viewport()->mapToGlobal(pos));
 }
 
 // --- PrimvarViewPanel ----------------------------------------------------------------

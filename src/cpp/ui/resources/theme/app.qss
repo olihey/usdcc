@@ -940,6 +940,15 @@ QLabel#propertyNote[severity="warning"] {
     color: @warning;
 }
 
+/* How the Primvars panel's last command went (docs/PRIMVAR_VIEWER.md §19). */
+QLabel#primvarsReport[severity="error"] {
+    color: @error;
+}
+
+QLabel#primvarsReport[severity="warning"] {
+    color: @warning;
+}
+
 QLabel#propertyBadge {
     color: @accent-text;
     font-size: 10px;

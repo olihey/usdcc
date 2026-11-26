@@ -20,6 +20,8 @@
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
 #include "usdcc/usd/primvar_colors.h"
+#include "usdcc/usd/primvar_commands.h"
+#include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/render/final_renderer.h"
 #include "usdcc/usd/viewport_overlays.h"
@@ -165,6 +167,40 @@ struct Host {
         const std::string added = type.label.toStdString();
         usdcc::usd::PrimvarViews::instance().add(std::move(type));
         noted("Primvar view", added);
+    }
+
+    // An entry in the Primvars panel's menus (docs/PRIMVAR_VIEWER.md §19): a row's, where the
+    // context has its primvar, and the panel's own options menu, where it has none. "Group/Action"
+    // makes a submenu. `run` is one undo step; it can edit with usdcc/usd/primvar_edit.h. Remove it
+    // in usdcc_plugin_deactivate() with usdcc::usd::PrimvarCommands::instance().remove(<plugin id>.<label>).
+    void addPrimvarMenuAction(const QString& label, std::function<void(const usdcc::usd::PrimvarCommandContext&)> run,
+                              std::function<bool(const usdcc::usd::PrimvarCommandContext&)> applies = {}) {
+        usdcc::usd::PrimvarCommand command;
+        command.id = id + "." + label.toStdString();
+        command.label = label;
+        const std::string step = label.section(QLatin1Char('/'), -1).remove(QStringLiteral("...")).toStdString();
+        // One step on the panel's stage, which needn't be the current one.
+        command.run = [this, step, run = std::move(run)](const usdcc::usd::PrimvarCommandContext& context) {
+            const auto body = [&]() {
+                try {
+                    run(context);
+                    return true;
+                } catch (const std::exception& error) {
+                    log(usdcc::core::LogLevel::Error, step + " failed: " + error.what());
+                } catch (...) {
+                    log(usdcc::core::LogLevel::Error, step + " failed");
+                }
+                return false;
+            };
+            if (context.undo && context.stage) {
+                context.undo->apply(context.stage, QString::fromStdString(step), body);
+            } else {
+                body();
+            }
+        };
+        command.applies = std::move(applies);
+        usdcc::usd::PrimvarCommands::instance().add(std::move(command));
+        noted("Primvar menu action", label.toStdString());
     }
 
     // A way of showing a primvar's values as colours in Color By (docs/PRIMVAR_VIEWER.md §17): its

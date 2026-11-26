@@ -20,6 +20,7 @@ Provisional: these calls may still change, until the UV view has used them.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +30,7 @@ from usdcc import _plugins
 from usdcc import usd as _usd
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
 try:
     import _usdcc_app as _native  # compiled into the app
@@ -347,3 +348,131 @@ def remove_relation(id: str) -> bool:
 def relations() -> list[dict[str, Any]]:
     """Every relation (dicts), the built-in ones included."""
     return _native.primvar_relations()
+
+
+# --- Editing (docs/PRIMVAR_VIEWER.md §19) ---------------------------------------------------
+#
+# Each call edits a whole primvar on the stage's edit target, as one undo step when the stage is
+# open in usdcc. It checks everything first: a refusal raises ValueError with the reason and
+# writes nothing. It returns the notes: what it overrode in weaker layers, or left behind.
+
+
+@contextmanager
+def _one_step(description: str, stage: Usd.Stage) -> Iterator[None]:
+    try:
+        _usd.stage_id(stage)
+    except (ValueError, RuntimeError, AttributeError):
+        yield  # a stage usdcc hasn't open: no undo history to be part of
+        return
+    with _usd.edit(description, stage):
+        yield
+
+
+def _edit(command: str, description: str, prim: Usd.Prim | Sdf.Path | str, name: str, **args: Any) -> list[str]:
+    found = _prim(prim)
+    with _one_step(description, found.GetStage()):
+        ok, error, notes = _native.primvar_edit(command, found.GetStage(), str(found.GetPath()), str(name), args)
+    if not ok:
+        raise ValueError(error)
+    return list(notes)
+
+
+def create(prim: Usd.Prim | Sdf.Path | str, name: str, type: str, interpolation: str = "constant", element_size: int = 1) -> list[str]:
+    """A new primvar of default values (zeros, empty strings), as many as `interpolation` needs:
+    ``create(mesh, "weight", "float[]", "vertex")``."""
+    return _edit("create", f"Create {name}", prim, name, type=str(type), interpolation=str(interpolation), element_size=int(element_size))
+
+
+def author(prim: Usd.Prim | Sdf.Path | str, name: str, values: Any, type: str, interpolation: str = "constant", element_size: int = 1,
+           indices: Iterable[int] | None = None) -> list[str]:
+    """Writes a whole primvar, replacing what's there: values as USD's Python API takes them for
+    `type` (a Vt array, a list of tuples), and indices if it's indexed. Refused if the count isn't
+    what `interpolation` needs on the prim, or an index is outside the values. Weaker layers'
+    indices are blocked when there are none."""
+    return _edit("author", f"Set {name}", prim, name, values=values, type=str(type), interpolation=str(interpolation),
+                 element_size=int(element_size), indices=None if indices is None else [int(i) for i in indices])
+
+
+def remove(prim: Usd.Prim | Sdf.Path | str, name: str) -> list[str]:
+    """Takes away the edit target's opinions on `name`. Refused if it has none; ``block()`` hides
+    a weaker layer's."""
+    return _edit("remove", f"Remove {name}", prim, name)
+
+
+def block(prim: Usd.Prim | Sdf.Path | str, name: str) -> list[str]:
+    """Blocks `name`'s values and indices on the edit target: it's there with no value."""
+    return _edit("block", f"Block {name}", prim, name)
+
+
+def rename(prim: Usd.Prim | Sdf.Path | str, name: str, new_name: str) -> list[str]:
+    """`name` as `new_name`; the old one removed on the edit target, or blocked if a weaker layer
+    has it. The notes say which materials read the old name."""
+    return _edit("rename", f"Rename {name}", prim, name, to=str(new_name))
+
+
+def duplicate(prim: Usd.Prim | Sdf.Path | str, name: str, new_name: str) -> list[str]:
+    """A copy of `name` as `new_name`, its values, indices, interpolation, element size and type."""
+    return _edit("duplicate", f"Duplicate {name}", prim, name, to=str(new_name))
+
+
+def types_like(type: str) -> list[str]:
+    """The types with the same data as `type`, which ``set_type()`` takes: "float2[]" for "texCoord2f[]"."""
+    return list(_native.primvar_types_like(str(type)))
+
+
+def set_type(prim: Usd.Prim | Sdf.Path | str, name: str, type: str) -> list[str]:
+    """The same values as another type with the same data (``types_like()``)."""
+    return _edit("set_type", f"Change {name}'s Type", prim, name, type=str(type))
+
+
+def set_interpolation(prim: Usd.Prim | Sdf.Path | str, name: str, interpolation: str) -> list[str]:
+    """Another interpolation, the values converted: to more elements by indices into the same
+    values; to fewer only where each element's values agree (refused with how many don't)."""
+    return _edit("set_interpolation", f"Make {name} {interpolation}", prim, name, interpolation=str(interpolation))
+
+
+def add_indices(prim: Usd.Prim | Sdf.Path | str, name: str) -> list[str]:
+    """Equal values merged, with indices to them."""
+    return _edit("add_indices", f"Index {name}", prim, name)
+
+
+def flatten(prim: Usd.Prim | Sdf.Path | str, name: str) -> list[str]:
+    """The value each index picks; no indices."""
+    return _edit("flatten", f"Flatten {name}", prim, name)
+
+
+def set_element_size(prim: Usd.Prim | Sdf.Path | str, name: str, element_size: int) -> list[str]:
+    """Another element size, where the values still fit (not for an indexed one)."""
+    return _edit("set_element_size", f"Set {name}'s Element Size", prim, name, element_size=int(element_size))
+
+
+def copy(source: Usd.Prim | Sdf.Path | str, target: Usd.Prim | Sdf.Path | str, name: str) -> list[str]:
+    """`source`'s `name` written on `target`, which must have as many elements for it (and for
+    faces and corners, the same faces). Both on one stage."""
+    found = _prim(target)
+    return _edit("copy", f"Copy {name}", source, name, to=str(found.GetPath()))
+
+
+def add_menu_action(label: str, callback: Any, applies: Any = None, id: str | None = None) -> None:
+    """Adds an entry to the Primvars panel's menus: a row's, where ``callback(stage, paths, primvar)``
+    gets the selected prims' Sdf.Paths and the row's primvar name, and the panel's own options
+    menu, where `primvar` is "". "Group/Action" makes a submenu. It runs as one undo step.
+    ``applies`` takes the same arguments and says whether the entry is in the menu. ``id`` says
+    what to replace or remove later (by default, the label)."""
+    add = getattr(_native, "add_primvar_menu_action", None)
+    if add is None:
+        raise RuntimeError("the Primvars panel's menus are the app's: this isn't running in usdcc")
+
+    def arguments(cache_id: int, paths: list[str], primvar: str) -> tuple:
+        return _usd._stage(cache_id), [Sdf.Path(path) for path in paths], primvar
+
+    add(id or label, label, lambda *plain: callback(*arguments(*plain)),
+        None if applies is None else lambda *plain: bool(applies(*arguments(*plain))))
+    _plugins.note("Primvar menu action", label)
+    _plugins.track(lambda: remove_menu_action(id or label))
+
+
+def remove_menu_action(id: str) -> bool:
+    """Removes an entry added with ``add_menu_action()``, by its id or label."""
+    remove_action = getattr(_native, "remove_primvar_menu_action", None)
+    return bool(remove_action(id)) if remove_action else False

@@ -168,3 +168,72 @@ finally:
 )"),
           "element_selection() and set_element_selection()");
 }
+
+// Editing (docs/PRIMVAR_VIEWER.md §19): each call on a stage outside the app, refusals raised,
+// then one inside it, where each call is an undo step, and a menu action of the Primvars panel.
+USDCC_TEST(python_primvars_editing) {
+    CHECK(python(R"(
+from pxr import Sdf, Usd, UsdGeom, Vt
+import usdcc.primvars as p
+stage = Usd.Stage.CreateInMemory()
+mesh = UsdGeom.Mesh.Define(stage, "/Grid")
+mesh.CreateFaceVertexCountsAttr([4, 4])
+mesh.CreateFaceVertexIndicesAttr([0, 1, 4, 3, 1, 2, 5, 4])
+mesh.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0), (1, 1, 0), (2, 1, 0)])
+grid = mesh.GetPrim()
+assert p.create(grid, "weight", "float[]", "vertex") == []
+assert list(p.values(grid, "weight")) == [0] * 6
+p.author(grid, "dirt", [0, 1, 2, 3, 4, 5], "float[]", "vertex")
+p.set_interpolation(grid, "dirt", "faceVarying")
+assert list(p.values(grid, "dirt", flattened=True)) == [0, 1, 4, 3, 1, 2, 5, 4] and p.info(grid).get("dirt").indexed
+p.author(grid, "st", [(0, 0), (1, 0), (1, 1), (0, 1)], "texCoord2f[]", "faceVarying", indices=[0, 1, 2, 3, 0, 1, 2, 3])
+p.rename(grid, "st", "uv")
+assert p.info(grid).get("st") is None and p.info(grid).get("uv").indexed
+p.flatten(grid, "uv")
+assert not p.info(grid).get("uv").indexed and len(p.values(grid, "uv")) == 8
+assert "float2[]" in p.types_like("texCoord2f[]")
+p.set_type(grid, "uv", "float2[]")
+assert p.info(grid).get("uv").type == "float2[]"
+p.duplicate(grid, "uv", "uv1")
+p.block(grid, "uv1")
+assert not p.info(grid).get("uv1").has_value
+p.remove(grid, "uv1")
+assert p.info(grid).get("uv1") is None
+other = UsdGeom.Mesh.Define(stage, "/Other")
+other.CreateFaceVertexCountsAttr([4, 4])
+other.CreateFaceVertexIndicesAttr([0, 1, 4, 3, 1, 2, 5, 4])
+other.CreatePointsAttr([(0, 0, 0)] * 6)
+p.copy(grid, other.GetPrim(), "dirt")
+assert list(p.values(other.GetPrim(), "dirt", flattened=True)) == [0, 1, 4, 3, 1, 2, 5, 4]
+for call, why in [(lambda: p.author(grid, "short", [1, 2, 3], "float[]", "vertex"), "needs 6"),
+                  (lambda: p.create(grid, "weight", "float[]", "vertex"), "already"),
+                  (lambda: p.set_interpolation(grid, "uv", "vertex"), "would need more than one value"),
+                  (lambda: p.add_indices(grid, "weight"), None),
+                  (lambda: p.set_element_size(grid, "dirt", 2), "Flatten it first")]:
+    try:
+        call()
+        assert why is None, "not refused: " + why
+    except ValueError as error:
+        assert why is not None and why in str(error), str(error)
+assert p.info(grid).get("short") is None
+)"),
+          "each call, and refusals that write nothing");
+    CHECK(python(std::string("import usdcc.usd, usdcc.primvars as p\nstage = usdcc.usd.open_stage(r\"") + USDCC_TEST_DATA_DIR +
+                 R"(/broken_primvars.usda")
+try:
+    stage.SetEditTarget(stage.GetSessionLayer())  # the file's layer is the other tests' too
+    good = stage.GetPrimAtPath("/World/Good")
+    p.rename(good, "dirt", "grime")
+    assert usdcc.usd.undo_text(stage) == "Rename dirt", usdcc.usd.undo_text(stage)
+    usdcc.usd.undo(stage)
+    assert p.info(good).get("dirt") is not None and p.info(good).get("grime") is None
+    seen = []
+    p.add_menu_action("Tools/Note It", lambda stage, paths, primvar: seen.append((paths, primvar)),
+                      applies=lambda stage, paths, primvar: primvar == "st")
+    assert p.remove_menu_action("Tools/Note It") and not p.remove_menu_action("Tools/Note It")
+finally:
+    stage.GetSessionLayer().Clear()
+    usdcc.usd.close_stage(stage)
+)"),
+          "one undo step each in the app; a menu action");
+}

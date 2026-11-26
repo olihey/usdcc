@@ -3,6 +3,7 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/ui/view_panel.h"
+#include "usdcc/usd/primvar_commands.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/stage.h"
 
@@ -58,6 +59,13 @@ public:
     const PrimvarContextTracker& tracker() const { return *m_tracker; }
     // Inherited primvars and the material's are listed (an option, saved).
     void setShowInherited(bool show);
+    // What the menus' commands act on (docs/PRIMVAR_VIEWER.md §19): the selection, `primvar`
+    // (none for the panel's own menu), and this panel to report to.
+    PrimvarCommandContext commandContext(const std::string& primvar) const;
+    // The line under the toolbar that says how the last command went; empty before one.
+    QString lastReport() const;
+    // The row menu's entries for `primvar`, as right-clicking its row shows them.
+    void fillRowMenu(QMenu* menu, QTreeWidgetItem* item);
 
 protected:
     void populateOptionsMenu(QMenu* menu) override;
@@ -75,6 +83,7 @@ private:
     std::shared_ptr<UndoManager> m_undoManager;
     PrimvarContextTracker* m_tracker;
     QLabel* m_summary;
+    QLabel* m_report;
     QAction* m_showInherited;
     QSplitter* m_splitter;
     QTreeWidget* m_list;
