@@ -1,0 +1,180 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 422aed75b..385f2757a 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -283,7 +283,8 @@ if(WITH_CYCLES_DEVICE_ONEAPI)
+   endif()
+ endif()
+ 
+-if(WITH_EMBREE)
++# WITH_EMBREE is Blender's name for it; this build's is WITH_CYCLES_EMBREE.
++if(WITH_CYCLES_EMBREE)
+   add_definitions(-DWITH_EMBREE)
+   if(WITH_CYCLES_DEVICE_ONEAPI AND EMBREE_SYCL_SUPPORT)
+     # NOTE: The debug version of Embree is built without SYCL support on Windows
+diff --git a/src/cmake/external_libs.cmake b/src/cmake/external_libs.cmake
+index 684cbf5e8..4b7bd5500 100644
+--- a/src/cmake/external_libs.cmake
++++ b/src/cmake/external_libs.cmake
+@@ -465,7 +465,8 @@ endif()
+ ###########################################################################
+ 
+ if(WITH_CYCLES_EMBREE)
+-  if(MSVC AND EXISTS ${_cycles_lib_dir})
++  # Another Embree (-DEMBREE_ROOT_DIR, such as a USD install's) is found as on other platforms.
++  if(MSVC AND EXISTS ${_cycles_lib_dir} AND EMBREE_ROOT_DIR STREQUAL "${_cycles_lib_dir}/embree")
+     set(EMBREE_ROOT_DIR ${_cycles_lib_dir}/embree)
+     set(EMBREE_INCLUDE_DIRS ${EMBREE_ROOT_DIR}/include)
+     set(EMBREE_MAJOR_VERSION 4)
+@@ -501,7 +502,9 @@ if(WITH_CYCLES_EMBREE)
+     find_package(Embree 3.8.0 REQUIRED)
+   endif()
+   
+-  if(WIN32)
++  if(NOT EMBREE_ROOT_DIR STREQUAL "${_cycles_lib_dir}/embree")
++    # Its own install's, not one to bundle.
++  elseif(WIN32)
+     add_bundled_libraries(embree/bin)
+   else()
+     add_bundled_libraries(embree/lib)
+diff --git a/src/hydra/CMakeLists.txt b/src/hydra/CMakeLists.txt
+index f1af78c92..12854d2f9 100644
+--- a/src/hydra/CMakeLists.txt
++++ b/src/hydra/CMakeLists.txt
+@@ -112,6 +112,8 @@ target_link_libraries(cycles_hydra
+ 
+ if(WITH_CYCLES_HYDRA_RENDER_DELEGATE)
+   set(SRC_HD_CYCLES_PLUGIN
++    implicit_surfaces.h
++    implicit_surfaces.cpp
+     plugin.h
+     plugin.cpp
+   )
+diff --git a/src/hydra/implicit_surfaces.cpp b/src/hydra/implicit_surfaces.cpp
+new file mode 100644
+index 000000000..beeb758ff
+--- /dev/null
++++ b/src/hydra/implicit_surfaces.cpp
+@@ -0,0 +1,55 @@
++/* SPDX-FileCopyrightText: 2022 Pixar
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Adapted from OpenUSD's hdEmbree (pxr/imaging/plugin/hdEmbree/implicitSurfaceSceneIndexPlugin.cpp). */
++
++#include "hydra/implicit_surfaces.h"
++
++#include <pxr/imaging/hd/retainedDataSource.h>
++#include <pxr/imaging/hd/sceneIndexPluginRegistry.h>
++#include <pxr/imaging/hd/tokens.h>
++#include <pxr/imaging/hdsi/implicitSurfaceSceneIndex.h>
++
++PXR_NAMESPACE_OPEN_SCOPE
++
++TF_DEFINE_PRIVATE_TOKENS(_tokens,
++                         ((sceneIndexPluginName, "HdCycles_ImplicitSurfaceSceneIndexPlugin")));
++
++/* The renderer plugin's displayName in plugInfo.json. */
++static const char *const _pluginDisplayName = "Cycles";
++
++TF_REGISTRY_FUNCTION(TfType)
++{
++  HdSceneIndexPluginRegistry::Define<HdCycles_ImplicitSurfaceSceneIndexPlugin>();
++}
++
++TF_REGISTRY_FUNCTION(HdSceneIndexPlugin)
++{
++  const HdSceneIndexPluginRegistry::InsertionPhase insertionPhase = 0;
++  HdSceneIndexPluginRegistry::GetInstance().RegisterSceneIndexForRenderer(
++      _pluginDisplayName,
++      _tokens->sceneIndexPluginName,
++      /* inputArgs = */ nullptr,
++      insertionPhase,
++      HdSceneIndexPluginRegistry::InsertionOrderAtStart);
++}
++
++HdCycles_ImplicitSurfaceSceneIndexPlugin::HdCycles_ImplicitSurfaceSceneIndexPlugin() = default;
++
++HdSceneIndexBaseRefPtr HdCycles_ImplicitSurfaceSceneIndexPlugin::_AppendSceneIndex(
++    const HdSceneIndexBaseRefPtr &inputScene, const HdContainerDataSourceHandle & /*inputArgs*/)
++{
++  const HdDataSourceBaseHandle toMesh = HdRetainedTypedSampledDataSource<TfToken>::New(
++      HdsiImplicitSurfaceSceneIndexTokens->toMesh);
++  const HdContainerDataSourceHandle args = HdRetainedContainerDataSource::New(
++      HdPrimTypeTokens->sphere, toMesh,
++      HdPrimTypeTokens->cube, toMesh,
++      HdPrimTypeTokens->cone, toMesh,
++      HdPrimTypeTokens->cylinder, toMesh,
++      HdPrimTypeTokens->capsule, toMesh,
++      HdPrimTypeTokens->plane, toMesh);
++  return HdsiImplicitSurfaceSceneIndex::New(inputScene, args);
++}
++
++PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/src/hydra/implicit_surfaces.h b/src/hydra/implicit_surfaces.h
+new file mode 100644
+index 000000000..0b0b41cb6
+--- /dev/null
++++ b/src/hydra/implicit_surfaces.h
+@@ -0,0 +1,26 @@
++/* SPDX-FileCopyrightText: 2022 Pixar
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Adapted from OpenUSD's hdEmbree (pxr/imaging/plugin/hdEmbree/implicitSurfaceSceneIndexPlugin.h). */
++
++#pragma once
++
++#include <pxr/imaging/hd/sceneIndexPlugin.h>
++#include <pxr/pxr.h>
++
++PXR_NAMESPACE_OPEN_SCOPE
++
++/* Turns USD's implicit shapes (sphere, cube, cone, cylinder, capsule, plane) into meshes for
++ * Cycles, which draws only meshes. A Hydra host that feeds the renderer through scene indices,
++ * as UsdImagingGLEngine does, hands them over as they are; without this they aren't drawn. */
++class HdCycles_ImplicitSurfaceSceneIndexPlugin : public HdSceneIndexPlugin {
++ public:
++  HdCycles_ImplicitSurfaceSceneIndexPlugin();
++
++ protected:
++  HdSceneIndexBaseRefPtr _AppendSceneIndex(const HdSceneIndexBaseRefPtr &inputScene,
++                                           const HdContainerDataSourceHandle &inputArgs) override;
++};
++
++PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/src/hydra/light.cpp b/src/hydra/light.cpp
+index 1457e7752..9fe8307df 100644
+--- a/src/hydra/light.cpp
++++ b/src/hydra/light.cpp
+@@ -92,8 +92,9 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+       /* Unclear why, but approximately matches Karma. */
+       strength *= 4.0f;
+     }
+-    else {
+-      /* Convert from intensity to radiant flux. */
++    else if (_lightType != HdPrimTypeTokens->domeLight) {
++      /* Convert from intensity to radiant flux. Not for a dome light: it becomes the
++       * background, whose strength is radiance, as UsdLux's intensity is. */
+       strength *= M_PI_F;
+     }
+ 
+diff --git a/src/hydra/resources/plugInfo.json b/src/hydra/resources/plugInfo.json
+index 94fe778ea..52426bb01 100644
+--- a/src/hydra/resources/plugInfo.json
++++ b/src/hydra/resources/plugInfo.json
+@@ -9,6 +9,14 @@
+                         ],
+                         "displayName": "Cycles",
+                         "priority": 0
++                    },
++                    "HdCycles_ImplicitSurfaceSceneIndexPlugin": {
++                        "bases": [
++                            "HdSceneIndexPlugin"
++                        ],
++                        "displayName": "Scene Index to turn implicit surfaces into meshes for Cycles",
++                        "loadWithRenderer": "Cycles",
++                        "priority": 0
+                     }
+                 }
+             },
