@@ -178,12 +178,18 @@ def tick():
         time.sleep(0.01)
 thread = threading.Thread(target=tick)
 thread.start()
-before = len(ticks)
+while not ticks:
+    time.sleep(0.001)
+# Ticks are stamped while their thread holds the GIL, so one stamped inside
+# the call's window proves the call let go of it. Counting ticks instead
+# failed on busy CI runners, where a 10 ms sleep can take far longer.
+start = time.monotonic()
 a.list("fake://studio/", "slow")
-during = len(ticks) - before
+end = time.monotonic()
 done.set()
 thread.join()
-assert during > 10, during
+during = [t for t in ticks if start < t < end]
+assert len(during) >= 3, (len(during), end - start)
 )"),
           "the GIL is released while a server is asked");
 }
