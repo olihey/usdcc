@@ -30,6 +30,7 @@ class QTimer;
 namespace usdcc::usd {
 
 class StageManager;
+class UndoManager;
 
 // What a view shows: the selected prims' primvars and the one in focus.
 struct PrimvarViewContext {
@@ -42,6 +43,8 @@ struct PrimvarViewContext {
     std::vector<PrimvarSet> sets;        // one for each of `prims`
     std::string primvar;                 // the stage's primvar focus; empty for none
     PXR_NS::UsdTimeCode time = PXR_NS::UsdTimeCode::Default();
+    // The stage's undo history, for a view that edits (the Values table); null where there's none.
+    UndoManager* undo = nullptr;
 
     // The first of `sets` with `name` (the focus by default), or null.
     const PrimvarSet* setWith(const std::string& name = {}) const;
@@ -61,6 +64,7 @@ public:
     ~PrimvarContextTracker() override;
 
     void setStage(const StageRefPtr& stage);
+    void setUndoManager(UndoManager* undo) { m_context.undo = undo; }
     const PrimvarViewContext& context() const { return m_context; }
     // Reads the prims again now, rather than after the pending edits.
     void refresh();

@@ -4,6 +4,7 @@
 #include "usdcc/usd/stage.h"
 
 #include <pxr/base/gf/half.h>
+#include <pxr/base/gf/traits.h>
 #include <pxr/base/gf/matrix2d.h>
 #include <pxr/base/gf/matrix3d.h>
 #include <pxr/base/gf/matrix4d.h>
@@ -35,6 +36,10 @@
 #include <pxr/usd/usdGeom/tokens.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <climits>
 #include <cstring>
 #include <functional>
@@ -232,6 +237,8 @@ std::optional<std::string> dataRefusal(const UsdPrim& prim, const std::string& n
         return std::to_string(values) + " values don't make elements of " + std::to_string(data.elementSize) + ".";
     }
     const std::size_t elements = values / std::size_t(data.elementSize);
+    // A constant array applies whole, however long (a list a shader takes): only indices are checked.
+    const bool constant = interpolation == UsdGeomTokens->constant;
     if (data.indices) {
         for (std::size_t i = 0; i < data.indices->size(); ++i) {
             const int index = (*data.indices)[i];
@@ -241,6 +248,7 @@ std::optional<std::string> dataRefusal(const UsdPrim& prim, const std::string& n
             }
         }
     }
+    if (constant) return std::nullopt;
     const std::size_t count = data.indices ? data.indices->size() : elements;
     const PrimvarElementCounts counts = primvarElementCounts(prim, UsdTimeCode::Default());
     if (counts.wholeValues && (interpolation == UsdGeomTokens->constant || interpolation == UsdGeomTokens->uniform)) return std::nullopt;
@@ -674,6 +682,341 @@ PrimvarEdit copyPrimvar(const UsdPrim& from, const UsdPrim& to, const std::strin
         }
     }
     return authorChecked(to, name, *data);
+}
+
+// --- Values ----------------------------------------------------------------------------------
+
+namespace {
+
+template <typename T>
+constexpr bool kNumberLike = std::is_arithmetic_v<T> || std::is_same_v<T, GfHalf>;
+
+// How many numbers one value of T has; 0 for one without numbers.
+template <typename T>
+constexpr int numbersIn() {
+    if constexpr (kNumberLike<T>) {
+        return 1;
+    } else if constexpr (GfIsGfVec<T>::value) {
+        return int(T::dimension);
+    } else if constexpr (GfIsGfQuat<T>::value) {
+        return 4;
+    } else if constexpr (GfIsGfMatrix<T>::value) {
+        return int(T::numRows * T::numColumns);
+    } else {
+        return 0;
+    }
+}
+
+template <typename T>
+double numberOf(const T& value, int i) {
+    if constexpr (std::is_same_v<T, bool>) {
+        return value ? 1.0 : 0.0;
+    } else if constexpr (kNumberLike<T>) {
+        return double(value);
+    } else if constexpr (GfIsGfVec<T>::value) {
+        return double(value[std::size_t(i)]);
+    } else if constexpr (GfIsGfQuat<T>::value) {
+        return i == 0 ? double(value.GetReal()) : double(value.GetImaginary()[std::size_t(i - 1)]);
+    } else if constexpr (GfIsGfMatrix<T>::value) {
+        return double(value[i / int(T::numColumns)][i % int(T::numColumns)]);
+    } else {
+        return 0.0;
+    }
+}
+
+template <typename S>
+S cast(double number) {
+    if constexpr (std::is_same_v<S, bool>) {
+        return number != 0.0;
+    } else if constexpr (std::is_same_v<S, GfHalf>) {
+        return S(float(number));
+    } else if constexpr (std::is_integral_v<S>) {
+        const double rounded = std::round(number);
+        if (rounded <= double(std::numeric_limits<S>::lowest())) return std::numeric_limits<S>::lowest();
+        if (rounded >= double(std::numeric_limits<S>::max())) return std::numeric_limits<S>::max();
+        return S(rounded);
+    } else {
+        return S(number);
+    }
+}
+
+template <typename T>
+void setNumber(T& value, int i, double number) {
+    if constexpr (kNumberLike<T>) {
+        value = cast<T>(number);
+    } else if constexpr (GfIsGfVec<T>::value) {
+        value[std::size_t(i)] = cast<typename T::ScalarType>(number);
+    } else if constexpr (GfIsGfQuat<T>::value) {
+        using S = typename T::ScalarType;
+        if (i == 0) {
+            value.SetReal(cast<S>(number));
+        } else {
+            auto imaginary = value.GetImaginary();
+            imaginary[std::size_t(i - 1)] = cast<S>(number);
+            value.SetImaginary(imaginary);
+        }
+    } else if constexpr (GfIsGfMatrix<T>::value) {
+        value[i / int(T::numColumns)][i % int(T::numColumns)] = cast<typename T::ScalarType>(number);
+    }
+}
+
+template <typename T>
+bool setText(T& value, const std::string& text) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        value = text;
+        return true;
+    } else if constexpr (std::is_same_v<T, TfToken>) {
+        value = TfToken(text);
+        return true;
+    } else if constexpr (std::is_same_v<T, SdfAssetPath>) {
+        value = SdfAssetPath(text);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+// Why `change` can't be done to elements of `total` numbers, if it can't.
+std::optional<std::string> changeRefusal(const PrimvarValueChange& change, std::size_t total) {
+    using Kind = PrimvarValueChange::Kind;
+    if (change.component >= 0 && std::size_t(change.component) >= total) {
+        return "Number " + std::to_string(change.component + 1) + " is past the " + std::to_string(total) + " each element has.";
+    }
+    const std::size_t given = change.numbers.size();
+    const bool all = change.component < 0;
+    switch (change.kind) {
+        case Kind::Set:
+        case Kind::Add:
+        case Kind::Multiply:
+            if (given == 1 || (all && given == total)) return std::nullopt;
+            return "It takes one number" + std::string(all && total > 1 ? " or " + std::to_string(total) : std::string()) + ", not " +
+                   std::to_string(given) + ".";
+        case Kind::Clamp:
+            if (given != 2) return "Clamp takes a low and a high number.";
+            if (change.numbers[0] > change.numbers[1]) return "Clamp's low number is above its high one.";
+            return std::nullopt;
+        case Kind::Remap:
+            if (given != 4) return "Remap takes two numbers to map from and two to map to.";
+            if (change.numbers[0] == change.numbers[1]) return "Remap's two numbers to map from are the same.";
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+// `change` done to an element's numbers.
+void applyChange(std::vector<double>& numbers, const PrimvarValueChange& change) {
+    using Kind = PrimvarValueChange::Kind;
+    const std::size_t first = change.component < 0 ? 0 : std::size_t(change.component);
+    const std::size_t last = change.component < 0 ? numbers.size() : first + 1;
+    const auto given = [&](std::size_t i) { return change.numbers.size() == 1 ? change.numbers[0] : change.numbers[i]; };
+    for (std::size_t i = first; i < last; ++i) {
+        double& x = numbers[i];
+        switch (change.kind) {
+            case Kind::Set: x = given(i); break;
+            case Kind::Add: x += given(i); break;
+            case Kind::Multiply: x *= given(i); break;
+            case Kind::Clamp: x = std::clamp(x, change.numbers[0], change.numbers[1]); break;
+            case Kind::Remap:
+                x = (x - change.numbers[0]) / (change.numbers[1] - change.numbers[0]) * (change.numbers[3] - change.numbers[2]) + change.numbers[2];
+                break;
+        }
+    }
+}
+
+// Changes `rows` of `values` (`per` values a row), through `indices` if there are any, which may
+// grow `values` by the shared values copied. Why not, if it can't; `split` counts the copies.
+template <typename T>
+std::optional<std::string> changeRows(VtArray<T>& values, std::optional<VtIntArray>& indices, const std::vector<std::size_t>& rows, std::size_t per,
+                                      const PrimvarValueChange& change, std::size_t& split) {
+    constexpr int each = numbersIn<T>();
+    const bool text = !change.text.empty();
+    if (text) {
+        T probe{};
+        if (!setText(probe, change.text.front())) return std::string("Its values are numbers, not text.");
+        if (change.kind != PrimvarValueChange::Kind::Set) return std::string("Text can only be set.");
+        if (change.text.size() != 1 && change.text.size() != per) {
+            return "It takes one text" + std::string(per > 1 ? " or " + std::to_string(per) : std::string()) + ", not " +
+                   std::to_string(change.text.size()) + ".";
+        }
+    } else {
+        if (each == 0) return std::string("Its values aren't numbers: set them as text.");
+        if (const auto why = changeRefusal(change, per * std::size_t(each))) return why;
+    }
+    const std::size_t elements = values.size() / per;
+
+    // The value elements to change: the rows', or copies of values other rows pick too.
+    std::vector<std::size_t> targets;
+    if (!indices) {
+        targets = rows;
+    } else {
+        std::vector<std::size_t> uses(elements, 0), changed(elements, 0);
+        for (const int index : *indices) {
+            if (index >= 0 && std::size_t(index) < elements) ++uses[std::size_t(index)];
+        }
+        for (const std::size_t row : rows) {
+            const int index = (*indices)[row];
+            if (index < 0 || std::size_t(index) >= elements) return "Row " + std::to_string(row) + "'s index is outside the values.";
+            ++changed[std::size_t(index)];
+        }
+        std::unordered_map<std::size_t, std::size_t> copies;  // a shared value to its copy
+        for (const std::size_t row : rows) {
+            const std::size_t index = std::size_t((*indices)[row]);
+            if (changed[index] == uses[index]) {
+                targets.push_back(index);
+                continue;
+            }
+            auto [it, made] = copies.try_emplace(index, values.size() / per);
+            if (made) {
+                for (std::size_t i = 0; i < per; ++i) values.push_back(T(values[index * per + i]));
+                targets.push_back(it->second);
+                ++split;
+            }
+            (*indices)[row] = int(it->second);
+        }
+    }
+    std::sort(targets.begin(), targets.end());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+
+    std::vector<double> numbers(per * std::size_t(std::max(each, 1)));
+    for (const std::size_t element : targets) {
+        if (text) {
+            for (std::size_t i = 0; i < per; ++i) setText(values[element * per + i], change.text[change.text.size() == 1 ? 0 : i]);
+            continue;
+        }
+        for (std::size_t i = 0; i < per; ++i) {
+            for (int c = 0; c < each; ++c) numbers[i * std::size_t(each) + std::size_t(c)] = numberOf(values[element * per + i], c);
+        }
+        applyChange(numbers, change);
+        for (std::size_t i = 0; i < per; ++i) {
+            for (int c = 0; c < each; ++c) setNumber(values[element * per + i], c, numbers[i * std::size_t(each) + std::size_t(c)]);
+        }
+    }
+    return std::nullopt;
+}
+
+// Calls fn(VtArray<T>&) on a copy of `value`'s array; a scalar as an array of one. `value` is then
+// the changed copy, a scalar again for a scalar.
+template <typename Fn>
+bool withMutableArray(VtValue& value, Fn&& fn) {
+    const bool scalar = !value.IsArrayValued();
+    bool done = false;
+    withArray(value, [&](const auto& array) {
+        using A = std::decay_t<decltype(array)>;
+        A copy = array;
+        fn(copy);
+        if (scalar && copy.size() == 1) {
+            value = VtValue(copy[0]);
+        } else {
+            value = VtValue(copy);
+        }
+        done = true;
+    });
+    return done;
+}
+
+}  // namespace
+
+std::size_t primvarElementNumbers(const UsdPrim& prim, const std::string& name) {
+    const std::optional<PrimvarData> data = readPrimvar(prim, name);
+    if (!data) return 0;
+    const bool constant = data->interpolation.IsEmpty() || data->interpolation == UsdGeomTokens->constant;
+    const std::size_t per = !data->type.IsArray() ? 1 : constant ? std::max<std::size_t>(valueCount(data->values), 1) : std::size_t(data->elementSize);
+    std::size_t each = 0;
+    withArray(data->values, [&](const auto& array) {
+        using T = typename std::decay_t<decltype(array)>::value_type;
+        each = std::size_t(numbersIn<T>());
+    });
+    return per * each;
+}
+
+std::optional<std::vector<double>> parseNumbers(const std::string& text) {
+    std::vector<double> numbers;
+    const char* at = text.c_str();
+    while (*at) {
+        if (std::isspace(static_cast<unsigned char>(*at)) || *at == ',' || *at == '(' || *at == ')' || *at == '[' || *at == ']' || *at == ';') {
+            ++at;
+            continue;
+        }
+        char* end = nullptr;
+        const double number = std::strtod(at, &end);
+        if (end == at) {
+            // A word: true and false are numbers here, anything else isn't.
+            const std::string rest(at);
+            if (TfStringStartsWith(rest, "true")) {
+                numbers.push_back(1.0);
+                at += 4;
+                continue;
+            }
+            if (TfStringStartsWith(rest, "false")) {
+                numbers.push_back(0.0);
+                at += 5;
+                continue;
+            }
+            return std::nullopt;
+        }
+        numbers.push_back(number);
+        at = end;
+    }
+    return numbers;
+}
+
+std::vector<std::string> splitTexts(const std::string& text) {
+    std::string inner = TfStringTrim(text);
+    if (inner.size() >= 2 && inner.front() == '[' && inner.back() == ']') inner = inner.substr(1, inner.size() - 2);
+    std::vector<std::string> texts;
+    std::size_t at = 0;
+    while (at <= inner.size()) {
+        while (at < inner.size() && std::isspace(static_cast<unsigned char>(inner[at]))) ++at;
+        std::string one;
+        if (at < inner.size() && inner[at] == '"') {
+            // Quoted: up to the closing quote, \" and \\ as themselves; then to the comma.
+            for (++at; at < inner.size() && inner[at] != '"'; ++at) {
+                if (inner[at] == '\\' && at + 1 < inner.size()) ++at;
+                one += inner[at];
+            }
+            at = inner.find(',', at);
+            at = at == std::string::npos ? inner.size() + 1 : at + 1;
+        } else {
+            const std::size_t comma = inner.find(',', at);
+            one = TfStringTrim(inner.substr(at, comma == std::string::npos ? std::string::npos : comma - at));
+            // An asset path as USD writes one.
+            if (one.size() >= 2 && one.front() == '@' && one.back() == '@') one = one.substr(1, one.size() - 2);
+            at = comma == std::string::npos ? inner.size() + 1 : comma + 1;
+        }
+        texts.push_back(std::move(one));
+    }
+    return texts;
+}
+
+PrimvarEdit changePrimvarValues(const UsdPrim& prim, const std::string& name, const std::vector<std::size_t>& elements,
+                                const PrimvarValueChange& change) {
+    if (const auto why = primRefusal(prim)) return refused(*why);
+    std::string why;
+    std::optional<PrimvarData> data = readPrimvar(prim, name, &why);
+    if (!data) return refused(why);
+    if (elements.empty()) return refused("No elements are picked.");
+    const bool constant = data->interpolation.IsEmpty() || data->interpolation == UsdGeomTokens->constant;
+    const std::size_t total = valueCount(data->values);
+    // A constant primvar is one element, its whole value; else an element size's worth.
+    const std::size_t per = !data->type.IsArray() ? 1 : constant ? std::max<std::size_t>(total, 1) : std::size_t(data->elementSize);
+    const std::size_t rows = data->indices ? data->indices->size() : (constant ? 1 : total / per);
+    std::vector<std::size_t> picked(elements);
+    std::sort(picked.begin(), picked.end());
+    picked.erase(std::unique(picked.begin(), picked.end()), picked.end());
+    if (picked.back() >= rows) {
+        return refused("Row " + std::to_string(picked.back()) + " is past " + name + "'s " + std::to_string(rows) + (rows == 1 ? " element." : " elements."));
+    }
+    std::optional<std::string> refusal;
+    std::size_t split = 0;
+    const bool typed = withMutableArray(data->values, [&](auto& array) { refusal = changeRows(array, data->indices, picked, per, change, split); });
+    if (!typed) return refused(name + "'s type can't be changed here.");
+    if (refusal) return refused(*refusal);
+    std::vector<std::string> notes;
+    if (split) {
+        notes.push_back(std::to_string(split) + (split == 1 ? " shared value was" : " shared values were") +
+                        " copied for the changed rows: other rows pick the old one.");
+    }
+    return authorChecked(prim, name, *data, std::move(notes));
 }
 
 }  // namespace usdcc::usd

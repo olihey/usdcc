@@ -5,6 +5,7 @@
 
 #include "usdcc/usd/primvar_edit.h"
 
+#include <pxr/base/gf/math.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/attribute.h>
@@ -235,7 +236,12 @@ USDCC_TEST(primvar_edit_indices_and_element_size) {
     edit = authorPrimvar(f.grid, "pair", pair);
     CHECK(edit && f.primvar("pair").GetElementSize() == 2, "a constant pair: %s", edit.error.c_str());
     edit = setPrimvarElementSize(f.grid, "pair", 1);
-    CHECK(!edit && contains(edit.error, "would have 2 elements") && contains(edit.error, "needs 1"), "two values aren't one element: %s",
+    CHECK(edit && f.primvar("pair").GetElementSize() == 1, "a constant array applies whole, however long: %s", edit.error.c_str());
+    pair.interpolation = UsdGeomTokens->vertex;
+    pair.values = VtValue(VtFloatArray(12, 0.0f));
+    authorPrimvar(f.grid, "pairs", pair);
+    edit = setPrimvarElementSize(f.grid, "pairs", 1);
+    CHECK(!edit && contains(edit.error, "would have 12 elements") && contains(edit.error, "needs 6"), "twelve values aren't six points: %s",
           edit.error.c_str());
     CHECK(contains(setPrimvarElementSize(f.grid, "st", 2).error, "Flatten it first"), "not indexed ones");
 }
@@ -287,4 +293,97 @@ USDCC_TEST(primvar_edit_copy) {
     CHECK(!edit && contains(edit.error, "faces aren't"), "other faces: %s", edit.error.c_str());
     edit = copyPrimvar(f.grid, f.stage->GetPrimAtPath(SdfPath("/Tri")), "dirt");
     CHECK(!edit && contains(edit.error, "needs 4"), "other points: %s", edit.error.c_str());
+}
+
+// Values (§7 level 2, §20): each kind of change, a component, shared values of an indexed
+// primvar copied for the rows changed, integers rounded, constant and element-size elements,
+// text, and refusals.
+USDCC_TEST(primvar_edit_values) {
+    Fixture f;
+    if (!f.grid) return;
+    using Kind = PrimvarValueChange::Kind;
+    const auto change = [](Kind kind, std::vector<double> numbers, int component = -1) {
+        PrimvarValueChange result;
+        result.kind = kind;
+        result.numbers = std::move(numbers);
+        result.component = component;
+        return result;
+    };
+    PrimvarEdit edit = changePrimvarValues(f.grid, "dirt", {2}, change(Kind::Set, {7}));
+    CHECK(edit && (f.flat<float>("dirt") == VtFloatArray{0, 1, 7, 3, 4, 5}) && anyNote(edit, "Overrides dirt from"), "set: %s",
+          edit.error.c_str());
+    changePrimvarValues(f.grid, "dirt", {0, 1}, change(Kind::Add, {10}));
+    changePrimvarValues(f.grid, "dirt", {3}, change(Kind::Multiply, {2}));
+    CHECK((f.flat<float>("dirt") == VtFloatArray{10, 11, 7, 6, 4, 5}), "add and multiply");
+    changePrimvarValues(f.grid, "dirt", {0, 1, 2, 3, 4, 5}, change(Kind::Clamp, {0, 8}));
+    CHECK((f.flat<float>("dirt") == VtFloatArray{8, 8, 7, 6, 4, 5}), "clamp");
+    changePrimvarValues(f.grid, "dirt", {4, 5}, change(Kind::Remap, {0, 10, 0, 1}));
+    const VtFloatArray remapped = f.flat<float>("dirt");
+    CHECK(GfIsClose(remapped[4], 0.4, 1e-6) && GfIsClose(remapped[5], 0.5, 1e-6), "remap");
+
+    // st's value 1 is picked by rows 1 and 4: row 1 gets a copy of its own.
+    edit = changePrimvarValues(f.grid, "st", {1}, change(Kind::Set, {0.25}, 1));
+    VtVec2fArray st = f.flat<GfVec2f>("st");
+    CHECK(edit && st[1] == GfVec2f(0.5f, 0.25f) && st[4] == GfVec2f(0.5f, 0.0f) && anyNote(edit, "1 shared value was copied"),
+          "one component of one row, the other row keeps the shared value: %s", edit.error.c_str());
+    edit = changePrimvarValues(f.grid, "st", {0}, change(Kind::Set, {0.1, 0.2}));
+    st = f.flat<GfVec2f>("st");
+    CHECK(edit && st[0] == GfVec2f(0.1f, 0.2f) && !anyNote(edit, "shared"), "a value only its row picks changes in place");
+
+    changePrimvarValues(f.grid, "faceId", {0}, change(Kind::Multiply, {1.5}));
+    CHECK(f.flat<int>("faceId")[0] == 11, "integers rounded: %d", f.flat<int>("faceId")[0]);
+    changePrimvarValues(f.grid, "tint", {0}, change(Kind::Set, {0, 0, 1}));
+    CHECK(f.flat<GfVec3f>("tint") == VtVec3fArray{GfVec3f(0, 0, 1)}, "a constant one's value");
+    createPrimvar(f.grid, "one", SdfValueTypeNames->Float, UsdGeomTokens->constant);
+    edit = changePrimvarValues(f.grid, "one", {0}, change(Kind::Set, {2.5}));
+    float one = 0;
+    CHECK(edit && f.primvar("one").GetTypeName() == SdfValueTypeNames->Float && f.primvar("one").Get(&one) && one == 2.5f, "a single value stays single");
+
+    PrimvarData pairs;
+    pairs.type = SdfValueTypeNames->FloatArray;
+    pairs.interpolation = UsdGeomTokens->vertex;
+    pairs.elementSize = 2;
+    pairs.values = VtValue(VtFloatArray(12, 0.0f));
+    authorPrimvar(f.grid, "pairs", pairs);
+    CHECK(primvarElementNumbers(f.grid, "pairs") == 2 && primvarElementNumbers(f.grid, "st") == 2 && primvarElementNumbers(f.grid, "tint") == 3,
+          "numbers an element");
+    changePrimvarValues(f.grid, "pairs", {1}, change(Kind::Set, {9}, 1));
+    CHECK(f.flat<float>("pairs")[3] == 9, "the second value of the second element");
+
+    PrimvarData labels;
+    labels.type = SdfValueTypeNames->StringArray;
+    labels.interpolation = UsdGeomTokens->vertex;
+    labels.values = VtValue(VtStringArray(6, "a"));
+    authorPrimvar(f.grid, "label", labels);
+    PrimvarValueChange words;
+    words.text = {"b"};
+    CHECK(changePrimvarValues(f.grid, "label", {5}, words) && f.flat<std::string>("label")[5] == "b" && primvarElementNumbers(f.grid, "label") == 0,
+          "text");
+    CHECK(contains(changePrimvarValues(f.grid, "label", {0}, change(Kind::Add, {1})).error, "aren't numbers"), "no adding to words");
+    // A constant string[] is one element of three texts: one for each, or one for all.
+    PrimvarData names;
+    names.type = SdfValueTypeNames->StringArray;
+    names.interpolation = UsdGeomTokens->constant;
+    names.values = VtValue(VtStringArray{"a", "b", "c"});
+    authorPrimvar(f.grid, "names", names);
+    PrimvarValueChange three;
+    three.text = splitTexts("x, \"y, z\", w");
+    CHECK(three.text.size() == 3 && three.text[1] == "y, z", "quotes keep a comma");
+    CHECK(changePrimvarValues(f.grid, "names", {0}, three) && (f.flat<std::string>("names") == VtStringArray{"x", "y, z", "w"}), "one each");
+    three.text = {"p", "q"};
+    CHECK(contains(changePrimvarValues(f.grid, "names", {0}, three).error, "takes one text or 3, not 2"), "not two");
+    CHECK((splitTexts("[a, b]") == std::vector<std::string>{"a", "b"}) && (splitTexts("@tex.png@") == std::vector<std::string>{"tex.png"}),
+          "brackets and asset paths");
+    CHECK(contains(changePrimvarValues(f.grid, "dirt", {0}, words).error, "are numbers, not text"), "no words for numbers");
+
+    CHECK(contains(changePrimvarValues(f.grid, "dirt", {6}, change(Kind::Set, {1})).error, "Row 6 is past dirt's 6 elements"), "a row too far");
+    CHECK(contains(changePrimvarValues(f.grid, "dirt", {0}, change(Kind::Set, {1, 2})).error, "takes one number, not 2"), "too many numbers");
+    CHECK(contains(changePrimvarValues(f.grid, "dirt", {0}, change(Kind::Clamp, {5, 1})).error, "low number is above"), "clamp backwards");
+    CHECK(contains(changePrimvarValues(f.grid, "dirt", {0}, change(Kind::Remap, {1, 1, 0, 1})).error, "are the same"), "remap from nothing");
+    CHECK(contains(changePrimvarValues(f.grid, "st", {0}, change(Kind::Set, {1}, 3)).error, "Number 4 is past the 2"), "a component too far");
+    CHECK(contains(changePrimvarValues(f.grid, "timed", {0}, change(Kind::Set, {1})).error, "time samples"), "not with time samples");
+
+    CHECK((parseNumbers("(0.5, 1)") == std::vector<double>{0.5, 1}) && (parseNumbers("[1 2 3]") == std::vector<double>{1, 2, 3}) &&
+              (parseNumbers("-1e-3") == std::vector<double>{-1e-3}) && (parseNumbers("true") == std::vector<double>{1}) && !parseNumbers("abc"),
+          "numbers in text");
 }

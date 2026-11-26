@@ -212,6 +212,26 @@ void bindPrimvars(py::module_& m) {
                 edit = [=, size = number("element_size", 1)]() { return setPrimvarElementSize(prim, name, size); };
             } else if (command == "copy") {
                 edit = [=, target = primOf(stage, text("to"))]() { return copyPrimvar(prim, target, name); };
+            } else if (command == "change_values") {
+                PrimvarValueChange change;
+                const std::string kind = text("kind");
+                change.kind = kind == "add"        ? PrimvarValueChange::Kind::Add
+                              : kind == "multiply" ? PrimvarValueChange::Kind::Multiply
+                              : kind == "clamp"    ? PrimvarValueChange::Kind::Clamp
+                              : kind == "remap"    ? PrimvarValueChange::Kind::Remap
+                                                   : PrimvarValueChange::Kind::Set;
+                if (kind != "set" && kind != "add" && kind != "multiply" && kind != "clamp" && kind != "remap") {
+                    throw py::value_error("it isn't a change: " + kind + " (set, add, multiply, clamp or remap)");
+                }
+                change.component = number("component", -1);
+                change.numbers = args["numbers"].cast<std::vector<double>>();
+                if (args.contains("text") && !args["text"].is_none()) {
+                    // One text for every value, or a list of one for each.
+                    change.text = py::isinstance<py::str>(args["text"]) ? std::vector<std::string>{text("text")}
+                                                                        : args["text"].cast<std::vector<std::string>>();
+                }
+                const std::vector<std::size_t> elements = args["elements"].cast<std::vector<std::size_t>>();
+                edit = [=]() { return changePrimvarValues(prim, name, elements, change); };
             } else if (command == "author") {
                 PrimvarData data;
                 data.type = type("type");

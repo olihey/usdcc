@@ -92,6 +92,7 @@ PrimvarsViewPanel::PrimvarsViewPanel(StageManager* stageManager, StageRefPtr sta
     : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent),
       m_undoManager(std::move(undoManager)),
       m_tracker(new PrimvarContextTracker(stageManager, this)) {
+    m_tracker->setUndoManager(m_undoManager.get());
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -535,10 +536,12 @@ void PrimvarsViewPanel::fillRowMenu(QMenu* menuPointer, QTreeWidgetItem* item) {
 // --- PrimvarViewPanel ----------------------------------------------------------------
 
 PrimvarViewPanel::PrimvarViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& viewId, const QString& title,
-                                   QWidget* parent)
+                                   QWidget* parent, std::shared_ptr<UndoManager> undoManager)
     : usdcc::ui::ViewPanel(stageManager, std::move(stage), title, parent),
       m_viewId(viewId),
+      m_undoManager(std::move(undoManager)),
       m_tracker(new PrimvarContextTracker(stageManager, this)) {
+    m_tracker->setUndoManager(m_undoManager.get());
     auto* container = new QWidget(this);
     auto* layout = new QVBoxLayout(container);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -578,7 +581,7 @@ PrimvarViewPanel::PrimvarViewPanel(StageManager* stageManager, StageRefPtr stage
 }
 
 usdcc::ui::ViewPanel* PrimvarViewPanel::duplicate(QWidget* parent) const {
-    auto* copy = new PrimvarViewPanel(stageManager(), currentStage(), m_viewId, windowTitle(), parent);
+    auto* copy = new PrimvarViewPanel(stageManager(), currentStage(), m_viewId, windowTitle(), parent, m_undoManager);
     if (m_view && copy->m_view) copy->m_view->restoreState(m_view->saveState());
     return copy;
 }

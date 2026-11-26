@@ -453,6 +453,20 @@ def copy(source: Usd.Prim | Sdf.Path | str, target: Usd.Prim | Sdf.Path | str, n
     return _edit("copy", f"Copy {name}", source, name, to=str(found.GetPath()))
 
 
+def change_values(prim: Usd.Prim | Sdf.Path | str, name: str, elements: Iterable[int], kind: str = "set",
+                  numbers: Iterable[float] = (), component: int = -1, text: str | Iterable[str] | None = None) -> list[str]:
+    """Changes elements of a primvar (rows of the Values table: points, faces, face corners; 0 for a
+    constant one's whole value), as one undo step. `kind` is "set", "add", "multiply", "clamp" or
+    "remap"; `numbers` what it takes (one for every chosen number, or one for each of an element's;
+    clamp's low and high; remap's from low, from high, to low, to high); `component` one number of
+    each element (0 for x), -1 for all; `text` sets strings and tokens (a list: one for each value of
+    an element, as a constant string[]'s). An indexed primvar's shared
+    values are copied for the changed rows, so the other rows keep theirs."""
+    return _edit("change_values", f"{kind.capitalize()} {name}", prim, name, elements=[int(i) for i in elements], kind=str(kind),
+                 numbers=[float(n) for n in numbers], component=int(component),
+                 text=None if text is None else text if isinstance(text, str) else [str(each) for each in text])
+
+
 def add_menu_action(label: str, callback: Any, applies: Any = None, id: str | None = None) -> None:
     """Adds an entry to the Primvars panel's menus: a row's, where ``callback(stage, paths, primvar)``
     gets the selected prims' Sdf.Paths and the row's primvar name, and the panel's own options

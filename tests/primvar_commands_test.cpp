@@ -6,6 +6,7 @@
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/primvar_commands.h"
+#include "usdcc/usd/primvar_values_view.h"
 #include "usdcc/usd/primvars_view_panel.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
@@ -17,9 +18,12 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QItemSelectionModel>
 #include <QFile>
 #include <QMenu>
 #include <QStandardPaths>
+#include <QTableView>
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -51,6 +55,12 @@ def Mesh "Grid"
     )
     float[] primvars:dirt = [0, 1, 2, 3, 4, 5] (
         interpolation = "vertex"
+    )
+    color3f[] primvars:displayColor = [(1, 0, 0)] (
+        interpolation = "constant"
+    )
+    string[] primvars:names = ["a", "b", "c"] (
+        interpolation = "constant"
     )
 }
 
@@ -224,4 +234,99 @@ USDCC_TEST(primvar_commands_plugin) {
     if (action) action->trigger();
     CHECK(ran == "dirt", "and it runs");
     CHECK(PrimvarCommands::instance().remove("test.double") && !PrimvarCommands::instance().find("test.double"), "removed");
+}
+
+// Editing in the Values table (docs/PRIMVAR_VIEWER.md §20): a cell, text that isn't numbers, the
+// Change submenu on picked rows, its components, and undo.
+USDCC_TEST(primvar_values_editing) {
+    Fixture f;
+    if (!f.stage) return;
+    PrimvarsViewPanel panel(&f.stages, f.stage, f.undo);
+    f.select({SdfPath("/Grid")});
+    f.stage->setPrimvarFocus("dirt");
+    settle();
+    auto* view = qobject_cast<PrimvarValuesView*>(panel.view(QStringLiteral("values")));
+    CHECK(view, "the Values view");
+    if (!view) return;
+    PrimvarValuesModel* model = view->model();
+    int points = -1;
+    for (int c = 0; c < model->columnCount(); ++c) {
+        if (model->columns()[std::size_t(c)].name == "points") points = c;
+    }
+    CHECK((model->flags(model->index(0, 0)) & Qt::ItemIsEditable) && points > 0 && !(model->flags(model->index(0, points)) & Qt::ItemIsEditable),
+          "dirt's cells can be edited, the points' can't");
+    CHECK(model->data(model->index(2, 0), Qt::EditRole).toString() == "2.0", "a cell's edit text: %s",
+          qPrintable(model->data(model->index(2, 0), Qt::EditRole).toString()));
+
+    const int before = f.history()->count();
+    CHECK(model->setData(model->index(2, 0), QStringLiteral("7")), "a cell edited");
+    VtFloatArray dirt;
+    f.primvar("dirt").ComputeFlattened(&dirt);
+    CHECK(dirt.size() == 6 && dirt[2] == 7 && f.history()->count() == before + 1 && f.history()->undoText() == "Edit dirt",
+          "written, one step: %s", qPrintable(f.history()->undoText()));
+    CHECK(view->lastReport().contains("Edit dirt: done.") && view->lastReport().contains("Overrides dirt from base.usda"), "reported: %s",
+          qPrintable(view->lastReport()));
+    const auto shown = [&]() {
+        settle();
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 2000 && model->data(model->index(2, 0), Qt::DisplayRole).toString() != "7.0") QApplication::processEvents(QEventLoop::AllEvents, 10);
+        return model->data(model->index(2, 0), Qt::DisplayRole).toString() == "7.0";
+    };
+    CHECK(shown(), "and shown");
+    CHECK(!model->setData(model->index(2, 0), QStringLiteral("seven")) && view->lastReport().contains("isn't numbers"), "words aren't numbers: %s",
+          qPrintable(view->lastReport()));
+
+    // Add 10 to rows 0 and 1, through the Change submenu.
+    QItemSelectionModel* rows = view->table()->selectionModel();
+    rows->select(QItemSelection(model->index(0, 0), model->index(1, 0)), QItemSelectionModel::ClearAndSelect);
+    QStringList asked;
+    view->setAskChange([&asked](PrimvarValueChange::Kind kind, const QString&, const QStringList& components, bool) {
+        asked = components;
+        PrimvarValueChange change;
+        change.kind = kind;
+        change.numbers = {10};
+        return std::optional<PrimvarValueChange>(change);
+    });
+    QMenu menu;
+    view->addChangeMenu(&menu, 0);
+    QAction* add = actionNamed(menu, "primvarValues.add");
+    CHECK(add && add->isEnabled() && actionNamed(menu, "primvarValues.remap"), "Set, Add, Multiply, Clamp, Remap");
+    if (add) add->trigger();
+    f.primvar("dirt").ComputeFlattened(&dirt);
+    CHECK(dirt[0] == 10 && dirt[1] == 11 && dirt[3] == 3 && f.history()->undoText() == "Add to dirt", "added to the picked rows: %s",
+          qPrintable(view->lastReport()));
+    f.history()->undo();
+    f.primvar("dirt").ComputeFlattened(&dirt);
+    CHECK(dirt[0] == 0 && dirt[2] == 7, "undone");
+
+    f.stage->setPrimvarFocus("st");
+    settle();
+    rows->select(model->index(1, 0), QItemSelectionModel::ClearAndSelect);
+    QMenu st;
+    view->addChangeMenu(&st, 0);
+    if (QAction* set = actionNamed(st, "primvarValues.set")) set->trigger();
+    CHECK((asked == QStringList{"u", "v"}), "a UV's numbers are u and v: %s", qPrintable(asked.join(",")));
+    CHECK(view->lastReport().contains("1 shared value was copied"), "a shared value copied for the row: %s", qPrintable(view->lastReport()));
+
+    // A constant array's cell: its edit text is its values, without the length the cell shows, and
+    // goes back in as it is.
+    f.stage->setPrimvarFocus("displayColor");
+    settle();
+    const QString color = model->data(model->index(0, 0), Qt::EditRole).toString();
+    CHECK(color == "(1.0, 0.0, 0.0)", "a constant color3f[]'s edit text: %s", qPrintable(color));
+    CHECK(model->setData(model->index(0, 0), color) && model->setData(model->index(0, 0), QStringLiteral("(0, 0.5, 1)")),
+          "taken back, and another: %s", qPrintable(view->lastReport()));
+    VtVec3fArray colors;
+    f.primvar("displayColor").Get(&colors);
+    CHECK(colors == VtVec3fArray{GfVec3f(0, 0.5f, 1)}, "written");
+    f.stage->setPrimvarFocus("names");
+    settle();
+    const QString names = model->data(model->index(0, 0), Qt::EditRole).toString();
+    CHECK(names == "a, b, c", "a constant string[]'s: %s", qPrintable(names));
+    CHECK(model->setData(model->index(0, 0), QStringLiteral("x, \"y, z\", w")), "texts: %s", qPrintable(view->lastReport()));
+    VtStringArray texts;
+    f.primvar("names").Get(&texts);
+    CHECK((texts == VtStringArray{"x", "y, z", "w"}), "one each, a quoted comma kept");
+
 }

@@ -1,18 +1,28 @@
 #include "usdcc/usd/primvar_values_view.h"
 
 #include "usdcc/ui/theme.h"
+#include "usdcc/usd/primvar_commands.h"
 #include "usdcc/usd/value_type_info.h"
 
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
+#include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/mesh.h>
 #include <pxr/usd/usdGeom/pointBased.h>
+#include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QPointer>
+#include <QStyle>
 #include <QFont>
 #include <QHeaderView>
 #include <QItemSelection>
@@ -96,6 +106,7 @@ bool PrimvarValuesModel::setContext(const PrimvarViewContext& context, QString* 
         column.indexed = info->indexed;
         column.elementSize = std::max(info->elementSize, 1);
         column.unauthoredValuesIndex = info->unauthoredValuesIndex;
+        column.editable = info->sourcePrim == set->prim;
         const UsdPrim source = context.stage->usdStage()->GetPrimAtPath(info->sourcePrim);
         if (source && read(source, info->name, context.time, column)) m_columns.push_back(std::move(column));
     }
@@ -207,6 +218,7 @@ QVariant PrimvarValuesModel::data(const QModelIndex& index, int role) const {
     if (!index.isValid() || index.column() >= int(m_columns.size())) return {};
     const Column& column = m_columns[std::size_t(index.column())];
     if (role == Qt::DisplayRole || role == Qt::ToolTipRole) return cell(column, std::size_t(index.row()));
+    if (role == Qt::EditRole) return editText(column, std::size_t(index.row()));
     if (role == Qt::ForegroundRole) {
         bool problem = false;
         cell(column, std::size_t(index.row()), &problem);
@@ -235,6 +247,51 @@ QVariant PrimvarValuesModel::headerData(int section, Qt::Orientation orientation
     return {};
 }
 
+Qt::ItemFlags PrimvarValuesModel::flags(const QModelIndex& index) const {
+    Qt::ItemFlags flags = QAbstractTableModel::flags(index);
+    if (index.isValid() && index.column() < int(m_columns.size())) {
+        const Column& column = m_columns[std::size_t(index.column())];
+        if (column.kind == Column::Kind::Primvar && column.editable && m_editor) flags |= Qt::ItemIsEditable;
+    }
+    return flags;
+}
+
+bool PrimvarValuesModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    if (role != Qt::EditRole || !(flags(index) & Qt::ItemIsEditable)) return false;
+    // The view writes it; the stage's change brings it back here.
+    return m_editor(index.column(), std::size_t(index.row()), value.toString());
+}
+
+QString PrimvarValuesModel::editText(const Column& column, std::size_t row) const {
+    // One value, every digit; a string quoted where a comma or quote in it would split it.
+    const auto full = [](const VtValue& value) {
+        const QString text = qs(formatValue(value, 9, std::numeric_limits<std::size_t>::max()));
+        const bool words = value.IsHolding<std::string>() || value.IsHolding<TfToken>() || value.IsHolding<SdfAssetPath>();
+        if (!words || (!text.contains(QLatin1Char(',')) && !text.contains(QLatin1Char('"')))) return text;
+        QString quoted = text;
+        quoted.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+        return QStringLiteral("\"%1\"").arg(quoted);
+    };
+    if (!column.values.IsArrayValued()) return full(column.values);
+    if (m_constant) {
+        // The whole array's values, without its length in front ("[3] a, b, c" is what the cell shows).
+        QStringList parts;
+        for (std::size_t i = 0; i < arraySize(column.values); ++i) parts << full(arrayElement(column.values, i));
+        return parts.join(QStringLiteral(", "));
+    }
+    const std::size_t size = std::size_t(column.elementSize);
+    std::size_t element = row;
+    if (column.indexed) {
+        if (row >= column.indices.size() || column.indices[row] < 0) return {};
+        element = std::size_t(column.indices[row]);
+    }
+    if ((element + 1) * size > arraySize(column.values)) return {};
+    if (size == 1) return full(arrayElement(column.values, element));
+    QStringList parts;
+    for (std::size_t i = 0; i < size; ++i) parts << full(arrayElement(column.values, element * size + i));
+    return QStringLiteral("[%1]").arg(parts.join(QStringLiteral(", ")));
+}
+
 QString PrimvarValuesModel::text(const QModelIndexList& indexes) const {
     std::set<int> rows, columns;
     for (const QModelIndex& index : indexes) {
@@ -259,8 +316,209 @@ QString PrimvarValuesModel::text(const QModelIndexList& indexes) const {
 
 // --- PrimvarValuesView ---------------------------------------------------------------
 
+namespace {
+
+void showReport(QLabel* label, const QString& what, const PrimvarEdit& edit) {
+    if (!label) return;
+    QStringList notes;
+    for (const std::string& note : edit.notes) notes << QString::fromStdString(note);
+    label->setText(edit.ok ? (notes.isEmpty() ? QObject::tr("%1: done.").arg(what) : QObject::tr("%1: done. %2").arg(what, notes.join(QLatin1Char(' '))))
+                           : QObject::tr("%1 wasn't done: %2").arg(what, QString::fromStdString(edit.error)));
+    label->setProperty("severity", edit.ok ? (notes.isEmpty() ? "info" : "warning") : "error");
+    label->style()->unpolish(label);
+    label->style()->polish(label);
+    label->show();
+}
+
+// What each number of an element is called: x, y, z; r, g, b; u, v; or 1, 2, 3 for more.
+QStringList componentNames(const UsdPrim& prim, const std::string& name, std::size_t numbers) {
+    QStringList names;
+    if (numbers <= 1) return names;
+    const UsdGeomPrimvar primvar = UsdGeomPrimvarsAPI(prim).GetPrimvar(TfToken(name));
+    const SdfValueTypeName type = primvar ? primvar.GetTypeName() : SdfValueTypeName();
+    const SdfTupleDimensions dimensions = type ? type.GetDimensions() : SdfTupleDimensions();
+    if (dimensions.size == 1 && dimensions.d[0] == numbers && numbers <= 4) {
+        const TfToken& role = type.GetRole();
+        const char* const letters = role == SdfValueRoleNames->Color ? "rgba" : role == SdfValueRoleNames->TextureCoordinate ? "uvw" : "xyzw";
+        for (std::size_t i = 0; i < numbers && letters[i]; ++i) names << QString(QLatin1Char(letters[i]));
+        if (std::size_t(names.size()) == numbers) return names;
+        names.clear();
+    }
+    for (std::size_t i = 0; i < numbers; ++i) names << QString::number(i + 1);
+    return names;
+}
+
+QString kindName(PrimvarValueChange::Kind kind) {
+    switch (kind) {
+        case PrimvarValueChange::Kind::Set: return QObject::tr("Set");
+        case PrimvarValueChange::Kind::Add: return QObject::tr("Add");
+        case PrimvarValueChange::Kind::Multiply: return QObject::tr("Multiply");
+        case PrimvarValueChange::Kind::Clamp: return QObject::tr("Clamp");
+        case PrimvarValueChange::Kind::Remap: return QObject::tr("Remap");
+    }
+    return {};
+}
+
+// The dialog Set, Add, Multiply, Clamp and Remap ask with: which number of each element, and the
+// numbers the change takes.
+std::optional<PrimvarValueChange> askChangeDialog(QWidget* parent, PrimvarValueChange::Kind kind, const QString& primvar,
+                                                  const QStringList& components, bool text) {
+    using Kind = PrimvarValueChange::Kind;
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QObject::tr("%1 %2").arg(kindName(kind), primvar));
+    auto* form = new QFormLayout(&dialog);
+    QComboBox* component = nullptr;
+    if (!components.isEmpty()) {
+        component = new QComboBox(&dialog);
+        component->addItem(QObject::tr("All"));
+        component->addItems(components);
+        form->addRow(QObject::tr("Of each:"), component);
+    }
+    QStringList labels;
+    switch (kind) {
+        case Kind::Set: labels << (text ? QObject::tr("Text:") : QObject::tr("Value:")); break;
+        case Kind::Add: labels << QObject::tr("Add:"); break;
+        case Kind::Multiply: labels << QObject::tr("Multiply by:"); break;
+        case Kind::Clamp: labels << QObject::tr("Low:") << QObject::tr("High:"); break;
+        case Kind::Remap: labels << QObject::tr("From low:") << QObject::tr("From high:") << QObject::tr("To low:") << QObject::tr("To high:"); break;
+    }
+    std::vector<QLineEdit*> fields;
+    for (const QString& label : labels) {
+        auto* field = new QLineEdit(&dialog);
+        if (kind == Kind::Multiply) field->setText(QStringLiteral("1"));
+        if (kind == Kind::Remap) field->setText(fields.size() % 2 ? QStringLiteral("1") : QStringLiteral("0"));
+        form->addRow(label, field);
+        fields.push_back(field);
+    }
+    if (kind == Kind::Set && !text && components.size() > 1) {
+        auto* hint = new QLabel(QObject::tr("One number for all of them, or %1 for each element's.").arg(components.size()), &dialog);
+        hint->setWordWrap(true);
+        form->addRow(hint);
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    form->addRow(buttons);
+    PrimvarValueChange change;
+    change.kind = kind;
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        change.numbers.clear();
+        change.component = component ? component->currentIndex() - 1 : -1;
+        if (text) {
+            change.text = splitTexts(fields.front()->text().toStdString());
+            dialog.accept();
+            return;
+        }
+        for (QLineEdit* field : fields) {
+            const std::optional<std::vector<double>> numbers = parseNumbers(field->text().toStdString());
+            const bool many = kind == Kind::Set || kind == Kind::Add || kind == Kind::Multiply;
+            if (!numbers || numbers->empty() || (!many && numbers->size() != 1)) {
+                field->setFocus();
+                field->selectAll();
+                return;  // stays open
+            }
+            change.numbers.insert(change.numbers.end(), numbers->begin(), numbers->end());
+        }
+        dialog.accept();
+    });
+    if (dialog.exec() != QDialog::Accepted) return std::nullopt;
+    return change;
+}
+
+}  // namespace
+
+std::vector<std::size_t> PrimvarValuesView::pickedRows() const {
+    std::set<std::size_t> rows;
+    for (const QModelIndex& index : m_table->selectionModel()->selectedIndexes()) rows.insert(std::size_t(index.row()));
+    if (rows.empty() && m_table->currentIndex().isValid()) rows.insert(std::size_t(m_table->currentIndex().row()));
+    return {rows.begin(), rows.end()};
+}
+
+QString PrimvarValuesView::lastReport() const { return m_report->isHidden() ? QString() : m_report->text(); }
+
+bool PrimvarValuesView::editCell(int column, std::size_t row, const QString& text) {
+    if (!m_stage || column < 0 || column >= m_model->columnCount()) return false;
+    const PrimvarValuesModel::Column& shown = m_model->columns()[std::size_t(column)];
+    if (shown.kind != PrimvarValuesModel::Column::Kind::Primvar || !shown.editable) return false;
+    const std::string name = shown.name.toStdString();
+    const UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(m_model->prim());
+    PrimvarValueChange change;
+    if (primvarElementNumbers(prim, name) == 0) {
+        // One text for each of the element's values (a constant string[]'s), or one for all.
+        change.text = splitTexts(text.toStdString());
+    } else {
+        const std::optional<std::vector<double>> numbers = parseNumbers(text.toStdString());
+        if (!numbers || numbers->empty()) {
+            PrimvarEdit refused;
+            refused.error = "\"" + text.toStdString() + "\" isn't numbers.";
+            showReport(m_report, tr("Edit %1").arg(shown.name), refused);
+            return false;
+        }
+        change.numbers = *numbers;
+    }
+    return changeValues(shown.name, {row}, change);
+}
+
+bool PrimvarValuesView::changeValues(const QString& primvar, std::vector<std::size_t> rows, const PrimvarValueChange& change) {
+    if (!m_stage || m_model->prim().IsEmpty()) return false;
+    PrimvarCommandContext context;
+    context.undo = m_undo;
+    context.stage = m_stage;
+    context.prims = {m_model->prim()};
+    context.primvar = primvar.toStdString();
+    QPointer<QLabel> report(m_report);
+    context.report = [report](const QString& what, const PrimvarEdit& edit) { showReport(report, what, edit); };
+    QString what;
+    switch (change.kind) {
+        case PrimvarValueChange::Kind::Set: what = rows.size() == 1 ? tr("Edit %1") : tr("Set %1"); break;
+        case PrimvarValueChange::Kind::Add: what = tr("Add to %1"); break;
+        case PrimvarValueChange::Kind::Multiply: what = tr("Multiply %1"); break;
+        case PrimvarValueChange::Kind::Clamp: what = tr("Clamp %1"); break;
+        case PrimvarValueChange::Kind::Remap: what = tr("Remap %1"); break;
+    }
+    const std::string name = context.primvar;
+    return runPrimvarEdit(context, what.arg(primvar), context.prims,
+                          [&](const UsdPrim& prim) { return changePrimvarValues(prim, name, rows, change); })
+        .ok;
+}
+
+void PrimvarValuesView::addChangeMenu(QMenu* menu, int column) {
+    if (!m_stage || column < 0 || column >= m_model->columnCount()) return;
+    const PrimvarValuesModel::Column& shown = m_model->columns()[std::size_t(column)];
+    if (shown.kind != PrimvarValuesModel::Column::Kind::Primvar || !shown.editable) return;
+    const QString name = shown.name;
+    const UsdPrim prim = m_stage->usdStage()->GetPrimAtPath(m_model->prim());
+    const std::size_t numbers = primvarElementNumbers(prim, name.toStdString());
+    const QStringList components = componentNames(prim, name.toStdString(), numbers);
+    const bool text = numbers == 0;
+    const std::size_t rows = pickedRows().size();
+    QMenu* change = menu->addMenu(tr("Change %1").arg(name));
+    change->setObjectName(QStringLiteral("primvarValuesChange"));
+    change->setToolTipsVisible(true);
+    using Kind = PrimvarValueChange::Kind;
+    for (const Kind kind : {Kind::Set, Kind::Add, Kind::Multiply, Kind::Clamp, Kind::Remap}) {
+        if (text && kind != Kind::Set) continue;
+        QAction* action = change->addAction(kindName(kind) + QStringLiteral("..."));
+        action->setObjectName(QStringLiteral("primvarValues.") + kindName(kind).toLower());
+        if (rows == 0) {
+            action->setEnabled(false);
+            action->setToolTip(tr("Pick rows first"));
+        }
+        connect(action, &QAction::triggered, this, [this, kind, name, components, text]() {
+            const std::vector<std::size_t> picked = pickedRows();
+            if (picked.empty()) return;
+            const std::optional<PrimvarValueChange> asked =
+                m_askChange ? m_askChange(kind, name, components, text) : askChangeDialog(this, kind, name, components, text);
+            if (asked) changeValues(name, picked, *asked);
+        });
+    }
+}
+
 PrimvarValuesView::PrimvarValuesView(QWidget* parent)
-    : PrimvarView(parent), m_status(new QLabel(this)), m_table(new QTableView(this)), m_model(new PrimvarValuesModel(this)) {
+    : PrimvarView(parent),
+      m_status(new QLabel(this)),
+      m_report(new QLabel(this)),
+      m_table(new QTableView(this)),
+      m_model(new PrimvarValuesModel(this)) {
     m_status->setObjectName(QStringLiteral("primvarValuesStatus"));
     m_status->setContentsMargins(6, 4, 6, 4);
     m_status->setWordWrap(true);
@@ -287,6 +545,7 @@ PrimvarValuesView::PrimvarValuesView(QWidget* parent)
         const int column = m_table->columnAt(pos.x());
         if (column >= 0) {
             menu.addAction(tr("Select Column"), this, [this, column]() { m_table->selectColumn(column); });
+            addChangeMenu(&menu, column);
         }
         menu.exec(m_table->viewport()->mapToGlobal(pos));
     });
@@ -295,7 +554,15 @@ PrimvarValuesView::PrimvarValuesView(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(m_status);
+    // How the last edit went (docs/PRIMVAR_VIEWER.md §20).
+    m_report->setObjectName(QStringLiteral("primvarsReport"));
+    m_report->setContentsMargins(6, 0, 6, 4);
+    m_report->setWordWrap(true);
+    m_report->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_report->hide();
+    layout->addWidget(m_report);
     layout->addWidget(m_table, 1);
+    m_model->setCellEditor([this](int column, std::size_t row, const QString& text) { return editCell(column, row, text); });
 
     connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this, &PrimvarValuesView::rowsPicked);
     // The row under the cursor is the stage's hover.
@@ -358,6 +625,7 @@ void PrimvarValuesView::setContext(const PrimvarViewContext& context, bool focus
     if (focusOnly && shown == m_shown) return;
     const bool same = shown == m_shown && !shown.empty();
     const int scroll = m_table->verticalScrollBar()->value();
+    m_undo = context.undo;
     if (context.stage != m_stage) {
         m_stage = context.stage;
         m_elementsConnection = m_stage ? m_stage->primvarElementsChanged.connect([this]() { showStageElements(); })

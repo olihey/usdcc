@@ -100,7 +100,7 @@ class USDCC_USD_UI_API PrimvarViewPanel : public usdcc::ui::ViewPanel {
 
 public:
     PrimvarViewPanel(StageManager* stageManager, StageRefPtr stage, const QString& viewId, const QString& title,
-                     QWidget* parent = nullptr);
+                     QWidget* parent = nullptr, std::shared_ptr<UndoManager> undoManager = {});
 
     ViewPanel* duplicate(QWidget* parent = nullptr) const override;
     QJsonObject saveSessionState() const override;
@@ -118,6 +118,7 @@ private:
     void onContextChanged(bool focusOnly);
 
     QString m_viewId;
+    std::shared_ptr<UndoManager> m_undoManager;
     PrimvarContextTracker* m_tracker;
     QComboBox* m_choice;
     PrimvarView* m_view = nullptr;

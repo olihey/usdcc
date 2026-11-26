@@ -79,4 +79,38 @@ PrimvarEdit setPrimvarElementSize(const PXR_NS::UsdPrim& prim, const std::string
 // for faces and corners, the same faces).
 PrimvarEdit copyPrimvar(const PXR_NS::UsdPrim& from, const PXR_NS::UsdPrim& to, const std::string& name);
 
+// --- Values (§7 level 2, §20) ---------------------------------------------------------------
+
+// What's done to each picked element of a primvar. An element is a row of the Values table: a
+// point's, face's or corner's value (an element size's worth), or a constant primvar's whole value.
+// Its numbers are its values' components in order: x, y, z of a vector; the first value's, then
+// the next's for an element size above 1.
+struct PrimvarValueChange {
+    enum class Kind { Set, Add, Multiply, Clamp, Remap };
+    Kind kind = Kind::Set;
+    int component = -1;  // one number of each element; -1: all of them
+    // Set: one number (every chosen number becomes it), or one for each of the element's numbers.
+    // Add, Multiply: one, or one for each. Clamp: low, high. Remap: from low, from high, to low, to high.
+    std::vector<double> numbers;
+    // Set, for strings, tokens and asset paths, which have no numbers: one text for every value of
+    // the element, or one for each (a constant string[]'s three names).
+    std::vector<std::string> text;
+};
+
+// A cell's text as the texts of its values: "a, b, c", "[a, b]", "\"a, b\", c" (quotes keep a comma).
+std::vector<std::string> splitTexts(const std::string& text);
+
+// Changes `elements` (rows, in the primvar's domain) and writes the whole primvar, after the same
+// checks as the rest. An indexed primvar's rows pick shared values: a value all of whose rows are
+// changed is changed in place; one that other rows pick too is copied for the changed rows, so the
+// others keep it (noted). Integers are rounded.
+PrimvarEdit changePrimvarValues(const PXR_NS::UsdPrim& prim, const std::string& name, const std::vector<std::size_t>& elements,
+                                const PrimvarValueChange& change);
+// How many numbers each element of a primvar has (as changePrimvarValues() counts them); 0 for one
+// without numbers (strings, tokens) or that can't be read.
+std::size_t primvarElementNumbers(const PXR_NS::UsdPrim& prim, const std::string& name);
+// The numbers in a cell's text, separated by anything that isn't part of one: "(0.5, 1)", "[1 2 3]",
+// "-1e-3". Nothing if there's something else in it.
+std::optional<std::vector<double>> parseNumbers(const std::string& text);
+
 }  // namespace usdcc::usd

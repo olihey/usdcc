@@ -491,16 +491,16 @@ int main(int argc, char** argv) {
     {
         // Each view as a panel of its own, the built-in ones and those plugins add, now or later.
         auto viewPanelTypes = std::make_shared<std::set<QString>>();
-        const auto syncViewPanels = [&panelTypes, &stageManager, viewPanelTypes]() {
+        const auto syncViewPanels = [&panelTypes, &stageManager, viewPanelTypes, undoManager]() {
             std::set<QString> now;
             for (const usdcc::usd::PrimvarViewType& type : usdcc::usd::PrimvarViews::instance().types()) {
                 const QString id = usdcc::usd::PrimvarViews::panelTypeId(type.id);
                 now.insert(id);
                 const QString viewId = type.id;
                 panelTypes.add(id, QObject::tr("Primvar %1").arg(type.label),
-                               [&stageManager, viewId](const usdcc::usd::StageRefPtr& stage, const QString& title,
-                                                       QWidget* parent) -> usdcc::ui::ViewPanel* {
-                                   return new usdcc::usd::PrimvarViewPanel(&stageManager, stage, viewId, title, parent);
+                               [&stageManager, viewId, undoManager](const usdcc::usd::StageRefPtr& stage, const QString& title,
+                                                                    QWidget* parent) -> usdcc::ui::ViewPanel* {
+                                   return new usdcc::usd::PrimvarViewPanel(&stageManager, stage, viewId, title, parent, undoManager);
                                });
             }
             for (const QString& id : *viewPanelTypes) {

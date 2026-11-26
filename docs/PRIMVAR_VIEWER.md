@@ -1,9 +1,9 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 to 7 are built** (the model, its Python calls and the validation rules: §13; the panel:
+Status: **phases 1 to 8 are built** (the model, its Python calls and the validation rules: §13; the panel:
 §14; the Values view, Python views and the histogram example: §15; element selection and viewport overlays:
-§16; Color By: §17; the UV View plugin: §18; editing a primvar's structure: §19), after the phase 0 spike
-(§5.2.1). The rest is a plan: §10 has the recommendation, §12 the questions.
+§16; Color By: §17; the UV View plugin: §18; editing a primvar's structure: §19; editing its values: §20),
+after the phase 0 spike (§5.2.1). What's left is the Later row of §11; §12 has the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -472,7 +472,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **5. Color By** — **done** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
 | **6. UV view plugin** — **done** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
 | **7. Editing: structure** — **done** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
-| **8. Editing: values** | Cell edits and bulk operations | M | UI tests |
+| **8. Editing: values** — **done** | Cell edits and bulk operations | M | UI tests |
 | Later | Checker in the viewport, vector lines, face picking in the viewport, UV transforms, overlaps and stretch, Unwrap from Mesh Tools | | |
 
 Phases 1 to 3 need nothing from Hydra and are useful alone. 5 is independent of 4 and 6; 6 needs 4 only
@@ -797,3 +797,43 @@ editing time samples; copying metadata other than the parts (a primvar's `doc`, 
 the readers' `varname` with a primvar (a note says which read it); converting curves' and points'
 interpolations beyond equal counts. **Not tried:** Linux; a stage with a stronger layer in the app (the
 tests cover it).
+
+## 20. As built: phase 8
+
+- **Changing values** (`changePrimvarValues()` in `primvar_edit.h`): picked elements of a primvar (rows of the
+  Values table: points, faces, corners; a constant one's whole value as one) are Set, Added to, Multiplied,
+  Clamped or Remapped, all of each element's numbers or one of them (x of a vector, the second value of an
+  element size of 2). Set takes one number for every chosen number, or one for each; text sets strings,
+  tokens and asset paths, one text for every value of an element or one for each (`splitTexts()`: "a, b,
+  c", quotes keep a comma). Integers are rounded. A constant array is one element however long, as USD
+  applies it whole: writes don't ask it for one value (§4.1's checks are for the other interpolations). Then the whole primvar is written with phase 7's checks
+  and notes, so the same refusals hold (a stronger layer, time samples, a locked layer, an instance
+  proxy) and one undo step undoes it.
+- **Indexed primvars**: a row picks a value other rows may share. A value all of whose rows are changed
+  changes in place; one other rows pick too is copied for the changed rows, so the others keep it, and a
+  note says so ("1 shared value was copied for the changed rows").
+- **In the Values table**: the shown prim's own primvars' cells are editable (double-click or F2); an
+  inherited or the material's column, and the points, faces and corners columns, aren't. A cell's editor
+  has every digit of its value, and neither its index nor a constant array's length (the cell shows
+  "[1] (1.0, 0.0, 0.0)", the editor "(1.0, 0.0, 0.0)"); it takes numbers in any form, "(0.5, 1)",
+  "[1 2 3]", "true", and texts for strings. The table's menu has **Change *name***: Set..., Add..., Multiply..., Clamp...,
+  Remap... (Set only, for text) on the picked rows, asking with a small dialog: which number of each
+  element (All, or x y z, r g b, u v, or 1, 2, 3), and the numbers. A line under the domain says how it
+  went, as the panel's does for commands.
+- **Views get the undo history**: `PrimvarViewContext::undo`, set by the Primvars panel and by a view's own
+  panel, so a view that edits makes undo steps.
+- **Python**: `usdcc.primvars.change_values(prim, name, elements, kind="set", numbers=(), component=-1,
+  text=None)`, one undo step, `ValueError` when refused, the notes returned. `parseNumbers()` and
+  `primvarElementNumbers()` are in C++ for a plugin's own editors.
+
+**Checked:** `primvar_edit_values` (each kind, a component, a shared value copied and one changed in place,
+rounding, a constant array and a single value, an element size of 2, text, and refusals: a row too far,
+too many numbers, clamp backwards, remap from nothing, a component too far, time samples; parsing),
+`primvar_values_editing` (which cells are editable, a cell's edit text, one undo step and the report,
+words that aren't numbers, Add through the Change submenu on picked rows, undo, a UV's components named
+u and v, a shared value copied) and `python_primvars_change_values`. In the app, on the broken test
+stage's `dirt`: typing 42 into a cell's editor, Multiply by 0.5 on four rows through the menu and its
+dialog, and both undone. **Not built:** pasting rows from the clipboard; editing several columns at once;
+editing time samples; a drag that edits as it goes (each change is one write of the whole primvar, which
+§7 expects). **Not tried:** a mesh of millions of rows changed at once (one pass over the values, but the
+whole primvar is written), Linux.

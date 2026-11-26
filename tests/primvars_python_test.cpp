@@ -237,3 +237,35 @@ finally:
 )"),
           "one undo step each in the app; a menu action");
 }
+
+USDCC_TEST(python_primvars_change_values) {
+    CHECK(python(R"(
+from pxr import Usd, UsdGeom
+import usdcc.primvars as p
+stage = Usd.Stage.CreateInMemory()
+mesh = UsdGeom.Mesh.Define(stage, "/Grid")
+mesh.CreateFaceVertexCountsAttr([4])
+mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+mesh.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)])
+grid = mesh.GetPrim()
+p.author(grid, "dirt", [0, 1, 2, 3], "float[]", "vertex")
+p.change_values(grid, "dirt", [1, 2], "add", [10])
+p.change_values(grid, "dirt", [0, 1, 2, 3], "clamp", [0, 11.5])
+assert list(p.values(grid, "dirt")) == [0, 11, 11.5, 3], list(p.values(grid, "dirt"))
+p.author(grid, "st", [(0, 0), (1, 1)], "texCoord2f[]", "faceVarying", indices=[0, 1, 1, 0])
+notes = p.change_values(grid, "st", [2], "set", [0.5], component=0)
+assert [tuple(v) for v in p.values(grid, "st", flattened=True)] == [(0, 0), (1, 1), (0.5, 1), (0, 0)], notes
+assert any("shared value" in note for note in notes), notes
+p.author(grid, "label", ["a", "a", "a", "a"], "string[]", "vertex")
+p.change_values(grid, "label", [3], text="d")
+assert list(p.values(grid, "label")) == ["a", "a", "a", "d"]
+for call, why in [(lambda: p.change_values(grid, "dirt", [9], "set", [1]), "past"),
+                  (lambda: p.change_values(grid, "dirt", [0], "bend", [1]), "isn't a change")]:
+    try:
+        call()
+        raise AssertionError("not refused")
+    except ValueError as error:
+        assert why in str(error), str(error)
+)"),
+          "change_values()");
+}
