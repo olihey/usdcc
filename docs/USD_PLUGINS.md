@@ -611,7 +611,9 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
         for those only), builds hdCycles against the OpenUSD asset (its OpenEXR, Imath and
         Embree too) with the GPU devices, OSL and Alembic off, and puts `hdCycles` with its
         resources in `plugin/usd` and Open Image Denoise's base library, core and CPU device
-        in `bin/` (Windows) or `lib/`. Linux binaries get RUNPATHs relative to `$ORIGIN`.*
+        in `bin/` (Windows) or `plugin/usd/hdCycles/lib` (not `lib/`, which in an installed
+        pack is a link to usdcc's own libraries, §10.2). Linux binaries get RUNPATHs relative
+        to `$ORIGIN`.*
       - *What each platform needed: on Windows OpenUSD's `include/boost-1_86` through MSVC's
         `CL` (Cycles sets `CMAKE_CXX_FLAGS` itself); on Linux Blender's zlib, since Cycles
         hides the system's headers once it uses Blender's libraries, and **GCC 14**: Cycles
