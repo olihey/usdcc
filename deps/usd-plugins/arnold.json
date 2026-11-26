@@ -5,8 +5,9 @@
   "patches": ["patches/arnold-usd-26.08.patch"],
   "sdks": {
     "arnold": {
-      "description": "Arnold SDK 7.5.4.0 for Windows, from Autodesk Account",
-      "files": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "EULA.txt"]
+      "description": "Arnold SDK 7.5.4 (7.5.4.0 or later) for this platform, from Autodesk Account",
+      "files": {"win64": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "EULA.txt"],
+                "macos-arm64": ["include/ai.h", "include/ai_version.h", "bin/libai.dylib", "EULA.txt"]}
     }
   },
   "cmake": ["-Wno-dev", "-DARNOLD_LOCATION={arnold}", "-DUSD_LOCATION={usd}",
@@ -17,12 +18,12 @@
   "licenses": {
     "arnold-sdk": ["{arnold}/EULA.txt"]
   },
-  "platforms": ["win64"],
+  "platforms": ["win64", "macos-arm64"],
   "license": "Apache-2.0",
   "set": "local",
   "publish": false,
   "check": {
-    "preload": ["{arnold}/bin/ai.dll"],
+    "preload": {"win64": ["{arnold}/bin/ai.dll"], "macos-arm64": ["{arnold}/bin/libai.dylib"]},
     "plugin_folders": ["plugin/arnold"],
     "plugins": ["hdArnold", "nodeRegistryArnold", "sceneIndexArnold", "usdImagingArnold"],
     "renderers": ["HdArnoldRendererPlugin"]

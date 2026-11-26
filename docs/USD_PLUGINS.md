@@ -8,7 +8,7 @@ way it already builds OpenUSD itself, and which of them a release ships. This is
 Python 3.13 with the Adobe pack for Windows; its Linux pack, and usdcc's Linux build and
 deploy with it, are built and checked locally (phase 8). Phase 3, Gatling, is built and checked locally on Windows
 and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
-Phase 7, Arnold, is built locally on Windows and renders in usdcc's viewport when
+Phase 7, Arnold, is built locally on Windows and macOS (arm64) and renders in usdcc's viewport when
 Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds.
 Phase 6, Aurora, was tried locally (2026-11-23): hdAurora **builds against our OpenUSD** with a
 small patch, no Autodesk fork needed, and registers in usdcc, but its renderer fails to start
@@ -126,7 +126,8 @@ Notes:
     install, it is in `<OpenUSD>/plugin/arnold`; a deploy would have it in
     `<deploy>/plugin/arnold`, but `tools/deploy.py` leaves `local` packs out (§5).
   - **Turning it on.** Settings > Renderers > Arnold > Arnold folder (`USD/arnoldFolder`),
-    from the next start: an Arnold SDK or install, the folder with `bin/ai.dll`. Once
+    from the next start: an Arnold SDK or install, the folder with `bin/ai.dll`
+    (`bin/libai.dylib` on macOS). Once
     Arnold is on, its 54 render settings join it in that group.
     `usdcc::usd::enableArnold()` (`arnold_runtime.h`), from
     `applyUsdEnvironmentSettings()`, then:
@@ -135,7 +136,10 @@ Notes:
        `usd-plugins/arnold.json` (the pin's `version`);
     2. loads `bin/ai.dll` by its full path (`LOAD_WITH_ALTERED_SEARCH_PATH`), so its own
        DLLs come from its own folder and nothing goes on `PATH`. That folder has Qt 6
-       DLLs of its own (3ds Max's copy and the SDK both do);
+       DLLs of its own (3ds Max's copy and the SDK both do). On macOS `bin/libai.dylib`
+       with `dlopen(RTLD_NOW | RTLD_GLOBAL)`: the plugins ask for `@rpath/libai.dylib`,
+       the install name of the one loaded, so they get it, and its own libraries
+       (licensing) come from its folder through its `@loader_path` rpath;
     3. asks the core its version (`AiGetVersion`). The plugins need the Arnold they were
        built for or a later one of the same 7.x: built against 7.5.4, they don't load
        with 3ds Max 2027's 7.5.2 ("The specified procedure could not be found"). Any
@@ -144,6 +148,18 @@ Notes:
        `PXR_PLUGINPATH_NAME`: OpenUSD reads that in a static constructor of `usd_plug.dll`,
        before `main()`, so setting it there is too late. Child processes don't get them
        either, which they couldn't use without the core.
+  - **macOS** (2026-11-26). The SDK's `libai.dylib` is universal (arm64 and x86_64). The
+    pin lists `macos-arm64`, and its SDK `files` and the check's `preload` are by
+    platform. Built with the Arnold SDK 7.5.4.2 for macOS:
+    `tools/build_usd_plugin.py arnold --usd-install <OpenUSD> --sdk arnold=<SDK> --install`,
+    13 files, the patch unchanged, rpaths only to OpenUSD (`@loader_path/../../lib`).
+    `tests/renderer_viewport_check.py` with `RV_RENDERER=HdArnoldRendererPlugin`: all six
+    steps converge (first frame 2.8 s), the checker texture, the red material and the
+    display colours show, with the watermark. **Not in `~/Downloads`, `~/Desktop` or
+    `~/Documents`:** macOS asks before a program reads those, and usdcc then waits in
+    `dlopen` (or Arnold in its licensing) for an answer that may never be seen. Put the
+    SDK elsewhere, as `~/deps/Arnold-7.5.4.2-darwin`. Arnold's sign-in licensing logs that
+    it can't find Autodesk Identity Manager, and renders with the watermark.
   - **The patch.** `arnold-usd-26.08.patch`: OpenUSD 26.08 (`HD_API_VERSION` 99) removed
     `HdRenderIndex::IsSceneIndexEmulationEnabled()`, which the render delegate calls in
     two places. With 26.08 the render index always takes scene indices, so the patch

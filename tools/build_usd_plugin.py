@@ -31,7 +31,8 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
                       null for a platform that doesn't need it
   sdks                {name: {description, files}}: an SDK that can't be downloaded
                       (it needs a login, as the Arnold SDK does), passed as
-                      --sdk <name>=<folder>, which must have the files listed
+                      --sdk <name>=<folder>, which must have the files listed;
+                      `files` a list, or {platform: list} where they differ
   cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders
   targets             what to build (default: everything)
   install_prefix      where in the pack the install goes (default: its root)
@@ -299,7 +300,8 @@ def _sdks(spec, pack, given):
         if name not in folders:
             fail(f"The {pack} pack needs the {sdk['description']}, which can't be downloaded: "
                  f"pass --sdk {name}=<its folder>")
-        for file in sdk.get("files", []):
+        files = sdk.get("files", [])
+        for file in files.get(ASSET_PLATFORM, []) if isinstance(files, dict) else files:  # by platform, or the same on all
             if not (folders[name] / file).is_file():
                 fail(f"{folders[name]} isn't the {sdk['description']}: it has no {file}")
     return folders

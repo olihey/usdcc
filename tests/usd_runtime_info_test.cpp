@@ -210,7 +210,12 @@ USDCC_TEST(arnold_runtime) {
     std::filesystem::create_directories(fake / "arnold");
     const std::string fakeRoot = (fake / "usd").generic_string();
     const ArnoldStatus noPack = enableArnold((fake / "arnold").generic_string(), fakeRoot);
+#if defined(_WIN32) || defined(__APPLE__)
 #if defined(_WIN32)
+    const char* const coreName = "bin/ai.dll";
+#else
+    const char* const coreName = "bin/libai.dylib";
+#endif
     CHECK(!noPack.enabled && noPack.message.find("no Arnold plugins") != std::string::npos,
           "no pack: %s", noPack.message.c_str());
     std::filesystem::create_directories(fake / "usd" / "plugin" / "arnold");
@@ -218,10 +223,10 @@ USDCC_TEST(arnold_runtime) {
     std::ofstream(fake / "usd" / "plugin" / "arnold" / "plugInfo.json") << R"({"Includes": ["*/resources/"]})";
     std::ofstream(fake / "usd" / "usd-plugins" / "arnold.json") << R"({"pack": "arnold", "version": "7.5.4.0"})";
     const ArnoldStatus noCore = enableArnold((fake / "arnold").generic_string(), fakeRoot);
-    CHECK(!noCore.enabled && noCore.packVersion == "7.5.4.0" && noCore.message.find("bin/ai.dll") != std::string::npos,
+    CHECK(!noCore.enabled && noCore.packVersion == "7.5.4.0" && noCore.message.find(coreName) != std::string::npos,
           "the pack's version read, and no Arnold core: %s", noCore.message.c_str());
 #else
-    CHECK(!noPack.enabled && noPack.message.find("Windows-only") != std::string::npos, "%s", noPack.message.c_str());
+    CHECK(!noPack.enabled && noPack.message.find("Windows and macOS only") != std::string::npos, "%s", noPack.message.c_str());
 #endif
     CHECK(PXR_NS::ArchGetEnv("PXR_PLUGINPATH_NAME") == before, "the plugin path left alone when Arnold stays off");
     std::filesystem::remove_all(fake);
