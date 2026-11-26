@@ -198,6 +198,49 @@ index 568aa68..9013233 100644
  
      void setSceneDelegate(pxr::HdSceneDelegate*);
      pxr::UsdImagingDelegate* usdImagingDelegate() const { return mUsdImagingDelegate; }
+diff --git a/lib/hydramoonray/RenderSettings.cc b/lib/hydramoonray/RenderSettings.cc
+index a8e12cf..71fcc41 100644
+--- a/lib/hydramoonray/RenderSettings.cc
++++ b/lib/hydramoonray/RenderSettings.cc
+@@ -47,18 +47,32 @@ RenderSettings::addDescriptors(HdRenderSettingDescriptorList& descriptorList) co
+ 
+         { "Show Debug Messages",  Tokens->debug,               VtValue(getEnv("HDMOONRAY_DEBUG", false)) },
+         { "Show Info Messages",   Tokens->info,                VtValue(getEnv("HDMOONRAY_INFO", false)) },
+-        { "Rdla output",          Tokens->rdlOutput,           VtValue(getEnv("HDMOONRAY_RDLA_OUTPUT","")) },
++        { "RDLA Output",          Tokens->rdlOutput,           VtValue(getEnv("HDMOONRAY_RDLA_OUTPUT","")) },
+         { "Disable Lighting",     Tokens->disableLighting,     VtValue(getEnv("HDMOONRAY_DISABLE_LIGHTING", false)) },
+-        { "DoubleSided",          Tokens->doubleSided,         VtValue(getEnv("HDMOONRAY_DOUBLESIDED", false)) },
+-        { "Decode Normals",       Tokens->decodeNormals,       VtValue(getEnv("HDMOONRAY_DOUBLESIDED", false)) },
++        { "Double Sided",         Tokens->doubleSided,         VtValue(getEnv("HDMOONRAY_DOUBLESIDED", false)) },
++        { "Decode Normals",       Tokens->decodeNormals,       VtValue(getEnv("HDMOONRAY_DECODE_NORMALS", false)) },
+         { "Enable Motion Blur",   Tokens->enableMotionBlur,    VtValue(getEnv("HDMOONRAY_ENABLE_MOTION_BLUR", true)) },
+         { "Prune Willow",         Tokens->pruneWillow,         VtValue(getEnv("HDMOONRAY_PRUNE_WILLOW", false)) },
+-        { "Prune FurDeform",      Tokens->pruneFurDeform,      VtValue(getEnv("HDMOONRAY_PRUNE_FURDEFORM", false)) },
++        { "Prune Fur Deform",      Tokens->pruneFurDeform,      VtValue(getEnv("HDMOONRAY_PRUNE_FURDEFORM", false)) },
+         { "Prune Volumes",        Tokens->pruneVolume,         VtValue(getEnv("HDMOONRAY_PRUNE_VOLUME", false)) },
+-        { "Prune WrapDeform",     Tokens->pruneWrapDeform,     VtValue(getEnv("HDMOONRAY_PRUNE_WRAPDEFORM", false)) },
+-        { "Prune CurveDeform",    Tokens->pruneCurveDeform,    VtValue(getEnv("HDMOONRAY_PRUNE_CURVEDEFORM", false)) },
++        { "Prune Wrap Deform",     Tokens->pruneWrapDeform,     VtValue(getEnv("HDMOONRAY_PRUNE_WRAPDEFORM", false)) },
++        { "Prune Curve Deform",    Tokens->pruneCurveDeform,    VtValue(getEnv("HDMOONRAY_PRUNE_CURVEDEFORM", false)) },
+         { "Force Polygon",        Tokens->forcePolygon,        VtValue(getEnv("HDMOONRAY_FORCE_POLYGON", false)) },
+         { "Execution Mode",       Tokens->executionMode,       VtValue(getEnv("HDMOONRAY_EXEC_MODE", "auto")) },
++        // The scene variables a render's quality is made of, at MoonRay's own defaults, so that
++        // they can be set where render settings are set. apply() reads them as any other
++        // "moonray:sceneVariable:<name>".
++        { "Sampling Mode",         TfToken("moonray:sceneVariable:sampling_mode"),         VtValue(std::string("uniform")) },
++        { "Pixel Samples",         TfToken("moonray:sceneVariable:pixel_samples"),         VtValue(8) },
++        { "Light Samples",         TfToken("moonray:sceneVariable:light_samples"),         VtValue(2) },
++        { "BSDF Samples",          TfToken("moonray:sceneVariable:bsdf_samples"),          VtValue(2) },
++        { "Min Adaptive Samples",  TfToken("moonray:sceneVariable:min_adaptive_samples"),  VtValue(16) },
++        { "Max Adaptive Samples",  TfToken("moonray:sceneVariable:max_adaptive_samples"),  VtValue(4096) },
++        { "Target Adaptive Error", TfToken("moonray:sceneVariable:target_adaptive_error"), VtValue(10.0f) },
++        { "Max Depth",             TfToken("moonray:sceneVariable:max_depth"),             VtValue(5) },
++        { "Max Diffuse Depth",     TfToken("moonray:sceneVariable:max_diffuse_depth"),     VtValue(2) },
++        { "Max Glossy Depth",      TfToken("moonray:sceneVariable:max_glossy_depth"),      VtValue(2) },
++        { "Max Mirror Depth",      TfToken("moonray:sceneVariable:max_mirror_depth"),      VtValue(3) },
+     };
+     for (const auto& desc : descriptors) {
+         descriptorList.push_back(desc);
 diff --git a/plugin/CMakeLists.txt b/plugin/CMakeLists.txt
 index d4e8f48..a4af4b5 100644
 --- a/plugin/CMakeLists.txt
@@ -358,6 +401,22 @@ index 0000000..b316fa0
 +}
 +
 +PXR_NAMESPACE_CLOSE_SCOPE
+diff --git a/plugin/hd_moonray/ArrasSettings.cc b/plugin/hd_moonray/ArrasSettings.cc
+index 406241e..e4025ef 100644
+--- a/plugin/hd_moonray/ArrasSettings.cc
++++ b/plugin/hd_moonray/ArrasSettings.cc
+@@ -156,9 +156,9 @@ ArrasSettings::addDescriptors(HdRenderSettingDescriptorList& descriptorList) con
+         { "Use Remote Hosts",        Tokens->useRemoteHosts,       VtValue(hosts > 0) },
+         { "Remote Hosts",            Tokens->remoteHosts,          VtValue(hosts > 0 ? hosts : 5) },
+         { "Local Reserved Cores",    Tokens->localReservedCores,   VtValue(getEnv("HDMOONRAY_LOCAL_RESERVED_CORES",1))},
+-        { "Log Level(1-5)",          Tokens->logLevel,             VtValue(getEnv("HDMOONRAY_LOGLEVEL", 1)) },
++        { "Arras Log Level (1-5)",          Tokens->logLevel,             VtValue(getEnv("HDMOONRAY_LOGLEVEL", 1)) },
+         { "Max FPS",                 Tokens->maxFps,               VtValue(getEnv("HDMOONRAY_MAX_FPS", 12.0f)) },
+-        { "Maximum connect retries", Tokens->maxConnectRetries,    VtValue(getEnv("HDMOONRAY_MAX_CONNECT_RETRIES",2)) },
++        { "Max Connect Retries", Tokens->maxConnectRetries,    VtValue(getEnv("HDMOONRAY_MAX_CONNECT_RETRIES",2)) },
+         { "Enable Denoising",        Tokens->enableDenoise,        VtValue(getEnv("HDMOONRAY_ENABLE_DENOISE",false)) },
+         { "Enable OIDN",             Tokens->enableOIDN,           VtValue(getEnv("HDMOONRAY_ENABLE_DENOISE_OIDN",false)) },
+         { "Denoise Albedo Guiding",  Tokens->denoiseAlbedoGuiding, VtValue(getEnv("HDMOONRAY_DENOISE_ALBEDO_GUIDING", false)) },
 diff --git a/plugin/hd_moonray/CMakeLists.txt b/plugin/hd_moonray/CMakeLists.txt
 index 1aa3088..ef0f00e 100644
 --- a/plugin/hd_moonray/CMakeLists.txt

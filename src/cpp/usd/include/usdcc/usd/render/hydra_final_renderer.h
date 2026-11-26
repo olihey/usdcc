@@ -18,6 +18,9 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 namespace usdcc::render {
 
+// Whether a delegate renders only the data window of a framing, as a tile needs.
+USDCC_RENDER_API bool rendersRegions(const PXR_NS::TfToken& pluginId);
+
 class USDCC_RENDER_API HydraFinalRenderer : public FinalRenderer {
 public:
     explicit HydraFinalRenderer(PXR_NS::TfToken pluginId);
@@ -26,7 +29,8 @@ public:
     std::string name() const override { return m_name; }
     // Storm's, when stormProblem() says one (usdcc_node's OpenGL check); none for the others.
     std::string setupProblem() const override;
-    Capabilities capabilities() const override { return {true, true}; }
+    // Tiles, but not with MoonRay: it renders the whole view at a tile's size (docs/MOONRAY.md §7.8).
+    Capabilities capabilities() const override { return {rendersRegions(m_pluginId), true}; }
     std::vector<std::string> namespaces() const override;
     // The delegate's settings (renderer_settings.h), defaulting to Settings > Renderers' values.
     std::vector<RenderSettingField> settingsSchema() const override;

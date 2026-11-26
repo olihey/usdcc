@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <utility>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -43,7 +44,7 @@ std::vector<RendererSettingInfo> readSettings(const TfToken& pluginId) {
     HdRenderDelegate* delegate = plugin->CreateRenderDelegate();
     if (!delegate) return settings;
     for (const HdRenderSettingDescriptor& descriptor : delegate->GetRenderSettingDescriptors()) {
-        if (isAppOwnedRendererSetting(descriptor.key)) continue;
+        if (isAppOwnedRendererSetting(descriptor.key) || isUnusedRendererSetting(pluginId, descriptor.key)) continue;
         const std::optional<core::SettingType> type = settingType(descriptor.defaultValue);
         if (!type) {
             USDCC_LOG_DEBUG("usdcc.viewport", "Renderer setting {} of {} is a {}: not shown", descriptor.key.GetString(),
@@ -61,6 +62,16 @@ std::vector<RendererSettingInfo> readSettings(const TfToken& pluginId) {
 }  // namespace
 
 bool isAppOwnedRendererSetting(const TfToken& key) { return key == HdRenderSettingsTokens->domeLightCameraVisibility; }
+
+bool isUnusedRendererSetting(const TfToken& pluginId, const TfToken& key) {
+    // The pack has no Arras coordinator for remote hosts, only the local session.
+    static const std::set<std::pair<std::string, std::string>> unused = {
+        {"HdMoonrayRendererPlugin", "useRemoteHosts"},
+        {"HdMoonrayRendererPlugin", "remoteHosts"},
+        {"HdMoonrayRendererPlugin", "maxConnectRetries"},
+    };
+    return unused.count({pluginId.GetString(), key.GetString()}) > 0;
+}
 
 const std::vector<RendererSettingInfo>& rendererSettings(const TfToken& pluginId) {
     static std::map<TfToken, std::vector<RendererSettingInfo>> cache;

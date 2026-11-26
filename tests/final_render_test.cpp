@@ -428,6 +428,9 @@ USDCC_TEST(final_render_embree) {
     if (!renderer) return;
     CHECK(renderer->namespaces() == std::vector<std::string>{"embree"}, "in the embree namespace");
     CHECK(hydraNamespace(TfToken("HdArnoldRendererPlugin")) == "arnold", "Arnold's would be arnold");
+    CHECK(renderer->capabilities().tiles, "Embree renders tiles");
+    CHECK(!rendersRegions(TfToken("HdMoonrayRendererPlugin")) && !rendersRegions(TfToken("HdMoonrayRendererDebugPlugin")),
+          "MoonRay doesn't: it renders the whole view at a tile's size");
     const std::vector<RenderSettingField> schema = renderer->settingsSchema();
     const auto bounces = std::find_if(schema.begin(), schema.end(), [](const RenderSettingField& f) { return f.rendererKey == TfToken("ty:maxBounces"); });
     CHECK(bounces != schema.end() && bounces->attribute == "embree:ty:maxBounces", "Max Bounces as embree:ty:maxBounces");

@@ -30,13 +30,18 @@ using RendererSettingValues = std::map<PXR_NS::TfToken, PXR_NS::VtValue>;
 // The settings `pluginId` ("HdEmbreeRendererPlugin") lists, in its order. Read from a
 // delegate made for the purpose (no GPU or GL context needed) and kept for later calls.
 // Leaves out the settings of another type than a bool, a number or a string, and those
-// the app sets itself (isAppOwnedRendererSetting()). Empty for an unknown plugin or one
+// the app sets itself (isAppOwnedRendererSetting()), and those usdcc has no use for
+// (isUnusedRendererSetting()). Empty for an unknown plugin or one
 // whose delegate can't be made.
 const std::vector<RendererSettingInfo>& rendererSettings(const PXR_NS::TfToken& pluginId);
 
 // Settings the viewport sets from its own options, never shown as the delegate's:
 // domeLightCameraVisibility (the Display options' dome light textures).
 bool isAppOwnedRendererSetting(const PXR_NS::TfToken& key);
+
+// A delegate's settings for what a usdcc install doesn't have: MoonRay's remote Arras hosts
+// (docs/MOONRAY.md §7.8). Left at the delegate's default.
+bool isUnusedRendererSetting(const PXR_NS::TfToken& pluginId, const PXR_NS::TfToken& key);
 
 // The Settings key of a delegate's setting: "Renderers/<pluginId>/<key>".
 std::string rendererSettingKey(const PXR_NS::TfToken& pluginId, const PXR_NS::TfToken& key);
