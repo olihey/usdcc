@@ -263,31 +263,55 @@ std::vector<InstalledPack> PackStore::installed(const std::string& version) cons
     return packs;
 }
 
-std::vector<std::string> PackStore::wanted() const {
+namespace {
+
+// One of wanted.json's lists of names, valid ones once each.
+std::vector<std::string> readNames(const QJsonObject& json, const char* key) {
     std::vector<std::string> names;
-    for (const QJsonValue& value : readJson(m_options.root / kWantedFile).value("packs").toArray()) {
+    for (const QJsonValue& value : json.value(key).toArray()) {
         const std::string name = value.toString().toStdString();
         if (isPackName(name) && std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
     }
     return names;
 }
 
-bool PackStore::setWanted(const std::string& name, bool wanted) {
-    if (!isPackName(name)) return false;
-    std::vector<std::string> names = this->wanted();
-    const auto found = std::find(names.begin(), names.end(), name);
-    if ((found != names.end()) == wanted) return true;
-    if (wanted) {
-        names.push_back(name);
-    } else {
-        names.erase(found);
-    }
+QJsonArray sortedArray(std::vector<std::string> names) {
     std::sort(names.begin(), names.end());
     QJsonArray array;
     for (const std::string& entry : names) array.append(QString::fromStdString(entry));
+    return array;
+}
+
+}  // namespace
+
+std::vector<std::string> PackStore::wanted() const {
+    return readNames(readJson(m_options.root / kWantedFile), "packs");
+}
+
+std::vector<std::string> PackStore::removed() const {
+    return readNames(readJson(m_options.root / kWantedFile), "removed");
+}
+
+bool PackStore::setWanted(const std::string& name, bool wanted) {
+    if (!isPackName(name)) return false;
+    const QJsonObject json = readJson(m_options.root / kWantedFile);
+    std::vector<std::string> names = readNames(json, "packs");
+    std::vector<std::string> removed = readNames(json, "removed");
+    const auto found = std::find(names.begin(), names.end(), name);
+    const auto foundRemoved = std::find(removed.begin(), removed.end(), name);
+    if ((found != names.end()) == wanted && (foundRemoved != removed.end()) != wanted) return true;
+    if (wanted) {
+        if (found == names.end()) names.push_back(name);
+        if (foundRemoved != removed.end()) removed.erase(foundRemoved);
+    } else {
+        if (found != names.end()) names.erase(found);
+        if (foundRemoved == removed.end()) removed.push_back(name);
+    }
     std::error_code error;
     std::filesystem::create_directories(m_options.root, error);
-    return writeJson(m_options.root / kWantedFile, QJsonObject{{"packs", array}});
+    QJsonObject out{{"packs", sortedArray(std::move(names))}};
+    if (!removed.empty()) out.insert("removed", sortedArray(std::move(removed)));
+    return writeJson(m_options.root / kWantedFile, out);
 }
 
 std::vector<InstalledPack> PackStore::prepare(const std::set<std::string>& keepVersions) {

@@ -17,7 +17,8 @@ class InUseMarker;
 // never in the app's own, one folder per usdcc version, since a pack is built for
 // exactly one:
 //
-//   <root>/wanted.json                 the packs the user installed; kept over updates
+//   <root>/wanted.json                 the packs the user installed, and those they
+//                                      removed; kept over updates
 //   <root>/26.12.1-linux-x64/moonray/  a plugin folder (usdcc-plugin.json), laid out
 //                                      as an install: plugin/usd/..., bin/ on Windows,
 //                                      and pack.json, .in-use
@@ -91,7 +92,11 @@ public:
 
     // wanted.json: the packs the user chose, whatever version has them.
     std::vector<std::string> wanted() const;
+    // Not wanted puts the pack among the removed ones, wanted takes it out of them.
     bool setWanted(const std::string& name, bool wanted);
+    // The packs the user removed and hasn't installed again: a session saved with one
+    // loads without it, and says nothing (docs/SESSIONS.md §4.3).
+    std::vector<std::string> removed() const;
 
     // At the start, before the plugins are scanned. Deletes the packs marked removed
     // and the folders of versions lower than this one, where no usdcc uses them

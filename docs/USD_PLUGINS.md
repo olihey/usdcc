@@ -839,7 +839,8 @@ until a release has shown that this works, and no Windows optional pack is publi
 
 ```text
 packs/
-  wanted.json                      the packs the user installed; kept over every update
+  wanted.json                      the packs the user installed ("packs") and removed
+                                   ("removed"); kept over every update
   26.12.1-linux-x64/               one per usdcc version and platform
     moonray/                       a usdcc plugin folder, laid out as an install
       usdcc-plugin.json            id org.usdcc.pack.moonray, "usd": ["plugin/usd"]
@@ -941,8 +942,10 @@ a pack that is in the store all the same is still loaded.
   (`zipfile` / `tarfile` with the `data` filter: no path or link may lead out of the folder), a
   check that it is one folder with a `usdcc-plugin.json`, the rename, and the pack joins
   `wanted.json`. Then "MoonRay is installed" with **Restart Now**.
-- **Remove...** asks once, naming the pack and the room it frees. The pack leaves `wanted.json`
-  at once, so no update and no start fetches it again. One this usdcc hasn't loaded is deleted at
+- **Remove...** asks once, naming the pack and the room it frees. The pack leaves `wanted.json`'s
+  `packs` at once, so no update and no start fetches it again, and joins its `removed`, so a
+  session saved with it loads without it quietly ([SESSIONS.md](SESSIONS.md) §4.3); installing it
+  again takes it out. One this usdcc hasn't loaded is deleted at
   once; a loaded one is marked, goes at the next start, and **Keep** takes that back.
 - **Nowhere else.** The viewport's Renderer menu has no entry for packs: a pack is plugins of any
   kind, and View > Plugins is where they are managed.

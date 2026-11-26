@@ -179,7 +179,8 @@ sessions/
     }
   ],
   "plugins": [
-    {"id": "usdcc.vray", "version": "0.3.0"}
+    {"id": "usdcc.vray", "version": "0.3.0"},
+    {"id": "org.usdcc.pack.moonray", "version": "1.0.0", "pack": "moonray"}
   ],
   "layout": {
     "geometry": "AdnQywADAAAAAAA...",
@@ -274,7 +275,9 @@ installed") with:
   `ViewPanelRegistry::savePanels()` already does, so they come back with the plugin.
 - **Cancel**.
 
-A plugin that isn't installed only warns; it can't block loading.
+A plugin that isn't installed only warns; it can't block loading. A plugin of an optional pack
+(`"pack"`, [USD_PLUGINS.md](USD_PLUGINS.md) §10) that the user removed doesn't even warn: the session
+loads without it, as it was asked to.
 
 ### 4.4 Saving
 

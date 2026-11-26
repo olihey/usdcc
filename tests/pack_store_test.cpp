@@ -145,6 +145,13 @@ USDCC_TEST(pack_store_remembers_what_is_wanted) {
     CHECK(store.wanted() == (std::vector<std::string>{"cycles", "moonray"}), "and listed in order");
     CHECK(PackStore(sandbox.options("27.1.1")).wanted() == store.wanted(), "for every version: an update keeps them");
     CHECK(store.setWanted("cycles", false) && store.wanted() == std::vector<std::string>{"moonray"}, "and taken out again");
+    CHECK(store.removed() == std::vector<std::string>{"cycles"}, "remembered as removed");
+    CHECK(store.setWanted("cycles", true) && store.removed().empty() && store.wanted().size() == 2,
+          "until it's installed again");
+    CHECK(store.setWanted("moonray", false) && store.setWanted("moonray", false) &&
+              store.removed() == std::vector<std::string>{"moonray"},
+          "and removed once, however often");
+    CHECK(PackStore(sandbox.options("27.1.1")).removed() == store.removed(), "for every version too");
     CHECK(!store.setWanted("../elsewhere", true) && !store.setWanted("", true) && !store.setWanted(".hidden", true),
           "a name is one folder's, nothing else");
 }

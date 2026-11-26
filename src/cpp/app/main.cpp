@@ -10,6 +10,7 @@
 #include "file_open_events.h"
 #include "startup.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -422,6 +423,10 @@ int main(int argc, char** argv) {
     sessionContext.setLoading = [&sessionLoading](bool loading) { sessionLoading = loading; };
     sessionContext.workspace = [&workspaces]() { return workspaces.currentId(); };
     sessionContext.setWorkspace = [&workspaces](const QString& id) { workspaces.setCurrentId(id); };
+    sessionContext.packRemoved = [&packs](const QString& pack) {
+        const std::vector<std::string> removed = packs.removed();
+        return std::find(removed.begin(), removed.end(), pack.toStdString()) != removed.end();
+    };
     // Restart and Load (§4.3): closes the window, asking what closing asks, and once
     // the app has quit starts it again with `arguments` (end of main()).
     sessionContext.restart = [&window, &restartRequested, &restartArguments](const QStringList& arguments) {

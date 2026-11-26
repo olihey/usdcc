@@ -353,6 +353,8 @@ USDCC_TEST(session_plugins_differ) {
         restartedWith = arguments;
         return restartWorks;
     };
+    QStringList removedPacks;
+    context.packRemoved = [&](const QString& pack) { return removedPacks.contains(pack); };
     SessionController sessions(context, folder.filePath("sessions"));
     QJsonObject json = sessions.capture("Plugins", QImage());
     CHECK(json.value("plugins").toArray().size() == 1, "the session lists the running plugin");
@@ -389,6 +391,25 @@ USDCC_TEST(session_plugins_differ) {
     CHECK(sessions.load(json, options, &error) == SessionController::LoadResult::Loaded, "or loads without them: %s",
           qPrintable(error));
     CHECK(sessions.warnings().join("\n").contains("Absent Plugin"), "saying what isn't here");
+
+    // A pack's plugin, from a pack the user removed: left out, and nothing said.
+    QJsonObject removedPack;
+    removedPack.insert("id", "org.usdcc.pack.hello");
+    removedPack.insert("name", "Hello");
+    removedPack.insert("pack", "hello");
+    QJsonObject keptPack;
+    keptPack.insert("id", "org.usdcc.pack.moonray");
+    keptPack.insert("name", "MoonRay");
+    keptPack.insert("pack", "moonray");
+    QJsonArray packs;
+    packs << QJsonObject{{"id", "sess_on"}} << removedPack << keptPack;
+    json.insert("plugins", packs);
+    QStringList missing = sessions.pluginDifference(json).missing;
+    missing.sort();
+    CHECK(missing == QStringList({"Hello", "MoonRay"}), "both missing while none was removed: %s", qPrintable(missing.join(",")));
+    removedPacks << "hello";
+    missing = sessions.pluginDifference(json).missing;
+    CHECK(missing == QStringList{"MoonRay"}, "a removed pack isn't missing; one that wasn't is: %s", qPrintable(missing.join(",")));
     plugins.deactivate(pythonTestApp().python);
 }
 
