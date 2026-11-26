@@ -7,7 +7,10 @@ OpenUSD install. This checks, first with the two still apart:
   - no file of the pack is already in the OpenUSD install, and no DLL (or .so)
     in it has the name of one there: two with one name can't both load in a
     process, and the first one wins;
-  - no text file in the pack names a --forbid folder (the build's).
+  - no text file in the pack names a --forbid folder (the build's);
+  - with the check's "libraries" (names without "lib", the extension or a
+    version), every library the pack has outside plugin/ is one of them: only
+    what the pin names ships, so nothing a build happens to install comes along.
 
 Then it copies the pack over the install and, in a fresh Python with nothing of
 this machine's environment, does what the pin's "check" asks:
@@ -167,6 +170,12 @@ def _is_library(name):
     return name.endswith((".dll", ".dylib")) or name.endswith(".so") or ".so." in name
 
 
+def _library_name(file):
+    """A library's name without its folder, "lib", extension and version: libfoo.so.2 is foo."""
+    name = Path(file).name.split(".")[0]
+    return name[3:] if name.startswith("lib") and not WINDOWS else name
+
+
 def _key(text):
     """As the file system compares names: Windows ignores case."""
     return text.lower() if WINDOWS else text
@@ -196,6 +205,12 @@ def static_checks(pack, usd, pack_dir, forbidden):
             problems.append(f"already in the OpenUSD install: {file}")
         elif _is_library(file) and _key(Path(file).name) in usd_libraries:
             problems.append(f"{file} has the name of the OpenUSD install's {usd_libraries[_key(Path(file).name)]}")
+
+    allowed = usd_plugin_asset.load(pack).get("check", {}).get("libraries")
+    if allowed is not None:
+        for file in files:
+            if _is_library(file) and not file.startswith("plugin/") and _library_name(file) not in allowed:
+                problems.append(f"{file} is a library the pin's check doesn't list in \"libraries\"")
 
     needles = []
     for folder in forbidden:

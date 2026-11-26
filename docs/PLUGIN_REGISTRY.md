@@ -101,7 +101,7 @@ a proposal or an assumption. §11 has the questions still open.
 | Viewport Broadcast | 0.3 MB | Yes |
 | Blender mesh tools | 2.2 MB | Its own distribution (GPL) |
 | MoonRay pack | 214 MB download | A separate archive, Linux and macOS |
-| Cycles pack | 126 MB installed | Not yet |
+| Cycles pack | 55 MB installed, 45 MB zipped (CPU only) | Not yet |
 | Gatling pack | 58 MB zipped | Not published (GPL) |
 
 So taking the shipped plugins out saves about 4 MB of 225. What the registry is for:
