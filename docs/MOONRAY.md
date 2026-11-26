@@ -8,7 +8,7 @@ in-process and through a local Arras session, build against the published OpenUS
 `deps/usd-plugins/moonray.json`, which passes its check and renders in usdcc's viewport on Ubuntu 24.04 in WSL.
 Its licences are read (§3.1), and a Linux release attaches it as a download of its own (§7.5), once CI
 has published the pack. The pack builds on macOS (Apple silicon) too and renders there in usdcc (§7.6); CI
-hasn't built that one. Its nodes are in the Material Editor (§7.7). **Linux x64 and macOS: no Windows, by decision.**
+hasn't built that one. Its nodes are in the Material Editor (§7.7), and final renders are checked (§7.8). **Linux x64 and macOS: no Windows, by decision.**
 
 ## 1. Short answers
 
@@ -532,6 +532,41 @@ shows the same material's UsdPreviewSurface.
 
 **Not tried:** the editor's panel by hand, macOS (CI builds and checks the pack there), each of the 102 classes (two
 were rendered: `DwaBaseMaterial` and `CheckerboardMap`), hair, volumes and displacement.
+
+### 7.8 Results of phase 6, settings and final renders (2026-11-26)
+
+In WSL, usdcc built from this branch over the published Linux asset and the pack. **A final frame is
+written**, with each delegate, through `tests/moonray_final_render_check.py` (§7.7's scene, by hand):
+
+| | MoonRay (Arras) | MoonRay (in-process) |
+|---|---|---|
+| A frame, color and depth AOVs, EXR and PNG | yes, 1.4 s at 320 × 200 | yes, 1.3 s |
+| 2 × 2 tiles | a whole frame (below) | the same |
+| Frames 1 to 3, the plane turning | yes, three files | yes |
+| Time limit 3 s, 4096 pixel samples | stopped at 3.1 s, with an image | **ended at 0.6 s**: its progressive render says it's done after its passes, whatever the samples |
+| Cancel after 1 s | cancelled, no file | finished first, as above |
+| A render after the cancel | yes | yes |
+
+No `execComp` was left after the app quit.
+
+- **Tiles:** hdMoonray renders the whole view at the size of the framing's data window (`RenderPass.cc`),
+  which a tile can't use: the read-back failed ("The renderer gave no image back"). Both MoonRay delegates
+  say they don't render regions (`rendersRegions()` in
+  [hydra_final_renderer.cpp](../src/cpp/usd/src/render/hydra_final_renderer.cpp)), so a job renders their
+  frames whole, as it does for any renderer without tiles.
+- **Settings** (Settings > Renderers, and the Render Settings panel's MoonRay tab):
+  - added, at MoonRay's own defaults: sampling mode, pixel, light and BSDF samples, min and max adaptive
+    samples and the target error, and four ray depths. hdMoonray reads any `moonray:sceneVariable:<name>`,
+    but lists none, and usdcc passes on only what a renderer lists. On the prim they are
+    `moonray:sceneVariable:pixel_samples` for MoonRay and `moonrayDebug:moonray:sceneVariable:pixel_samples`
+    for the in-process one.
+  - left out: remote hosts, their count and connect retries. The pack has no Arras coordinator.
+  - fixed: Decode Normals read `HDMOONRAY_DOUBLESIDED`; labels ("RDLA Output", "Double Sided",
+    "Arras Log Level (1-5)", ...).
+  All of it is in the hdMoonray patch, but the hidden ones (`isUnusedRendererSetting()`).
+
+**Not tried:** the panels by hand, a real scene, denoising (Open Image Denoise is in the pack), macOS, and
+whether the in-process renderer takes the sample counts.
 
 ## 8. Decisions
 

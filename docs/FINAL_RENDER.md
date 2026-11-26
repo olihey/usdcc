@@ -115,6 +115,8 @@ A plugin adds one with `Host::addFinalRenderer()` and removes it when it's turne
   - color correction is off, so the images are linear;
   - delegates other than Storm get `SetActiveRenderSettingsPrimPath`, for those that read the
     prim themselves.
+- **Tiles:** every delegate but MoonRay's, which renders the whole view at a tile's size; its jobs
+  render whole frames ([MOONRAY.md](MOONRAY.md) §7.8).
 - **A stage without lights** gets Hydra's dome, as a viewport does.
 - **Read back:** each AOV's render buffer is mapped and turned into float RGBA. Hydra's rows run
   bottom to top. One-channel AOVs (depth) have the value in R, G and B.

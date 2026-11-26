@@ -67,6 +67,10 @@ USDCC_TEST(renderer_settings_of_a_delegate) {
               "%s: not the dome light's visibility, which Display sets", plugin.GetText());
     }
     CHECK(usdcc::usd::rendererSettings(TfToken("HdNoSuchRendererPlugin")).empty(), "nothing for an unknown plugin");
+    CHECK(usdcc::usd::isUnusedRendererSetting(TfToken("HdMoonrayRendererPlugin"), TfToken("remoteHosts")) &&
+              !usdcc::usd::isUnusedRendererSetting(TfToken("HdMoonrayRendererPlugin"), TfToken("maxFps")) &&
+              !usdcc::usd::isUnusedRendererSetting(kEmbree, TfToken("remoteHosts")),
+          "MoonRay's remote hosts aren't listed, and nothing else is left out");
 
     // A delegate's value and a setting's, both ways.
     using usdcc::usd::toRendererValue;
