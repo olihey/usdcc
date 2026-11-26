@@ -294,6 +294,9 @@ endif()
 usdcc_feature(VIEWPORT_BROADCAST LABEL "Viewport Broadcast" DEFAULT ON
     DOC "Viewport Broadcast: a viewport on a web page (docs/VIEWPORT_BROADCAST.md)"
     PLUGINS org.usdcc.viewport-broadcast FOLDERS viewport_broadcast)
+usdcc_feature(UV_VIEW LABEL "UV View" DEFAULT ON
+    DOC "UV View: a mesh's UVs laid out flat in the Primvars panel (docs/PRIMVAR_VIEWER.md)"
+    PLUGINS org.usdcc.uv-view FOLDERS uv_view)
 usdcc_feature(HTTP LABEL "HTTP assets" DEFAULT ON
     DOC "Stages and assets from http:// and https:// (docs/HTTP_RESOLVER.md)"
     PLUGINS org.usdcc.http-assets FOLDERS http)
@@ -370,6 +373,10 @@ endif()
 # (docs/VIEWPORT_BROADCAST.md). Bundled and enabled, like Jolt Physics.
 if(USDCC_BUILD_VIEWPORT_BROADCAST)
     add_subdirectory(src/plugins/viewport_broadcast)
+endif()
+# UV View: the Primvars panel's UV tab (docs/PRIMVAR_VIEWER.md §18). Bundled and enabled.
+if(USDCC_BUILD_UV_VIEW)
+    add_subdirectory(src/plugins/uv_view)
 endif()
 # Jolt Physics, the physics backend, bundled and enabled (docs/PHYSICS.md §4.1).
 if(USDCC_BUILD_PHYSICS_JOLT)

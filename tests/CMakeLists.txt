@@ -87,6 +87,10 @@ add_dependencies(usdcc_tests usdcc_node)
 # docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
 # plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
 # A feature left out of the build (docs/BUILD_OPTIONS.md) takes its tests with it.
+if(USDCC_BUILD_UV_VIEW)
+    target_sources(usdcc_tests PRIVATE uv_layout_test.cpp)
+    target_link_libraries(usdcc_tests PRIVATE usdcc_uv_view_core)
+endif()
 if(USDCC_BUILD_PHYSICS_JOLT)
     target_sources(usdcc_tests PRIVATE physics_spike_test.cpp physics_test.cpp physics_bake_joints_test.cpp)
     target_link_libraries(usdcc_tests PRIVATE Jolt::Jolt usdcc_physics_jolt_backend)
@@ -180,6 +184,10 @@ endif()
 if(USDCC_BUILD_VIEWPORT_BROADCAST)
     target_sources(usdcc_ui_tests PRIVATE viewport_broadcast_test.cpp)
     target_link_libraries(usdcc_ui_tests PRIVATE usdcc_viewport_broadcast_ui)
+endif()
+if(USDCC_BUILD_UV_VIEW)
+    target_sources(usdcc_ui_tests PRIVATE uv_view_test.cpp)
+    target_link_libraries(usdcc_ui_tests PRIVATE usdcc_uv_view_ui)
 endif()
 # The render queue server and its web page (docs/RENDER_NODE.md §4.4, §4.5).
 target_link_libraries(usdcc_ui_tests PRIVATE usdcc_node_core)

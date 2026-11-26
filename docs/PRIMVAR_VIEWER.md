@@ -1,9 +1,9 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 to 5 are built** (the model, its Python calls and the validation rules: §13; the panel:
+Status: **phases 1 to 6 are built** (the model, its Python calls and the validation rules: §13; the panel:
 §14; the Values view, Python views and the histogram example: §15; element selection and viewport overlays:
-§16; Color By: §17), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has the recommendation, §12
-the questions.
+§16; Color By: §17; the UV View plugin: §18), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has
+the recommendation, §12 the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -470,7 +470,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **3. Values** — **done** | The table per domain as a registered view, indexed values, copy. The Python example plugin (histogram view) | M | UI tests, a mesh with a million points; the example's test |
 | **4. Element selection and overlays** — **done** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
 | **5. Color By** — **done** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
-| **6. UV view plugin** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
+| **6. UV view plugin** — **done** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
 | **7. Editing: structure** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
 | **8. Editing: values** | Cell edits and bulk operations | M | UI tests |
 | Later | Checker in the viewport, vector lines, face picking in the viewport, UV transforms, overlaps and stretch, Unwrap from Mesh Tools | | |
@@ -495,7 +495,7 @@ for the linked hover.
    overlays)? Recommended: those five as their phases come; commands, colorizers and relations with the
    phase that builds their first built-in.
 9. **The UV view: shipped plugin** (recommended, §9.4) **or in the app** with the registries still open
-   to others?
+   to others? Built as a shipped plugin (§18).
 
 ## 13. As built: phase 1
 
@@ -687,3 +687,53 @@ Duplicate) and `python_viewport_primvar_coloring`. In the app, on the shader bal
 V over a fixed range, lit, on Storm and Embree, a switch back to Storm keeping it, and off. **Not tried:**
 Linux, other renderers, native instances and point instancers, curves and points, a heavy stage's stats
 (they're read on the main thread), two viewports colouring by different primvars at once.
+
+## 18. As built: phase 6
+
+- **The UV View plugin** (`src/plugins/uv_view`, `org.usdcc.uv-view`): a C++ plugin, shipped and on, as §9.4
+  recommends. Its feature is `USDCC_BUILD_UV_VIEW` ([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §6). It adds one
+  primvar view, `org.usdcc.uv-view.uv` ("UV"), with `Host::addPrimvarView()`: a tab of the Primvars panel and
+  a panel type of its own, `primvarView.org.usdcc.uv-view.uv`. It uses no call the app keeps for itself.
+- **Where it applies** (`uvViewApplies()`): the primvar in focus is two numbers a value (`float2`, `double2`,
+  `half2`, `texCoord2*`), faceVarying, vertex or varying, on a selected mesh. It shows the first such mesh in
+  the selection.
+- **The layout** (`uv_layout.*`, no Qt): read on the main thread (`readUvSource()`: the topology and the
+  values, owned) and worked out on a worker (`computeUvLayout()`): each face corner's UV through the indices
+  or through the points; each face's signed area; **flipped** faces (wound against most of the mesh's),
+  **degenerate** ones (fewer than three corners, or an area under a millionth of the mean); faces with a
+  corner **outside 0-1**; **seams** (an edge of the mesh two faces share, with other UVs on each side); the
+  **UDIM tiles** (the tile each face's middle is in, so a face from 0 to 1 is in 1001 only); corners whose
+  index is past the values; and a grid to find the face under a point. What can't be laid out says why:
+  not a mesh, no such primvar, not two numbers, constant or uniform, too few UVs for the corners.
+- **Drawn** with `QPainter`: a grid that thins as it zooms, the 0-1 square in amber, every tile used with its
+  number, the faces' edges in one call, seams in cyan, flipped faces filled red, degenerate ones circled in
+  orange. Behind it: **nothing, a checker** (the default: a dot in each square whose red grows with u and
+  green with v) **or a texture**. Pan with a drag (or the middle button, or Alt), zoom with the wheel, **F**
+  or Fit to fit; it stays fitted as the panel's size changes until it's panned or zoomed. A line under it
+  says what's there: "Tiles · st, faceVarying · 3 faces · UDIM tiles 1001, 1002, 1011 · 1 flipped · 2 seam
+  edges".
+- **Textures** (`texturesReading()`): the bound material's shaders with a `file` whose coordinates come from a
+  reader of this set (`varname` or `geomprop`, as a string or a token, through up to four nodes in between
+  such as a `UsdTransform2d`), or that have no coordinates connected, which read the primary set. A path with
+  `<UDIM>` is anchored to the layer that has it (Ar leaves a relative path whose file isn't there unanchored)
+  and read for each tile the layout uses. Read on a worker with `HioImage` (Qt's readers if it can't), at most
+  2048 pixels a side; floats are shown with a gamma of 2.2.
+- **Linked to 3D through phase 4:** the face under the cursor is the stage's element hover (`faces`), a click
+  picks a face as the stage's elements, Shift adds, Ctrl takes one away, a click off the faces drops this
+  mesh's; the viewport's overlay shows them on the mesh. The stage's elements from elsewhere show here too:
+  faces filled, points and face corners as dots at their corners. Hover from the Values table lights the face
+  here only when it's of faces.
+- **Sessions** keep what's behind, the texture, Seams and Problems.
+
+**Checked:** `uv_layout_test` (faces through indices and through points, seams, tiles, flipped, degenerate,
+an index past the values, what can't be laid out, textures read through a transform, by default and by a
+token `varname`), `uv_view_test` (the tab where it applies and gone with the plugin, the summary, the checker,
+a UDIM texture tile by tile, edits laid out again, hover and picking both ways, the canvas's mouse, sessions).
+In the app: the shader ball (5,838 faces, 3,456 degenerate: most of its `st` are 0, as §5.2.1 found; 240
+seam edges); a stage of three UDIM tiles with a texture each, picked faces tinted on the mesh in Storm, and
+the face the view shows flipped drawn mirrored. Without the plugin (its folder taken away) the app starts,
+the Primvars panel has Info and Values, and the panel type isn't there. **Not built from §6:** the faint fill
+of every face (only problems and picks are filled), points for uniform and constant sets, marking the set a
+material reads, the `faceVaryingLinearInterpolation` note, overlaps, stretch and texel density, editing (§7),
+the other way of linking (picking faces in the viewport). **Not tried:** Linux, a mesh of millions of faces
+(laid out on a worker, but drawn whole on each paint), textures through a package or a remote resolver.
