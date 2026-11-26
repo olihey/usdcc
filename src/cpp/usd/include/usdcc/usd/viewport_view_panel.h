@@ -209,6 +209,10 @@ public:
     // Viewport defaults, except for what it overrides; a value it doesn't override
     // follows its setting when that changes.
     ViewportDisplayOverrides displayOverrides() const { return m_displayOverrides; }
+    // Color By (docs/PRIMVAR_VIEWER.md §17): what the geometry is coloured by. Kept in sessions
+    // and by Duplicate; the options menu's Color By sets it.
+    void setPrimvarColoring(const PrimvarColoring& coloring);
+    const PrimvarColoring& primvarColoring() const;
     void setDisplayOverrides(const ViewportDisplayOverrides& overrides);
     // What it shows: the defaults with the overrides applied.
     HydraViewportWindow::DisplayOptions displayOptions() const;
@@ -342,6 +346,9 @@ private:
     // The stage's primvar elements, which the overlay of them draws.
     usdcc::core::Signal<>::Connection m_elementsConnection;
     usdcc::core::Signal<>::Connection m_elementHoverConnection;
+    // After edits: Color By's range and categories again (HydraViewportWindow::refreshPrimvarColoring()).
+    QTimer* m_coloringTimer = nullptr;
+    void populateColorByMenu(QMenu* menu);
 
     QTimer* m_countTimer = nullptr;
     std::unique_ptr<SceneCountJob> m_stageCountJob;

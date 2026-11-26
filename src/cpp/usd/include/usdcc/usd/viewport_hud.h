@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 class QPainter;
@@ -59,6 +60,19 @@ QString formatHudFrame(double time);
 QString formatMetersPerUnit(double metersPerUnit);
 
 // Everything the HUD shows; the window fills it in for each frame.
+// What Color By shows (docs/PRIMVAR_VIEWER.md §17): a ramp with its ends, the colours of values,
+// or what the colours mean.
+struct HudLegend {
+    QString title;  // "Color by dirt"
+    bool ramp = false;
+    std::vector<QColor> rampStops;
+    QString low, high;
+    std::vector<std::pair<QColor, QString>> categories;
+    QString more;  // "and 12 more"
+    QString note;  // "U red, V green"
+    bool operator==(const HudLegend&) const = default;
+};
+
 struct HudInput {
     QSizeF size;  // the window, in logical pixels
     // The app's UI scale (UiScaleController, 1.0 at 100%): every margin, radius, line width
@@ -116,6 +130,9 @@ struct HudInput {
     QPointF cursor;
 
     HudItem hover = HudItem::None;
+
+    // Under the top left's labels, while the viewport colours by a primvar.
+    std::optional<HudLegend> legend;
 };
 
 // One piece of text, where it goes, and how.
@@ -128,6 +145,15 @@ struct HudText {
     bool plated = false;           // on its corner's plate (HudLayout::plates)
     bool hovered = false;
     bool operator==(const HudText&) const = default;
+};
+
+// Where the legend goes: its text's box, on a plate of HudLayout::plates.
+struct HudLegendLayout {
+    HudLegend legend;
+    QRectF content;
+    double lineHeight = 0;
+    double swatch = 0;
+    bool operator==(const HudLegendLayout&) const = default;
 };
 
 // One end of the axis triad.
@@ -162,9 +188,10 @@ struct HudLayout {
     std::vector<QRectF> safeFrames;
     std::optional<QRectF> aspectGuide;
     std::optional<QPointF> centerCross;
+    std::optional<HudLegendLayout> legend;
 
     bool isEmpty() const {
-        return texts.empty() && axes.empty() && !gate && safeFrames.empty() && !aspectGuide && !centerCross;
+        return texts.empty() && axes.empty() && !gate && safeFrames.empty() && !aspectGuide && !centerCross && !legend;
     }
     bool operator==(const HudLayout&) const = default;
 };

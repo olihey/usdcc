@@ -44,6 +44,7 @@ add_executable(usdcc_tests
     viewport_overlays_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
+    primvar_colors_test.cpp
     primvar_info_test.cpp
     property_categorizer_test.cpp
     relationship_targets_test.cpp

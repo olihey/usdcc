@@ -471,6 +471,13 @@ void PrimvarsViewPanel::showRowMenu(const QPoint& pos) {
         menu.addAction(tr("Select %1").arg(source), this, [this, item]() { selectSourceOf(item); });
     }
     if (!name.isEmpty() && !item->data(Name, kGroupRole).toBool()) {
+        if (::usdcc::usd::hooks().colorViewports) {
+            menu.addAction(tr("Color Viewports by %1").arg(name), this, [this, name]() {
+                ::usdcc::usd::hooks().colorViewports(currentStage(), name.toStdString());
+            });
+            menu.addAction(tr("Stop Coloring Viewports"), this, [this]() { ::usdcc::usd::hooks().colorViewports(currentStage(), {}); });
+            menu.addSeparator();
+        }
         menu.addAction(tr("Copy Name"), this, [name]() { QGuiApplication::clipboard()->setText(name); });
         menu.addAction(tr("Copy Property Name"), this,
                        [name]() { QGuiApplication::clipboard()->setText(QStringLiteral("primvars:") + name); });

@@ -19,6 +19,7 @@
 #include "usdcc/usd/stage_camera.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
+#include "usdcc/usd/primvar_info.h"
 #include "usdcc/usd/viewport_overlays.h"
 #include "usdcc/usd/viewport_render_params.h"
 
@@ -33,7 +34,9 @@
 #include <set>
 #include <QAction>
 #include <QActionGroup>
+#include <QActionGroup>
 #include <QInputDialog>
+#include <QRegularExpression>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -871,6 +874,11 @@ ViewportViewPanel::ViewportViewPanel(StageManager* stageManager, StageRefPtr sta
         if (!menu.isEmpty()) menu.exec(globalPos);
     });
     // The HUD's counts: a slice at a time, a moment after the last change.
+    // Edits come in bursts: Color By's range is worked out again once they rest.
+    m_coloringTimer = new QTimer(this);
+    m_coloringTimer->setSingleShot(true);
+    m_coloringTimer->setInterval(250);
+    connect(m_coloringTimer, &QTimer::timeout, m_viewport, &HydraViewportWindow::refreshPrimvarColoring);
     m_countTimer = new QTimer(this);
     m_countTimer->setSingleShot(true);
     connect(m_countTimer, &QTimer::timeout, this, &ViewportViewPanel::runCounts);
@@ -933,6 +941,7 @@ void ViewportViewPanel::onStageChanged(const StageRefPtr& stage) {
     // came from (undo/redo, another panel, a script) — requestUpdate() folds a
     // burst of notices into one frame.
     m_stageChangedConnection = stage->changed.connect([this](const StageChanges& changes) {
+        if (m_viewport->primvarColoring().active()) m_coloringTimer->start();
         m_viewport->requestUpdate();
         // The camera orbits about the stage's up axis, which Layer Properties can change.
         m_viewport->stageUpAxisMayHaveChanged();
@@ -1379,6 +1388,7 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
     copy->setDisplayOverrides(m_displayOverrides);
     copy->setRendererOverrides(m_rendererOverrides);
     copy->m_viewport->setHiddenOverlays(m_viewport->hiddenOverlays());
+    copy->setPrimvarColoring(primvarColoring());
 
     // Renderer selection and camera state: the duplicate's HydraViewportWindow
     // has no GL context yet (it's created lazily on first expose), so it has
@@ -1400,6 +1410,174 @@ usdcc::ui::ViewPanel* ViewportViewPanel::duplicate(QWidget* parent) const {
             });
 
     return copy;
+}
+
+
+void ViewportViewPanel::setPrimvarColoring(const PrimvarColoring& coloring) {
+    if (coloring == m_viewport->primvarColoring()) return;
+    m_viewport->setPrimvarColoring(coloring);
+    notifyOptionsChanged();
+}
+
+const PrimvarColoring& ViewportViewPanel::primvarColoring() const { return m_viewport->primvarColoring(); }
+
+void ViewportViewPanel::populateColorByMenu(QMenu* menu) {
+    menu->setObjectName(QStringLiteral("colorByMenu"));
+    menu->setToolTipsVisible(true);
+    const PrimvarColoring current = primvarColoring();
+    // The primvars the selected prims have, the one in focus, and the one shown.
+    std::set<std::string> names;
+    if (const StageRefPtr& stage = currentStage()) {
+        PrimvarInfoOptions quick;
+        quick.readers = false;
+        quick.scan = false;
+        for (const PXR_NS::SdfPath& path : stageManager()->selectedPaths(stage)) {
+            if (names.size() > 200) break;
+            const PXR_NS::UsdPrim prim = stage->usdStage()->GetPrimAtPath(path);
+            for (const PrimvarInfo& info : primvarInfo(prim, stage->timeCode(), quick).primvars) {
+                if (info.hasValue) names.insert(info.name);
+            }
+        }
+        if (!stage->primvarFocus().empty()) names.insert(stage->primvarFocus());
+    }
+    if (current.active()) names.insert(current.primvar);
+    auto* primvars = new QActionGroup(menu);
+    const auto choice = [&](const QString& label, const std::string& name) {
+        QAction* action = menu->addAction(label);
+        action->setObjectName(QString::fromStdString("colorBy:" + name));
+        action->setCheckable(true);
+        action->setChecked(current.primvar == name);
+        primvars->addAction(action);
+        connect(action, &QAction::triggered, this, [this, name]() {
+            PrimvarColoring coloring = primvarColoring();
+            if (coloring.primvar != name) {
+                coloring = PrimvarColoring{};  // another primvar starts from the defaults, but lit
+                coloring.lit = primvarColoring().lit;
+            }
+            coloring.primvar = name;
+            setPrimvarColoring(coloring);
+        });
+    };
+    choice(tr("None"), {});
+    for (const std::string& name : names) choice(QString::fromStdString(name), name);
+    if (names.empty()) {
+        QAction* hint = menu->addAction(tr("Select a prim to list its primvars"));
+        hint->setEnabled(false);
+    }
+    menu->addAction(tr("Other Primvar..."), this, [this]() {
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, tr("Color By"), tr("Primvar (without \"primvars:\"):"), QLineEdit::Normal,
+                                                   QString::fromStdString(primvarColoring().primvar), &ok)
+                                 .trimmed()
+                                 .remove(QRegularExpression(QStringLiteral("^primvars:")));
+        if (!ok) return;
+        PrimvarColoring coloring = primvarColoring();
+        coloring.primvar = name.toStdString();
+        setPrimvarColoring(coloring);
+    });
+    if (!current.active()) return;
+
+    menu->addSeparator();
+    const PrimvarColorStats& stats = m_viewport->primvarColorStats();
+    QMenu* colors = menu->addMenu(tr("Colors"));
+    colors->setObjectName(QStringLiteral("colorizerMenu"));
+    auto* colorizers = new QActionGroup(colors);
+    const auto colorizerChoice = [&](const QString& label, const std::string& id) {
+        QAction* action = colors->addAction(label);
+        action->setObjectName(QString::fromStdString("colorizer:" + id));
+        action->setCheckable(true);
+        action->setChecked(current.colorizer == id);
+        colorizers->addAction(action);
+        connect(action, &QAction::triggered, this, [this, id]() {
+            PrimvarColoring coloring = primvarColoring();
+            coloring.colorizer = id;
+            setPrimvarColoring(coloring);
+        });
+    };
+    const PrimvarColorizer* chosen = stats.type ? PrimvarColorizers::instance().choose({}, stats.type) : nullptr;
+    colorizerChoice(chosen ? tr("Automatic (%1)").arg(QString::fromStdString(chosen->label)) : tr("Automatic"), {});
+    for (const PrimvarColorizer& colorizer : PrimvarColorizers::instance().colorizers()) {
+        if (stats.type && colorizer.applies && !colorizer.applies(stats.type)) continue;
+        colorizerChoice(QString::fromStdString(colorizer.label), colorizer.id);
+    }
+    const PrimvarColorizer* used = stats.type ? PrimvarColorizers::instance().choose(current.colorizer, stats.type) : nullptr;
+    const PXR_NS::SdfTupleDimensions dimensions = stats.type ? stats.type.GetDimensions() : PXR_NS::SdfTupleDimensions();
+    if (used && used->legend == PrimvarColorizer::Legend::Ramp) {
+        if (dimensions.size == 1 && dimensions.d[0] > 1) {
+            QMenu* component = menu->addMenu(tr("Component"));
+            component->setObjectName(QStringLiteral("componentMenu"));
+            auto* components = new QActionGroup(component);
+            for (int i = -1; i < int(std::min<std::size_t>(dimensions.d[0], 4)); ++i) {
+                QAction* action = component->addAction(i < 0 ? tr("Length") : QString(QChar("xyzw"[i])));
+                action->setCheckable(true);
+                action->setChecked(current.component == i);
+                components->addAction(action);
+                connect(action, &QAction::triggered, this, [this, i]() {
+                    PrimvarColoring coloring = primvarColoring();
+                    coloring.component = i;
+                    setPrimvarColoring(coloring);
+                });
+            }
+        }
+        QAction* range = menu->addAction(current.range ? tr("Range: %1 to %2...").arg(current.range->low).arg(current.range->high)
+                                                       : tr("Range..."));
+        range->setObjectName(QStringLiteral("colorRangeAction"));
+        range->setToolTip(tr("The values at the ramp's ends; the stage's lowest and highest unless set"));
+        connect(range, &QAction::triggered, this, [this]() {
+            const PrimvarColoring coloring = primvarColoring();
+            const PrimvarColorRange shown = coloring.range ? *coloring.range
+                                                           : m_viewport->primvarColorStats().range.value_or(PrimvarColorRange());
+            bool ok = false;
+            const QString text = QInputDialog::getText(this, tr("Color By Range"), tr("Lowest and highest, like \"0 1\":"),
+                                                       QLineEdit::Normal, QStringLiteral("%1 %2").arg(shown.low).arg(shown.high), &ok);
+            if (!ok) return;
+            const QStringList parts = text.split(QRegularExpression(QStringLiteral("[\\s,;]+")), Qt::SkipEmptyParts);
+            bool lowOk = false, highOk = false;
+            const double low = parts.value(0).toDouble(&lowOk), high = parts.value(1).toDouble(&highOk);
+            if (parts.size() != 2 || !lowOk || !highOk) return;
+            PrimvarColoring changed = coloring;
+            changed.range = PrimvarColorRange{low, high};
+            setPrimvarColoring(changed);
+        });
+        if (current.range) {
+            menu->addAction(tr("Use the Stage's Range"), this, [this]() {
+                PrimvarColoring coloring = primvarColoring();
+                coloring.range.reset();
+                setPrimvarColoring(coloring);
+            });
+        }
+    }
+    QAction* lit = menu->addAction(tr("Lit"));
+    lit->setObjectName(QStringLiteral("colorByLitAction"));
+    lit->setToolTip(tr("Shade the colours with the lights; off, they're as they are"));
+    lit->setCheckable(true);
+    lit->setChecked(current.lit);
+    connect(lit, &QAction::triggered, this, [this](bool on) {
+        PrimvarColoring coloring = primvarColoring();
+        coloring.lit = on;
+        setPrimvarColoring(coloring);
+    });
+}
+
+static QJsonObject primvarColoringToJson(const PrimvarColoring& coloring) {
+    QJsonObject json;
+    json.insert(QStringLiteral("primvar"), QString::fromStdString(coloring.primvar));
+    if (!coloring.colorizer.empty()) json.insert(QStringLiteral("colorizer"), QString::fromStdString(coloring.colorizer));
+    if (coloring.range) json.insert(QStringLiteral("range"), QJsonArray{coloring.range->low, coloring.range->high});
+    if (coloring.component >= 0) json.insert(QStringLiteral("component"), coloring.component);
+    if (coloring.lit) json.insert(QStringLiteral("lit"), true);
+    return json;
+}
+
+static PrimvarColoring primvarColoringFromJson(const QJsonObject& json) {
+    PrimvarColoring coloring;
+    coloring.primvar = json.value(QStringLiteral("primvar")).toString().toStdString();
+    coloring.colorizer = json.value(QStringLiteral("colorizer")).toString().toStdString();
+    const QJsonArray range = json.value(QStringLiteral("range")).toArray();
+    if (range.size() == 2) coloring.range = PrimvarColorRange{range[0].toDouble(), range[1].toDouble()};
+    coloring.component = std::clamp(json.value(QStringLiteral("component")).toInt(-1), -1, 3);
+    coloring.lit = json.value(QStringLiteral("lit")).toBool(false);
+    return coloring;
 }
 
 QJsonObject ViewportViewPanel::saveSessionState() const {
@@ -1444,6 +1622,7 @@ QJsonObject ViewportViewPanel::saveSessionState() const {
     QJsonArray hidden;
     for (const std::string& id : m_viewport->hiddenOverlays()) hidden.append(QString::fromStdString(id));
     if (!hidden.isEmpty()) state.insert(QStringLiteral("hiddenOverlays"), hidden);
+    if (primvarColoring().active()) state.insert(QStringLiteral("colorBy"), primvarColoringToJson(primvarColoring()));
     return state;
 }
 
@@ -1473,6 +1652,7 @@ void ViewportViewPanel::restoreSessionState(const QJsonObject& state) {
     std::set<std::string> hiddenOverlays;
     for (const QJsonValue& id : state.value(QStringLiteral("hiddenOverlays")).toArray()) hiddenOverlays.insert(id.toString().toStdString());
     m_viewport->setHiddenOverlays(std::move(hiddenOverlays));
+    setPrimvarColoring(primvarColoringFromJson(state.value(QStringLiteral("colorBy")).toObject()));
     HydraViewportWindow::CameraState camera = m_viewport->cameraState();
     const QJsonObject orbit = state.value(QStringLiteral("camera")).toObject();
     const QJsonArray target = orbit.value(QStringLiteral("target")).toArray();
@@ -1963,6 +2143,8 @@ void ViewportViewPanel::populateOptionsMenu(QMenu* menu) {
     addSwitch(menu, tr("Cull Backfaces"), "cullBackfacesAction", &Options::cullBackfaces, &Overrides::cullBackfaces);
     addSwitch(menu, tr("Show Colliders"), "showCollidersAction", &Options::showColliders, &Overrides::showColliders);
     // What's drawn over the render (viewport_overlays.h): each on unless switched off here.
+    // Color By (docs/PRIMVAR_VIEWER.md §17): the geometry coloured by a primvar.
+    populateColorByMenu(menu->addMenu(tr("Color By")));
     QMenu* overlays = menu->addMenu(tr("Overlays"));
     overlays->setObjectName(QStringLiteral("overlaysMenu"));
     for (const ViewportOverlay& overlay : ViewportOverlays::instance().overlays()) {

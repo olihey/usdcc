@@ -19,6 +19,7 @@
 #include "usdcc/usd/main_menu_actions.h"
 #include "usdcc/usd/physics_backend.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_colors.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/render/final_renderer.h"
 #include "usdcc/usd/viewport_overlays.h"
@@ -164,6 +165,17 @@ struct Host {
         const std::string added = type.label.toStdString();
         usdcc::usd::PrimvarViews::instance().add(std::move(type));
         noted("Primvar view", added);
+    }
+
+    // A way of showing a primvar's values as colours in Color By (docs/PRIMVAR_VIEWER.md §17): its
+    // `colors` is called on Hydra's threads while it syncs, so it must only read. One with the id
+    // of another replaces it. Remove it in usdcc_plugin_deactivate() with
+    // usdcc::usd::PrimvarColorizers::instance().remove(id).
+    void addPrimvarColorizer(usdcc::usd::PrimvarColorizer colorizer) {
+        if (colorizer.id.empty() || !colorizer.colors) throw std::invalid_argument("a colorizer has an id and makes colours");
+        const std::string added = colorizer.label.empty() ? colorizer.id : colorizer.label;
+        usdcc::usd::PrimvarColorizers::instance().add(std::move(colorizer));
+        noted("Primvar colorizer", added);
     }
 
     // Lines and triangles every viewport draws over its render, on unless a viewport's

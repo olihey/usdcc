@@ -37,6 +37,7 @@
 #include "usdcc/usd/physics_session.h"
 #include "usdcc/usd/playback_controller.h"
 #include "usdcc/usd/prim_context_menu.h"
+#include "usdcc/usd/primvar_colors.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/render/render_menu.h"
 #include "usdcc/usd/render/render_queue.h"
@@ -895,6 +896,44 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     m.def(
         "viewport_renderer", [](int id) { return viewportWithId(id).hydraWindow()->currentRendererPlugin().GetString(); },
         py::arg("id"));
+    // Color By (docs/PRIMVAR_VIEWER.md §17), as a dict.
+    m.def(
+        "viewport_primvar_coloring",
+        [](int id) {
+            const usdcc::usd::PrimvarColoring& coloring = viewportWithId(id).primvarColoring();
+            py::dict result;
+            result["primvar"] = coloring.primvar;
+            result["colorizer"] = coloring.colorizer;
+            result["range"] = coloring.range ? py::object(py::make_tuple(coloring.range->low, coloring.range->high)) : py::object(py::none());
+            result["component"] = coloring.component;
+            result["lit"] = coloring.lit;
+            return result;
+        },
+        py::arg("id"));
+    m.def(
+        "set_viewport_primvar_coloring",
+        [](int id, const std::string& primvar, const std::string& colorizer, std::optional<std::pair<double, double>> range,
+           int component, bool lit) {
+            if (!colorizer.empty() && !usdcc::usd::PrimvarColorizers::instance().find(colorizer)) {
+                throw py::value_error("no colorizer '" + colorizer + "'");
+            }
+            if (component < -1 || component > 3) throw py::value_error("a component is -1 (the length) or 0 to 3");
+            usdcc::usd::PrimvarColoring coloring;
+            coloring.primvar = primvar.rfind("primvars:", 0) == 0 ? primvar.substr(9) : primvar;
+            coloring.colorizer = colorizer;
+            if (range) coloring.range = usdcc::usd::PrimvarColorRange{range->first, range->second};
+            coloring.component = component;
+            coloring.lit = lit;
+            viewportWithId(id).setPrimvarColoring(coloring);
+        },
+        py::arg("id"), py::arg("primvar"), py::arg("colorizer"), py::arg("range"), py::arg("component"), py::arg("lit"));
+    m.def("primvar_colorizers", []() {
+        std::vector<std::pair<std::string, std::string>> result;
+        for (const usdcc::usd::PrimvarColorizer& colorizer : usdcc::usd::PrimvarColorizers::instance().colorizers()) {
+            result.emplace_back(colorizer.id, colorizer.label);
+        }
+        return result;
+    });
     // The ones it can switch to: once it has drawn, those that can render here; before, all.
     m.def(
         "viewport_renderers",

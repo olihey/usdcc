@@ -1,8 +1,9 @@
 # Primvar Viewer (investigation)
 
-Status: **phases 1 to 4 are built** (the model, its Python calls and the validation rules: §13; the panel:
+Status: **phases 1 to 5 are built** (the model, its Python calls and the validation rules: §13; the panel:
 §14; the Values view, Python views and the histogram example: §15; element selection and viewport overlays:
-§16), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has the recommendation, §12 the questions.
+§16; Color By: §17), after the phase 0 spike (§5.2.1). The rest is a plan: §10 has the recommendation, §12
+the questions.
 
 A primvar is any attribute named `primvars:*`: data a renderer interpolates over a prim's surface, curve
 or volume and hands to shaders. That covers UV sets, vertex colors, skin weights, per-face ids and
@@ -232,8 +233,8 @@ Prims without `X` go grey. Instances and prototypes come for free, as the filter
 
 ### 5.2.1 The spike (phase 0, 2026-11-25): it works
 
-Built as §5.2 says (`src/cpp/usd/src/primvar_color_spike.*`, hooked into `hydra_viewport_window.cpp`;
-uncommitted, not for merging as it is) and run in the app on a stage with a grid mesh (`st` faceVarying
+Built as §5.2 says (a throwaway filter hooked into `hydra_viewport_window.cpp`, never committed; Color By
+replaced it in phase 5, §17) and run in the app on a stage with a grid mesh (`st` faceVarying
 and indexed, a float per point, an int per face), a triangle (`st` per point, a constant float, a constant
 string), a Cube with no primvars, two materials and a dome light. A script switched the primvar and the
 renderer and saved the viewport's own picture after each.
@@ -394,7 +395,7 @@ calls are the API"): an interface the built-ins can't live with is found out at 
 | 3 | **Primvar views** (built, §14, §15) | `addPrimvarView(type)` | `usdcc.primvars.register_view(id, label, cls, applies=None)`, `cls` a `usdcc.ui.PrimvarView` | A tab in the Primvars panel: a widget told the stage, prims, primvar and time, with session state. `applies(context)` decides when the tab shows (the UV view: two float components) |
 | 4 | **Primvar commands** | `addPrimvarMenuAction(label, run, applies)` | `usdcc.primvars.add_menu_action(label, callback, applies=None)` | An entry in the list's context menu and the panel's options, one undo step, as the prim menu's entries are. The context has the prims, the primvars and the element selection |
 | 5 | **Authoring** (no registry) | `usdcc/usd/primvar_edit.h` | `usdcc.primvars.author(prim, name, values, indices=None, interpolation=..., element_size=1)` | Writes a whole primvar as a group (§4.6 point 4): refuses what §4.1 would call broken, blocks weaker indices |
-| 6 | **Colorizers** | `addPrimvarColorizer(...)` | `usdcc.primvars.register_colorizer(id, label, function, applies=None, options=...)` | A Color By mode (§5): values in, colors out, with options described as data, as a tool's are |
+| 6 | **Colorizers** (built in C++, §17) | `addPrimvarColorizer(...)` | `usdcc.primvars.register_colorizer(id, label, function, applies=None, options=...)` | A Color By mode (§5): values in, colors out, with options described as data, as a tool's are |
 | 7 | **Viewport overlays** (built in C++, §16) | `addViewportOverlay(overlay)` | `usdcc.app.add_viewport_overlay(id, label, build)` | World-space lines and triangles over the frame, switched per viewport like Show Colliders, without being the active tool. `build(stage, time, selection)` returns what a tool's gizmo does |
 | 8 | **Relations** (built, §13) | `PrimvarRelations::instance().set(...)` | `usdcc.primvars.register_relation(id, label, members, ...)` | A row for §4.2's table: a studio's or a renderer's own groups (`primvars:groom:*`), shown as one row and checked together |
 | — | **Validation rules** | (a USD plugin's validators) | `usdcc.validation.rule(...)` | Exists |
@@ -468,7 +469,7 @@ A viewer is certain; an editor is realistic at levels 1 and 2, and level 3 is a 
 | **2. Panel: list and info** — **done** | The panel, following the selection; the list; the primvar focus on `StageManager`; the view registry with Info as its first view, statistics on a worker; Open in Own Panel; the Attribute Editor's ⚠ and link | M | UI tests; in the app on the shader ball |
 | **3. Values** — **done** | The table per domain as a registered view, indexed values, copy. The Python example plugin (histogram view) | M | UI tests, a mesh with a million points; the example's test |
 | **4. Element selection and overlays** — **done** | The shared element selection, the table's rows following it; the viewport overlay registry, with the selected elements as its first overlay | M | UI tests; in the app |
-| **5. Color By** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
+| **5. Color By** — **done** | The filter (from the spike, with what §5.2.1 found and left unchecked), the colorizer registry with the color maps of §5, the display option, menu, session, HUD legend | M–L | Tests of the mapping; in the app on Storm and Embree |
 | **6. UV view plugin** | `src/plugins/uv_view`: layout, grid and UDIM tiles, checker and texture, flipped / degenerate / borders, hover linked to 3D through phase 4 | L | Tests of the layout and diagnostics; in the app, and without the plugin |
 | **7. Editing: structure** | `primvar_edit` and the commands of §7 level 1, through the command registry | M | Unit tests per command, across layers |
 | **8. Editing: values** | Cell edits and bulk operations | M | UI tests |
@@ -642,3 +643,47 @@ the stage's elements and their dropping), `primvars_values_element_selection` (b
 hover), `viewport_overlays_menu` (the menu, sessions, Duplicate) and `python_primvars_element_selection`. In
 the app on Storm, on the shader ball: 3,336 face corners, every third point and every fourth face. **Not
 tried:** Linux, other renderers, picking elements in the viewport (still later).
+
+## 17. As built: phase 5
+
+- **Color By** (`HydraViewportWindow::setPrimvarColoring()`, a viewport's options menu, Color By): the geometry
+  coloured by one primvar, through `PrimvarColorSceneIndex` (`primvar_color_filter.*`), the spike made real.
+  What the spike found is handled: implicit surfaces count as geometry; the filter keeps a list of the
+  geometry from Hydra's added and removed notices instead of walking every prim; its state is swapped
+  whole under a lock, so Hydra's threads read one or the other. Each engine a viewport makes (a new stage,
+  another renderer) gets a filter of its own, and the coloring is handed to it at once. The spike's code
+  is gone.
+- **What it colours by** (`PrimvarColoring`): the primvar, a colorizer (or the one for its type), a range for
+  numbers (or the stage's), a vector's component (or its length) and whether it's lit. **Unlit by default**:
+  the colours as they are (`params.enableLighting` off, which Storm honours); Lit shades them with the
+  lights.
+- **Colorizers** (`primvar_colors.h`, `PrimvarColorizers`): Ramp (numbers, dark blue to red over the range),
+  Categories (whole numbers, bools, strings, tokens: a colour per value, the same text the same colour
+  everywhere), Color (as they are, clamped), UV (U red, V green) and Direction (x red, y green, z blue). The
+  one for a type: Color for colours, UV for two numbers, Direction for normals and vectors, Categories for
+  whole numbers and words, Ramp for the rest. C++ plugins add theirs with `Host::addPrimvarColorizer()`;
+  their colours are made on Hydra's threads. **No Python colorizers:** they'd need the GIL on those threads.
+  So the histogram example has no colorizer either.
+- **The range and categories are the stage's** (`primvarColorStats()`): read from every prim that has the
+  primvar, so a colour means the same on each. Worked out again a quarter of a second after edits stop,
+  when the stage changes, and as the time moves for a primvar with time samples.
+- **The HUD's legend**, under the top left's labels: "Color by dirt" with the ramp and its ends, the first
+  eight categories' colours and "and N more", or what the colours mean ("U red, V green").
+- **The menu:** None, the selected prims' primvars, the one in focus and Other Primvar...; then Colors (the
+  colorizers that apply), Component for a ramp of vectors, Range... and Use the Stage's Range, and Lit.
+  Sessions and Duplicate keep it (`"colorBy"`).
+- **From the Primvars panel:** a row's menu has Color Viewports by *name* and Stop Coloring Viewports: every
+  viewport on the stage, each keeping whether it's lit.
+- **Python:** `Viewport.primvar_coloring()` and `set_primvar_coloring(primvar, colorizer="", range=None,
+  component=-1, lit=False)`, and `usdcc.app.primvar_colorizers()`.
+- **Between a face's corners** a renderer blends the colours, not the values: a big face whose corners are
+  at both ends of a ramp goes through purple, not through the ramp's greens.
+
+**Checked:** `primvar_colors_test` (each colorizer, the choice by type, a plugin's, the stage's range,
+categories and time samples, and the filter on a scene of its own: colours, the binding taken away, grey
+without the primvar, implicit surfaces, dirtying, geometry coming and going, off again),
+`viewport_color_by` (the menu, the stats, the legend for each kind, following edits, Lit, sessions,
+Duplicate) and `python_viewport_primvar_coloring`. In the app, on the shader ball: its UVs, a ramp of U and of
+V over a fixed range, lit, on Storm and Embree, a switch back to Storm keeping it, and off. **Not tried:**
+Linux, other renderers, native instances and point instancers, curves and points, a heavy stage's stats
+(they're read on the main thread), two viewports colouring by different primvars at once.

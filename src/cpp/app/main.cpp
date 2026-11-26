@@ -510,9 +510,21 @@ int main(int argc, char** argv) {
         };
         syncViewPanels();
         QObject::connect(&usdcc::usd::PrimvarViews::instance(), &usdcc::usd::PrimvarViews::changed, &window, syncViewPanels);
-        usdcc::usd::PrimvarsViewPanel::setHooks({[&window, &panelTypes](const QString& viewId, const usdcc::usd::StageRefPtr& stage) {
+        usdcc::usd::PrimvarsViewPanel::Hooks primvarHooks;
+        primvarHooks.openView = [&window, &panelTypes](const QString& viewId, const usdcc::usd::StageRefPtr& stage) {
             panelTypes.open(usdcc::usd::PrimvarViews::panelTypeId(viewId), stage, window.dockManager(), &window);
-        }});
+        };
+        // Every viewport on the stage, each keeping its own colorizer and lighting for the same primvar.
+        primvarHooks.colorViewports = [&window](const usdcc::usd::StageRefPtr& stage, const std::string& primvar) {
+            for (auto* viewport : window.findChildren<usdcc::usd::ViewportViewPanel*>()) {
+                if (viewport->currentStage() != stage || viewport->isClosed()) continue;
+                usdcc::usd::PrimvarColoring coloring = viewport->primvarColoring();
+                if (coloring.primvar != primvar) coloring = usdcc::usd::PrimvarColoring{{}, {}, {}, -1, coloring.lit};
+                coloring.primvar = primvar;
+                viewport->setPrimvarColoring(coloring);
+            }
+        };
+        usdcc::usd::PrimvarsViewPanel::setHooks(std::move(primvarHooks));
         usdcc::usd::PropertySheet::setShowPrimvars([&window, &panelTypes](const usdcc::usd::StageRefPtr& stage, const std::string& primvar) {
             if (!stage) return;
             usdcc::usd::PrimvarsViewPanel* panel = nullptr;

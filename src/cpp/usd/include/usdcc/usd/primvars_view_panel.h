@@ -39,6 +39,8 @@ public:
     struct Hooks {
         // Opens view `viewId` in a panel of its own, on `stage`.
         std::function<void(const QString& viewId, const StageRefPtr& stage)> openView;
+        // Colours the viewports on `stage` by `primvar` (docs/PRIMVAR_VIEWER.md §17); "" stops.
+        std::function<void(const StageRefPtr& stage, const std::string& primvar)> colorViewports;
     };
     static void setHooks(Hooks hooks);
 

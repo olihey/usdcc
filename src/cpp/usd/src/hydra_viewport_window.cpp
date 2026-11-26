@@ -2,6 +2,7 @@
 #include "usdcc/usd/anim_edit.h"
 
 #include "selection_overlay.h"
+#include "primvar_color_filter.h"
 #include "viewport_overlay_renderer.h"
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/scale_controller.h"
@@ -123,7 +124,14 @@ double uiScale() {
 }
 }  // namespace
 
-HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent) {
+// Color By's state (docs/PRIMVAR_VIEWER.md §17).
+struct HydraViewportWindow::ColorBy {
+    PrimvarColorSceneIndex::RefPtr filter;  // the current engine's, made with it
+    PrimvarColoring coloring;
+    PrimvarColorStats stats;
+};
+
+HydraViewportWindow::HydraViewportWindow(QWindow* parent) : QWindow(parent), m_colorBy(std::make_unique<ColorBy>()) {
     setSurfaceType(QWindow::OpenGLSurface);
     // Until a shared set is installed (see setToolSet()), use a private one so
     // the viewport always has working tools.
@@ -194,6 +202,7 @@ void HydraViewportWindow::releaseEngine() {
     m_selectionOverlay.reset();
     m_overlayRenderer.reset();
     m_engine.reset();
+    m_colorBy->filter.Reset();  // that engine's
     forgetRendererHalt();
     m_framebuffer.reset();
     if (current && m_hudTexture) m_context->functions()->glDeleteTextures(1, &m_hudTexture);
@@ -211,6 +220,11 @@ void HydraViewportWindow::setStage(const PXR_NS::UsdStageRefPtr& stage) {
     m_stage = stage;
     // Its cameras were the other stage's.
     forgetStageCamera();
+    // Color By keeps its primvar, with the new stage's range and categories.
+    if (m_colorBy->coloring.active()) {
+        const PrimvarColoring& coloring = m_colorBy->coloring;
+        m_colorBy->stats = usdcc::usd::primvarColorStats(m_stage, coloring.primvar, m_time, coloring.component);
+    }
     m_firstFrameRendered = false;  // firstFrameRendered() is per stage
     m_engineFailures = 0;
 
@@ -240,6 +254,8 @@ void HydraViewportWindow::setTime(PXR_NS::UsdTimeCode time) {
     m_time = time;
     // Not renderNow(): scrubbing and playback send these faster than frames draw.
     requestUpdate();
+    // A primvar with time samples has another range now.
+    if (m_colorBy->coloring.active() && m_colorBy->stats.timeVarying) refreshPrimvarColoring();
     // A stage camera is where it is at that time: it may have moved.
     if (isLookingThroughStageCamera()) Q_EMIT cameraChanged();
 }
@@ -247,9 +263,15 @@ void HydraViewportWindow::setTime(PXR_NS::UsdTimeCode time) {
 void HydraViewportWindow::rebuildEngine() {
     const PXR_NS::TfToken rendererPluginId = m_engine->GetCurrentRendererId();
     m_context->makeCurrent(this);
-    m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
-    forgetRendererHalt();
-    m_engine->SetRendererPlugin(rendererPluginId);
+    m_colorBy->filter.Reset();
+    {
+        // Its render index gets this viewport's Color By filter.
+        const PrimvarColorClaim claim(&m_colorBy->filter);
+        m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
+        forgetRendererHalt();
+        m_engine->SetRendererPlugin(rendererPluginId);
+    }
+    applyPrimvarColoring();
     configureEngine();
 }
 
@@ -336,10 +358,15 @@ void HydraViewportWindow::ensureEngine() {
     }
     if (!m_engine) {
         if (!m_context->isValid() || !m_context->makeCurrent(this)) return;
-        m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
-        if (!m_rendererPluginId.IsEmpty()) {
-            m_engine->SetRendererPlugin(m_rendererPluginId);  // the one in use before releaseEngine()
+        m_colorBy->filter.Reset();
+        {
+            const PrimvarColorClaim claim(&m_colorBy->filter);  // Color By's filter, in its render index
+            m_engine = std::make_unique<PXR_NS::UsdImagingGLEngine>();
+            if (!m_rendererPluginId.IsEmpty()) {
+                m_engine->SetRendererPlugin(m_rendererPluginId);  // the one in use before releaseEngine()
+            }
         }
+        applyPrimvarColoring();
         configureEngine();
         USDCC_LOG_INFO("usdcc.viewport", "Viewport renderer: {}",
                        m_engine->GetRendererDisplayName(m_engine->GetCurrentRendererId()));
@@ -566,6 +593,7 @@ HudInput HydraViewportWindow::hudInput() const {
     input.hasStage = static_cast<bool>(m_stage);
     input.paused = m_paused;
     input.hover = m_hudHover;
+    input.legend = primvarLegend();
     input.cursor = m_cursorPos;
 
     input.showCamera = m_display.hudCamera;
@@ -829,7 +857,14 @@ void HydraViewportWindow::setRendererPlugin(const PXR_NS::TfToken& pluginId) {
     }
     m_context->makeCurrent(this);
     const PXR_NS::TfToken previous = m_engine->GetCurrentRendererId();
-    if (m_engine->SetRendererPlugin(pluginId)) {
+    bool switched = false;
+    {
+        // Another renderer is another render index, with a Color By filter of its own.
+        const PrimvarColorClaim claim(&m_colorBy->filter);
+        switched = m_engine->SetRendererPlugin(pluginId);
+    }
+    applyPrimvarColoring();
+    if (switched) {
         if (m_engine->GetCurrentRendererId() != previous) forgetRendererHalt();  // a new one, running
         requestColorAov();        // a new delegate's task controller starts without it
         applyRendererSettings();  // a new delegate starts from its defaults
@@ -1447,6 +1482,102 @@ void HydraViewportWindow::setHiddenOverlays(std::set<std::string> ids) {
     requestUpdate();
 }
 
+
+// --- Color By (docs/PRIMVAR_VIEWER.md §17) ---------------------------------------------
+
+void HydraViewportWindow::setPrimvarColoring(const PrimvarColoring& coloring) {
+    if (coloring == m_colorBy->coloring) return;
+    const bool statsChange = coloring.primvar != m_colorBy->coloring.primvar || coloring.component != m_colorBy->coloring.component;
+    m_colorBy->coloring = coloring;
+    if (statsChange) {
+        m_colorBy->stats = coloring.active() ? usdcc::usd::primvarColorStats(m_stage, coloring.primvar, m_time, coloring.component) : PrimvarColorStats();
+    }
+    applyPrimvarColoring();
+    m_hudTextureStale = true;
+    requestUpdate();
+}
+
+const PrimvarColoring& HydraViewportWindow::primvarColoring() const { return m_colorBy->coloring; }
+
+const PrimvarColorStats& HydraViewportWindow::primvarColorStats() const { return m_colorBy->stats; }
+
+bool HydraViewportWindow::isColoringGeometry() const { return m_colorBy->filter && m_colorBy->filter->state(); }
+
+void HydraViewportWindow::refreshPrimvarColoring() {
+    const PrimvarColoring& coloring = m_colorBy->coloring;
+    if (!coloring.active()) return;
+    PrimvarColorStats stats = usdcc::usd::primvarColorStats(m_stage, coloring.primvar, m_time, coloring.component);
+    // Unchanged, the colours follow the primvar's own edits through the filter: nothing to redo.
+    if (stats.type == m_colorBy->stats.type && stats.range == m_colorBy->stats.range &&
+        stats.categories == m_colorBy->stats.categories && stats.prims == m_colorBy->stats.prims) {
+        m_colorBy->stats.timeVarying = stats.timeVarying;
+        return;
+    }
+    m_colorBy->stats = std::move(stats);
+    applyPrimvarColoring();
+    m_hudTextureStale = true;
+    requestUpdate();
+}
+
+void HydraViewportWindow::applyPrimvarColoring() {
+    if (!m_colorBy->filter) return;
+    const PrimvarColoring& coloring = m_colorBy->coloring;
+    if (!coloring.active()) {
+        m_colorBy->filter->setState(nullptr);
+        return;
+    }
+    auto state = std::make_shared<PrimvarColorSceneIndex::State>();
+    state->primvar = PXR_NS::TfToken(coloring.primvar);
+    // Nothing on the stage has it: everything grey.
+    if (const PrimvarColorizer* colorizer = PrimvarColorizers::instance().choose(coloring.colorizer, m_colorBy->stats.type);
+        colorizer && m_colorBy->stats.type) {
+        state->colors = colorizer->colors;
+    }
+    state->input.range = coloring.range ? *coloring.range : m_colorBy->stats.range.value_or(PrimvarColorRange());
+    state->input.component = coloring.component;
+    m_colorBy->filter->setState(std::move(state));
+}
+
+std::optional<HudLegend> HydraViewportWindow::primvarLegend() const {
+    const PrimvarColoring& coloring = m_colorBy->coloring;
+    if (!coloring.active()) return std::nullopt;
+    HudLegend legend;
+    legend.title = QStringLiteral("Color by %1").arg(QString::fromStdString(coloring.primvar));
+    const PrimvarColorStats& stats = m_colorBy->stats;
+    const PrimvarColorizer* colorizer = stats.type ? PrimvarColorizers::instance().choose(coloring.colorizer, stats.type) : nullptr;
+    if (!colorizer) {
+        legend.note = QStringLiteral("Nothing on the stage has it");
+        return legend;
+    }
+    const auto qcolor = [](const PXR_NS::GfVec3f& c) { return QColor::fromRgbF(c[0], c[1], c[2]); };
+    switch (colorizer->legend) {
+        case PrimvarColorizer::Legend::Ramp: {
+            const PrimvarColorRange range = coloring.range ? *coloring.range : stats.range.value_or(PrimvarColorRange());
+            legend.ramp = true;
+            for (const PXR_NS::GfVec3f& stop : primvarRampStops()) legend.rampStops.push_back(qcolor(stop));
+            legend.low = QLocale().toString(range.low, 'g', 4);
+            legend.high = QLocale().toString(range.high, 'g', 4);
+            if (coloring.component >= 0) legend.title += QStringLiteral(" (%1)").arg(QChar("xyzw"[std::min(coloring.component, 3)]));
+            break;
+        }
+        case PrimvarColorizer::Legend::Categories: {
+            constexpr std::size_t kShown = 8;
+            for (std::size_t i = 0; i < std::min(stats.categories.size(), kShown); ++i) {
+                legend.categories.emplace_back(qcolor(primvarCategoryColor(stats.categories[i])), QString::fromStdString(stats.categories[i]));
+            }
+            const std::size_t rest = stats.categories.size() > kShown ? stats.categories.size() - kShown : 0;
+            if (rest > 0 || stats.moreCategories) {
+                legend.more = stats.moreCategories ? QStringLiteral("and more") : QStringLiteral("and %1 more").arg(rest);
+            }
+            break;
+        }
+        case PrimvarColorizer::Legend::None:
+            legend.note = QString::fromStdString(colorizer->note);
+            break;
+    }
+    return legend;
+}
+
 void HydraViewportWindow::exposeEvent(QExposeEvent*) {
     watchTopLevel();
     renderNow();  // or, no longer exposed, pauses the renderer
@@ -1593,6 +1724,8 @@ void HydraViewportWindow::renderNow() {
     PXR_NS::UsdImagingGLRenderParams params = viewportRenderParams(m_display, shading);
     params.frame = m_time;
     if (m_previewMode) params.enableSceneLights = true;  // a preview's lights are its stage's
+    // Color By's colours as they are, unless asked to be lit.
+    if (m_colorBy->coloring.active() && !m_colorBy->coloring.lit) params.enableLighting = false;
     // A renderer that hands over display colors already gets no view transform.
     if (m_displayReferredColor) params.colorCorrectionMode = PXR_NS::HdxColorCorrectionTokens->disabled;
     // Storm leaves what it misses transparent, for the composite over the background.

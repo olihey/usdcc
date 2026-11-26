@@ -5,7 +5,9 @@
 
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/attributes_view_panel.h"
+#include "usdcc/usd/primvar_colors.h"
 #include "usdcc/usd/primvar_values_view.h"
+#include "usdcc/usd/viewport_hud.h"
 #include "usdcc/usd/primvar_views.h"
 #include "usdcc/usd/primvars_view_panel.h"
 #include "usdcc/usd/properties/property_row.h"
@@ -544,4 +546,69 @@ USDCC_TEST(viewport_overlays_menu) {
     elements->setChecked(true);
     viewport.restoreSessionState(state);
     CHECK(viewport.hydraWindow()->hiddenOverlays().count("usdcc.primvarElements"), "and gives it back");
+}
+
+USDCC_TEST(viewport_color_by) {
+    Fixture fixture;
+    if (!fixture.stage) return;
+    auto tools = std::make_shared<usdcc::tools::ToolSet>();
+    ViewportViewPanel viewport(&fixture.stages, fixture.stage, tools, fixture.undo);
+    fixture.select({SdfPath("/World/Good")});
+    struct Opener : ViewportViewPanel {
+        static void populate(ViewportViewPanel* p, QMenu* m) { (p->*(&Opener::populateOptionsMenu))(m); }
+    };
+    QMenu menu;
+    Opener::populate(&viewport, &menu);
+    QAction* dirt = menu.findChild<QAction*>(QStringLiteral("colorBy:dirt"));
+    CHECK(menu.findChild<QAction*>(QStringLiteral("colorBy:")) && dirt && menu.findChild<QAction*>(QStringLiteral("colorBy:st")),
+          "Color By lists None and the selected prims' primvars");
+    if (!dirt) return;
+    dirt->trigger();
+    HydraViewportWindow* window = viewport.hydraWindow();
+    CHECK(viewport.primvarColoring().primvar == "dirt" && window->primvarColorStats().prims >= 2 &&
+              window->primvarColorStats().range == (PrimvarColorRange{0, 7}),
+          "colours by it, the stage's range: %zu", window->primvarColorStats().prims);
+    std::optional<HudLegend> legend = window->hudInput().legend;
+    CHECK(legend && legend->ramp && legend->title == "Color by dirt" && legend->low == QLocale().toString(0.0) &&
+              legend->high == QLocale().toString(7.0),
+          "the HUD's legend: %s", legend ? qPrintable(legend->low + " " + legend->high) : "none");
+
+    // An edit that widens the range, a moment later.
+    UsdGeomPrimvarsAPI(fixture.stage->usdStage()->GetPrimAtPath(SdfPath("/World/Good"))).GetPrimvar(TfToken("dirt")).Set(VtFloatArray{0, 1, 2, 3, 4, 50});
+    CHECK(waitFor([&]() { return window->primvarColorStats().range && window->primvarColorStats().range->high == 50; }), "follows edits");
+
+    QMenu again;
+    Opener::populate(&viewport, &again);
+    CHECK(again.findChild<QAction*>(QStringLiteral("colorizer:categories")) == nullptr && again.findChild<QAction*>(QStringLiteral("colorizer:ramp")),
+          "the colours that apply to floats");
+    QAction* lit = again.findChild<QAction*>(QStringLiteral("colorByLitAction"));
+    if (lit) lit->trigger();
+    CHECK(viewport.primvarColoring().lit, "Lit");
+
+    PrimvarColoring ids;
+    ids.primvar = "id";
+    viewport.setPrimvarColoring(ids);
+    legend = window->hudInput().legend;
+    CHECK(legend && !legend->ramp && legend->categories.size() >= 2, "whole numbers: a colour each (%zu)", legend ? legend->categories.size() : 0);
+    ids.primvar = "st";
+    viewport.setPrimvarColoring(ids);
+    legend = window->hudInput().legend;
+    CHECK(legend && legend->note == "U red, V green", "a UV set says what its colours mean");
+
+    PrimvarColoring fixed;
+    fixed.primvar = "dirt";
+    fixed.range = PrimvarColorRange{-1, 1};
+    fixed.component = 0;
+    viewport.setPrimvarColoring(fixed);
+    const QJsonObject state = viewport.saveSessionState();
+    CHECK(state.value("colorBy").toObject().value("primvar").toString() == "dirt" &&
+              state.value("colorBy").toObject().value("range").toArray().size() == 2,
+          "a session keeps it");
+    std::unique_ptr<usdcc::ui::ViewPanel> copy(viewport.duplicate());
+    CHECK(qobject_cast<ViewportViewPanel*>(copy.get())->primvarColoring() == fixed, "and Duplicate");
+    viewport.setPrimvarColoring({});
+    CHECK(!window->hudInput().legend, "off: no legend");
+    viewport.restoreSessionState(state);
+    CHECK(viewport.primvarColoring() == fixed, "and gives it back");
+    viewport.setPrimvarColoring({});
 }
