@@ -8,7 +8,7 @@ the three trimmed 7.5.4.2 SDKs and a workflow, run by hand, that builds the pack
 macOS arm64 and Linux x64 with this repository's tools and pin, refuses a pack holding any SDK
 file, checks each over CI's OpenUSD, rendering a frame with Arnold on each of the three, and keeps
 them in a private release named as that OpenUSD asset (`deps/usd-70c45e83b-76ce049f`). The macOS
-pack also renders in usdcc's viewport. The pack stays
+and Linux packs also render in usdcc's viewport. The pack stays
 `local`: `deps-usd-plugins.yml` leaves it out and nothing of it is published. What's left:
 phase 4, asking Autodesk (§7).
 
@@ -16,7 +16,7 @@ phase 4, asking Autodesk (§7).
 |---|---|
 | 1. The private repository and its SDKs | Done |
 | 2. The workflow, all three platforms, each rendering a frame | Done |
-| 3. A CI-built pack in usdcc (macOS) | Done; Windows and Linux not tried in usdcc |
+| 3. A CI-built pack in usdcc | Done on macOS and Linux (x86-64, in a container); Windows not tried in usdcc |
 | 4. Ask Autodesk: CI download, and publishing the plugins | Open, for the maintainer |
 | 5. Publish as an optional pack | Only after 4 |
 
@@ -217,9 +217,18 @@ Not legal advice: what is above is what the texts say, read by us.
    ([USD_PLUGINS.md](USD_PLUGINS.md) §10) with a note that it needs Arnold from Autodesk. Or, with
    Autodesk's CI download, the build moves into `deps-usd-plugins.yml` itself, as Gaffer's is.
 6. **Linux x64** (2026-11-26): the pin lists it, `enableArnold()` loads `bin/libai.so`, and the
-   workflow has an `ubuntu-24.04` job. Its first run failed the check: the plugins name `libai.so`, which
+   workflow has an `ubuntu-24.04` job. **In usdcc (2026-11-27):** in an x86-64 Ubuntu 24.04 container
+   on the Mac (Colima, Rosetta), usdcc built from `claude/packs-in-app` (`e074fa3`) against CI's
+   Linux OpenUSD as `build.yml`'s Linux job sets it up, with the CI-built Linux pack over that
+   OpenUSD and the trimmed SDK as the Arnold folder: "Arnold 7.5.4.2 from /arnold/bin/libai.so, with
+   4 plugins", and all six steps of `tests/renderer_viewport_check.py` converge under Xvfb (first
+   frame 1.8 s), the same picture as on macOS. `FindUSD.cmake` found the container's uv Python by
+   itself, though the asset names `/opt/hostedtoolcache/…`. The container needed `python3-venv`
+   (vcpkg's `libsystemd`), and GCC under Rosetta crashed twice (an LTO internal error in the
+   Blender mesh tools, left out with `--without blender_mesh_tools`, and a segfault in Qt, fine on
+   a retry with `VCPKG_MAX_CONCURRENCY=8`): emulation, not usdcc. Its first run failed the check: the plugins name `libai.so`, which
    has no SONAME, so the core loaded first didn't count. The pin's `preloaded` drops it from their
    `NEEDED`. Then `hdArnold` alone failed, missing `libusd_usdImaging.so` from its `NEEDED`
    (Ubuntu's `--as-needed`), which a Linux-only `-Wl,--no-as-needed` fixes ([USD_PLUGINS.md](USD_PLUGINS.md)
-   §3, Arnold). The workflow prints what the plugins need after a failed Linux check. Rendering in usdcc on Linux is still to try.
+   §3, Arnold). The workflow prints what the plugins need after a failed Linux check.
 7. **Later:** Windows arm64, if Autodesk ships an arm64 SDK.
