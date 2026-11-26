@@ -19,6 +19,7 @@
             "-DBUILD_SCENE_INDEX_PLUGIN=ON", "-DBUILD_PROCEDURAL=OFF", "-DBUILD_SCHEMAS=OFF",
             "-DBUILD_TESTSUITE=OFF", "-DBUILD_DOCS=OFF", "-DPREFIX_PLUGINS=."],
   "install_prefix": "plugin/arnold",
+  "preloaded": {"linux-x64": ["libai.so"]},
   "licenses": {
     "arnold-sdk": ["{arnold}/EULA.txt"]
   },

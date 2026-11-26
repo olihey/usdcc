@@ -38,6 +38,11 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
   install_prefix      where in the pack the install goes (default: its root)
   install_components  the install components to take (default: all of it)
   licenses            {name: [files]}: more licence files, {<download name>} and {<sdk name>} allowed
+  preloaded           {platform: [library names]}, Linux: libraries the app loads by full path
+                      and globally before the pack's plugins (Arnold's core), taken out of
+                      the plugins' NEEDED. Such a library without a SONAME, as libai.so,
+                      doesn't satisfy a NEEDED of its name, so the plugins couldn't load;
+                      without the entry their symbols come from the loaded one
 
 --install copies the pack over the OpenUSD install afterwards. Check a pack with
 tools/ci/check_usd_plugin.py.
@@ -414,6 +419,15 @@ def _finish(spec, pack, args, usd, work, pack_dir, source, build, submodules, pl
         print(f"rpaths relative to @loader_path: {', '.join(_relative_rpaths(pack_dir, usd)) or 'none to change'}", flush=True)
     if LINUX and not spec.get("hook"):  # a hook sets its binaries' own
         print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir, usd)) or 'none to change'}", flush=True)
+    if LINUX and spec.get("preloaded", {}).get(ASSET_PLATFORM):
+        from _elf import elf_files, needed, remove_needed
+        names = spec["preloaded"][ASSET_PLATFORM]
+        changed = []
+        for file in elf_files(pack_dir):
+            for name in set(needed(file)) & set(names):
+                remove_needed(file, name)
+                changed.append(f"{file.relative_to(pack_dir).as_posix()} ({name})")
+        print(f"Preloaded, not NEEDED: {', '.join(changed) or 'nothing named them'}", flush=True)
 
     # The licences: the plugin's own and what CMake fetched into it, its
     # submodules', and the files the pin names (an SDK's, shipped beside it).

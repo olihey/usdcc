@@ -140,7 +140,11 @@ Notes:
        `bin/libai.dylib` or `bin/libai.so` with `dlopen(RTLD_NOW | RTLD_GLOBAL)`: the plugins
        ask for `@rpath/libai.dylib` or `libai.so`, the install name or soname of the one
        loaded, so they get it, and its own libraries (licensing) come from its folder
-       through its `@loader_path` or `$ORIGIN` rpath. Linux is built only by
+       through its `@loader_path` or `$ORIGIN` rpath. On Linux that isn't enough:
+       Arnold's `libai.so` has no SONAME, and a library loaded by its path satisfies no
+       `NEEDED libai.so`, so the plugins wouldn't load. The pin's `preloaded` takes
+       `libai.so` out of their `NEEDED` (`build_usd_plugin.py`, `patchelf`), and their
+       Arnold symbols come from the core loaded globally first. Linux is built only by
        [ARNOLD_CI.md](ARNOLD_CI.md)'s workflow so far, not tried in usdcc;
     3. asks the core its version (`AiGetVersion`). The plugins need the Arnold they were
        built for or a later one of the same 7.x: built against 7.5.4, they don't load

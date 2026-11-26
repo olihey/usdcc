@@ -182,5 +182,7 @@ Not legal advice: what is above is what the texts say, read by us.
    ([USD_PLUGINS.md](USD_PLUGINS.md) §10) with a note that it needs Arnold from Autodesk. Or, with
    Autodesk's CI download, the build moves into `deps-usd-plugins.yml` itself, as Gaffer's is.
 6. **Linux x64** (2026-11-26): the pin lists it, `enableArnold()` loads `bin/libai.so`, and the
-   workflow has an `ubuntu-24.04` job. Rendering in usdcc on Linux is still to try.
+   workflow has an `ubuntu-24.04` job. Its first run failed the check: the plugins name `libai.so`, which
+   has no SONAME, so the core loaded first didn't count. The pin's `preloaded` drops it from their
+   `NEEDED` ([USD_PLUGINS.md](USD_PLUGINS.md) §3, Arnold). Rendering in usdcc on Linux is still to try.
 7. **Later:** Windows arm64, if Autodesk ships an arm64 SDK.
