@@ -100,6 +100,7 @@ was built with.
 | RTX Render | `USDCC_BUILD_RTX_RENDER` | Plugin | Off (as today) | | Rename with an alias |
 | Blender mesh tools | `USDCC_BUILD_BLENDER_MESH_TOOLS` | Plugin | On | GPL | Small: stop forcing it |
 | Updates | `USDCC_BUILD_UPDATES` | In the app (`app_updates.cpp`) | On (without Velopack it only says that there is a newer release) | The studio deploys versions itself, and nothing should ask the internet | Medium: compile definition in `usdcc_app` |
+| Packs | `USDCC_BUILD_PACKS` | In the app (`app_packs.cpp`) | On | Nothing should be downloaded into a studio's seats, or it copies packs there itself. A pack that is in the store is still loaded ([USD_PLUGINS.md](USD_PLUGINS.md) §10) | Done: sources and `#if USDCC_FEATURE_PACKS` in `main.cpp` and `app_updates.cpp` |
 | Peers | `USDCC_BUILD_PEERS` | A library (`usdcc_peers`), linked by `usdcc_usd`, `usdcc_ui`, `usdcc_app` and `usdcc_node` (*checked*) | On | A build that never opens a connection | **Large:** the shared stage, rendering with peers, the render queue and the Peers panel all build on it. Its own plan when it's wanted |
 | Editor link | `USDCC_BUILD_EDITOR_LINK` | In a library (`usdcc_scripting_app`) | On | Other programs running scripts in the app ([VSCODE.md](VSCODE.md)) | Done with its first phase |
 | MCP | to come with it | | | | Has an option from its first phase |

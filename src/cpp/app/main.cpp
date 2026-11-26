@@ -1,6 +1,9 @@
 #include <QInputDialog>
 #include <QApplication>
 
+#if USDCC_FEATURE_PACKS
+#include "app_packs.h"
+#endif
 #if USDCC_FEATURE_UPDATES
 #include "app_updates.h"
 #endif
@@ -69,6 +72,7 @@
 #include "usdcc/scripting/editor_link.h"
 #endif
 #include "usdcc/scripting/editor_setup.h"
+#include "usdcc/scripting/pack_store.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_manager_side_panel.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -235,6 +239,19 @@ int main(int argc, char** argv) {
         QStringLiteral("install-plugin-packages"),
         QObject::tr("Install the Python packages the plugins ask for, and exit. Exit code: 0 done, 2 some left out, 1 failed."));
     commandLine.addOption(installPackagesOption);
+#if USDCC_FEATURE_PACKS
+    // For farm machines too (docs/USD_PLUGINS.md §10): a render node loads the packs the app installed.
+    const QCommandLineOption installPacksOption(
+        QStringLiteral("install-packs"),
+        QObject::tr("Install optional packs for this version of usdcc, and exit: their names, separated by commas, or "
+                    "\"chosen\" for those chosen in View > Plugins. Exit code: 0 done, 2 some aren't offered, 1 failed."),
+        QObject::tr("names"));
+    const QCommandLineOption removePacksOption(
+        QStringLiteral("remove-packs"),
+        QObject::tr("Remove optional packs, and exit: their names, separated by commas."), QObject::tr("names"));
+    commandLine.addOption(installPacksOption);
+    commandLine.addOption(removePacksOption);
+#endif
 #if USDCC_FEATURE_EDITOR_LINK
     const QCommandLineOption noEditorLinkOption(QStringLiteral("no-editor-link"),
                                                 QObject::tr("Don't let editors connect this time (docs/VSCODE.md)."));
@@ -257,6 +274,10 @@ int main(int argc, char** argv) {
     // Settings > Updates (docs/UPDATES.md §4).
     usdcc::app::AppUpdates::defineSettings();
 #endif
+#if USDCC_FEATURE_PACKS
+    // Settings > Updates > Packs (docs/USD_PLUGINS.md §10).
+    usdcc::app::AppPacks::defineSettings();
+#endif
     // Settings > Viewport's grid and background, there before any viewport opens.
     usdcc::usd::defineViewportDisplaySettings();
     usdcc::usd::defineMaterialPreviewSettings();
@@ -264,8 +285,16 @@ int main(int argc, char** argv) {
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry
     // doesn't take in a plugin's schemas once it exists (docs/PLUGINS.md §3.1).
-    usdcc::scripting::PluginManager plugins(usdcc::scripting::PluginManager::defaultOptions(
-        usdcc::app::pluginFolders(commandLine.values(pluginPathOption)), !commandLine.isSet(noPluginsOption)));
+    // The packs usdcc downloaded (docs/USD_PLUGINS.md §10) are plugins too, made loadable
+    // first; `packs` holds them in use for as long as the app runs.
+    usdcc::scripting::PackStore packs(usdcc::scripting::PackStore::defaultOptions());
+    bool loadPlugins = !commandLine.isSet(noPluginsOption);
+#if USDCC_FEATURE_PACKS
+    // --install-packs and --remove-packs load none: a pack this process had loaded couldn't
+    // be removed by it.
+    if (commandLine.isSet(installPacksOption) || commandLine.isSet(removePacksOption)) loadPlugins = false;
+#endif
+    usdcc::scripting::PluginManager plugins(usdcc::app::pluginOptions(commandLine.values(pluginPathOption), loadPlugins, packs));
     plugins.scan();
     // The schema libraries in the plugins' USD folders, and Settings > Assets.
     usdcc::app::configurePluginUsd(plugins);
@@ -313,6 +342,31 @@ int main(int argc, char** argv) {
         };
         return plugins.installPackages(python, report);
     }
+#if USDCC_FEATURE_PACKS
+    // The same for the optional packs (docs/USD_PLUGINS.md §10): removed first, then installed.
+    if (commandLine.isSet(installPacksOption) || commandLine.isSet(removePacksOption)) {
+        const auto report = [](const QString& line) {
+            USDCC_LOG_INFO("usdcc.packs", "{}", line.toStdString());
+            usdcc::core::writeToOriginalStderr(line.toStdString() + "\n");
+        };
+        const auto names = [&commandLine](const QCommandLineOption& option) {
+            QStringList list;
+            for (const QString& value : commandLine.values(option)) {
+                for (const QString& name : value.split(QLatin1Char(','), Qt::SkipEmptyParts)) list << name.trimmed();
+            }
+            return list;
+        };
+        usdcc::app::AppPacks unattended({.store = &packs, .python = python.isAvailable() ? python.executable() : std::filesystem::path()});
+        int code = 0;
+        if (commandLine.isSet(removePacksOption)) code = unattended.removeNow(names(removePacksOption), report);
+        if (commandLine.isSet(installPacksOption)) {
+            QStringList wanted = names(installPacksOption);
+            wanted.removeAll(QStringLiteral("chosen"));  // no names: the chosen ones
+            code = std::max(code, unattended.installNow(wanted, report));
+        }
+        return code;
+    }
+#endif
 
     usdcc::ui::MainWindow window;
     window.logPanel()->setLogFile(logFilePath);
@@ -1251,6 +1305,27 @@ int main(int argc, char** argv) {
     auto* pluginPanel = new usdcc::scripting::PluginManagerSidePanel(plugins);
     window.addSidePanel(pluginPanel, Qt::RightDockWidgetArea);
     pluginPanel->hide();
+#if USDCC_FEATURE_PACKS
+    // The packs usdcc can download, under the plugins and managed there alone (docs/USD_PLUGINS.md
+    // §10): a pack is plugins of any kind. Restart Now closes the window as File > Exit does and
+    // comes back with the last session, as a restart for a schema does.
+    usdcc::app::AppPacks appPacks({.store = &packs,
+                                   .python = python.isAvailable() ? python.executable() : std::filesystem::path(),
+                                   .toasts = window.toasts(),
+                                   .restart = [&window, &restartRequested, &restartArguments]() {
+                                       restartRequested = true;
+                                       restartArguments = {QStringLiteral("--open-session"),
+                                                           QLatin1String(usdcc::ui::session::kLastSessionName)};
+                                       window.close();
+                                       if (window.isVisible()) restartRequested = false;
+                                       return restartRequested;
+                                   }});
+    pluginPanel->setPackCatalog(&appPacks);
+#if USDCC_FEATURE_UPDATES
+    // An update of usdcc takes the chosen packs along, fetched for the new version first.
+    updates.setPacks(&appPacks);
+#endif
+#endif
 
     // Peers (docs/PEERS.md): rooms with other usdcc instances, found on this machine and
     // network, with the people in them and their chat. Nothing opens a port or goes on
@@ -1688,6 +1763,10 @@ int main(int argc, char** argv) {
 #if USDCC_FEATURE_UPDATES
     // "Updated to ..." after an update, and the check a few seconds later (docs/UPDATES.md §4).
     updates.start();
+#endif
+#if USDCC_FEATURE_PACKS
+    // The packs the user chose that this version lacks, a few seconds later (docs/USD_PLUGINS.md §10).
+    appPacks.start();
 #endif
 
     // Once the window is up and its layout settled (so panels the scripts add

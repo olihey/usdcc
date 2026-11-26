@@ -26,6 +26,8 @@ class MainWindow;
 
 namespace usdcc::app {
 
+class AppPacks;
+
 class AppUpdates : public QObject {
 public:
     // `closeWindow` closes the main window as File > Exit does, asking what
@@ -55,6 +57,12 @@ public:
     // Restart to Update to <version>. `action` outlives the AppUpdates.
     void setMenuAction(QAction* action);
 
+    // The optional packs (docs/USD_PLUGINS.md §10), which an update takes along: before the
+    // new version is downloaded, the packs the user chose are fetched for it, and a pack
+    // it doesn't have is asked about. `packs` outlives this, or is set to null first.
+    // Without one (a build without the Packs feature) an update is the app's alone.
+    void setPacks(AppPacks* packs) { m_packs = packs; }
+
     // At the end of main(), once the app has quit: when Restart Now closed it,
     // hands the downloaded update to Velopack's updater, which waits for this
     // process to end, installs it and starts usdcc again.
@@ -68,6 +76,14 @@ private:
     void checkFailed(const QString& error, bool interactive);
     bool mayRestartForUpdate();
     void download();
+    void downloadPackage();
+    void fetchPacksThenDownload();
+    void fetchPacks(const QString& version);
+    void stopDownloading();
+    // Whether to go on with the update though its packs aren't all there. With `retry`,
+    // trying again is offered too.
+    enum class PackChoice { UpdateAnyway, Retry, Later };
+    PackChoice askAboutPacks(const QString& text, bool retry);
     void restartNow();
     void showReady();
     void updateMenuAction();
@@ -81,6 +97,8 @@ private:
     QString m_releaseVersion;  // the newer release a copy that can't update itself found, and its tag
     QString m_releaseTag;
     int m_availableToast = 0;  // "usdcc <version> is available"; 0 is none
+    AppPacks* m_packs = nullptr;
+    QString m_packsFetched;  // the packs fetched for the update, as "MoonRay and Cycles"; for the ready notification
     std::shared_ptr<State> m_state;
 };
 

@@ -1,0 +1,20 @@
+{
+  "moonray": {
+    "title": "MoonRay",
+    "description": "DreamWorks' production path tracer, as a renderer for the viewport and for final renders.",
+    "homepage": "https://openmoonray.org",
+    "renderers": ["MoonRay", "MoonRay (in-process)"]
+  },
+  "cycles": {
+    "title": "Cycles",
+    "description": "Blender's path tracer, on the CPU, as a renderer for the viewport and for final renders.",
+    "homepage": "https://www.cycles-renderer.org",
+    "renderers": ["Cycles"]
+  },
+  "gatling": {
+    "title": "Gatling",
+    "description": "A GPU path tracer with MDL materials. Needs a GPU with Vulkan ray tracing.",
+    "homepage": "https://github.com/pablode/gatling",
+    "renderers": ["Gatling"]
+  }
+}

@@ -39,7 +39,7 @@ VCPKG_DIR = REPO / "external/vcpkg"
 # declares them with usdcc_feature() (docs/BUILD_OPTIONS.md). RTX Render, off by
 # default, has --with-rtx and --without-rtx.
 OPTIONAL_FEATURES = ["VIEWPORT_BROADCAST", "UV_VIEW", "HTTP", "WEBDAV", "S3", "PHYSICS_JOLT", "VRAY_RENDER", "BLENDER_MESH_TOOLS",
-                     "UPDATES", "EDITOR_LINK"]
+                     "UPDATES", "PACKS", "EDITOR_LINK"]
 
 
 def parser(description=None):

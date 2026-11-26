@@ -12,7 +12,8 @@ Phase 7, Arnold, is built locally on Windows and renders in usdcc's viewport whe
 Settings > Renderers > Arnold names an Arnold folder; it is a `local` pack, which CI never builds.
 Phase 6, Aurora, was tried locally (2026-11-23): hdAurora **builds against our OpenUSD** with a
 small patch, no Autodesk fork needed, and registers in usdcc, but its renderer fails to start
-there; no pin yet (§7 phase 6). The rest is a plan.
+there; no pin yet (§7 phase 6). Optional packs are installed in the app, and updated with it
+(§10): built and checked on Windows with a test pack, not released. The rest is a plan.
 
 ## 1. Where we are
 
@@ -783,99 +784,8 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 
 ## 9. Later
 
-- **Optional packs downloaded in the app** (decided 2026-11-26; not planned in detail yet). An
-  optional pack stays a separate download (§5), but usdcc fetches the one for its own
-  version itself, in place of an archive the user unpacks over it, and of the second disk image
-  on macOS. Not through a plugin registry: [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) is parked.
-  - **A pack is plugins of any kind,** not only a renderer. The first ones are render
-    delegates (MoonRay; Cycles and Gatling after it) because those are the big ones, but the
-    same download serves whatever is too large or too special to ship with usdcc: file
-    formats, asset resolvers, schemas, and usdcc's own plugins, in Python or C++
-    ([PLUGINS.md](PLUGINS.md)). Nothing below depends on what is in the pack, except where
-    it says "render".
-  - **A pack with a C++ plugin of usdcc's** loads into one usdcc build only (PLUGINS.md §3.2),
-    as a pack of USD plugins loads into one OpenUSD. The next point covers both.
-  - **An app update wipes the pack** (decided 2026-11-26). It is built against one OpenUSD, or
-    one usdcc, and wouldn't load into the next anyway. usdcc then offers the download again; there is no
-    "needs update" state and no second build kept ready.
-  - **So the pack is unpacked over usdcc's own folder,** where the user unpacks it today: a
-    Windows install (Velopack replaces the folder at an update, which is the wipe), a 7z or a
-    Linux tar.xz. It keeps the layout it was built and checked in (§4, §5), and raises no new
-    question about finding its libraries. Only new files are written, as a pack never brings a
-    file the folder has (§2); it takes effect at the next start. Removing it deletes the files
-    its list names.
-  - **Where that can't be done:** a signed macOS bundle, and the AppImage, which is one
-    read-only file. To decide, per platform: the pack in the user's data folder, with the
-    library question of PLUGIN_REGISTRY.md §7 (RUNPATHs relative to an install it is no longer
-    in); or an update channel of its own whose package is usdcc with the pack, as the second
-    disk image is today, which the app switches to. Whether Velopack moves an install to
-    another channel at the same version isn't checked.
-  - **A channel is one fixed set of packs.** With several packs and a user who wants some of
-    them, it is a channel per combination (four packs: sixteen packages a platform, each
-    release) or one "all packs" channel that gives everyone everything. So the channel only
-    serves while there is one optional pack; a choice of packs needs the data folder.
-  - **The data folder, with a link:** the pack unpacked into a folder
-    laid out as an install, `<data>/usd-packs/plugin/usd/<pack>/...`, with `lib` there a
-    symbolic link to the app's own `lib`, made again at each start, as the AppImage is mounted
-    somewhere else each time. The pack's relative RUNPATHs then lead where they did, with the
-    pack built as it is today. It needs the pack to keep all its own files under
-    `plugin/usd/<pack>`, as MoonRay's does ([MOONRAY.md](MOONRAY.md) §7.4) and Adobe's doesn't
-    (three libraries in `lib`), and usdcc to register that folder before the first stage, as
-    `enableArnold()` does. In the trials below the pack's folder is a usdcc plugin, with a
-    `usdcc-plugin.json` naming its USD folder, found by the plugin manager; a pack with
-    Python or a C++ plugin would be the same folder with those parts in its manifest. Only a
-    pack of render delegates has been tried.
-
-    *Tried on Linux (2026-11-26; WSL, Ubuntu 24.04), with the deploy and the MoonRay pack of
-    2026-11-24, the deploy without PySide6:*
-    - *Set up:* the deploy with MoonRay's files taken out; the pack's own folder, as
-      `tools/deploy.py --optional-packs` makes it, in a folder elsewhere, unchanged but for
-      two files added: a `plugin/usd/plugInfo.json` including `*/resources/`, and a
-      `usdcc-plugin.json` naming `plugin/usd` as a USD folder, so that usdcc's own
-      `PluginManager` registers it (`--plugin-path`).
-    - *The check:* [MOONRAY.md](MOONRAY.md) §7.4's, by `usdcc --script` under Xvfb: the three
-      plugins load, and both delegates record a frame of the test scene.
-    - *Without the link* the renderers are listed but no plugin loads: `libusd_pegtl.so: cannot
-      open shared object file`, a library of OpenUSD that usdcc hadn't loaded by then.
-    - *With the link* all three load from the data folder and both delegates render, the
-      Arras one too, whose `execComp` is a process of its own and finds everything through the
-      link. The pictures are the control's (the pack inside the deploy). The process has 57
-      MoonRay libraries from the data folder and the rest from the app or the system; none is
-      mapped twice, none is there under one name from two places, and libfreetype is the app's.
-    - *With the app's folder renamed and the link made again,* as an AppImage's next start
-      would have it: the same.
-    *Tried on macOS (2026-11-26; Apple silicon), with usdcc 26.11.10 from `/Applications` and
-    its MoonRay pack, which is older than the shader nodes (MOONRAY.md phase 5) and so has
-    three of the check's five plugins:*
-    - *With the link* the three load from the data folder and both delegates render, as in
-      the control; the pack's `@loader_path/../../../../lib` leads through the link as the
-      RUNPATH does on Linux. 57 MoonRay libraries come from the data folder; none is loaded
-      twice or under one name from two places. *With the app's folder renamed* the same.
-    - *Without the link* it doesn't fail, it hangs: the debug delegate records the right
-      picture, then the Arras one never finishes (killed after 5 minutes). dyld finds a
-      library by install name when the process already has it, so more loads than on Linux,
-      and what is missing shows only later. In the app that would be a render that never
-      comes, not an error (for another kind of pack, whatever it does that never finishes),
-      so the link has to be checked before what the pack adds is offered.
-    - *Signing:* taking the pack out of the copied bundle breaks its seal (`codesign --verify`:
-      a sealed resource is missing), as expected; the programs and libraries keep their own
-      signatures and run. `--resign` wasn't tried. A pack shipped this way leaves the bundle
-      whole.
-    - *To run it again,* on Linux or macOS: `python tools/try_pack_outside_app.py --deploy
-      <a deploy with the pack in it>`. It does the four runs (the pack inside, outside without
-      the link, with it, and with the app moved) with the pin's own check scene, and says
-      where each library of the process came from. In WSL and on macOS it gives the results
-      above; with today's pack all five plugins should load.
-    - *Not tried:* a pack that isn't render delegates (file formats, a usdcc plugin in Python
-      or C++); the viewport, with a window (the check records frames by script); a real
-      AppImage, read-only and mounted by FUSE; macOS with a pack that has the shader nodes,
-      and a notarized bundle beside a data folder Gatekeeper may treat as downloaded. **Two usdcc at once from one AppImage** are mounted in two places and would
-      share the one link: the second start repoints it, and when that one quits the first
-      has a link into a folder that is gone, for whatever it loads after (a shader, a new
-      `execComp`). A link folder per process doesn't help as it is, since `..` in the RUNPATH
-      is followed from the pack's real folder; hard links of the pack per process would.
-  - **A folder the user can't write** (a shared install): the app says so, and an administrator
-    unpacks the archive as today.
+- **Optional packs downloaded in the app:** built, §10. It began here as a decision of
+  2026-11-26, with the trials that section now has.
 - **More render delegates.** AMD's Radeon ProRender (`hdRpr`) and Intel's OSPRay
   (`hdOSPRay`, a CPU renderer, so testable on hosted runners) are open source. Whether
   either still follows current OpenUSD has to be checked first. MoonRay, which doesn't
@@ -885,3 +795,294 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
   without publishing, so a plugin that breaks on the next OpenUSD is known before the bump.
 - **A symbols asset** for OpenUSD and the packs (`relwithdebinfo`), CI.md §6 item 3.
 - **macOS**, with CI.md §7.
+
+## 10. Optional packs in the app
+
+An optional pack stays a separate download (§5), but usdcc fetches the one for its own version
+itself, in **View > Plugins > Packs**, in place of an archive the user unpacks over it, and of
+the second disk image on macOS. Not through a plugin registry:
+[PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) is parked.
+
+**Status (2026-11-26):** built, and checked on Windows with a test pack, in the app and by the
+tests of §10.6; nothing is released with it. On Linux and macOS none of it has run yet: its
+parts were tried by hand before (§10.6). The release workflow's new steps haven't run either;
+a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stay
+until a release has shown that this works, and no Windows optional pack is published yet
+(Cycles and Gatling say `"publish": false`), so Windows users see an empty list until one is.
+
+### 10.1 Decisions
+
+- **A pack is plugins of any kind,** not only a renderer. The first ones are render delegates
+  (MoonRay; Cycles and Gatling after it) because those are the big ones, but the same download
+  serves whatever is too large or too special to ship with usdcc: file formats, asset resolvers,
+  schemas, and usdcc's own plugins, in Python or C++ ([PLUGINS.md](PLUGINS.md)).
+- **A pack is for exactly one usdcc version.** It is built against one OpenUSD, and one with a
+  C++ plugin of usdcc's loads into one usdcc build only (PLUGINS.md §3.2). There is no "needs
+  update" state: a version has its packs or it doesn't.
+- **Packs live in the user's data folder, on every platform,** one folder per usdcc version
+  (decided 2026-11-26; first it was "unpacked over usdcc's own folder" where that could be done).
+  One mechanism in place of two; the app's folder is never written, so a signed macOS bundle, an
+  AppImage and an install the user can't write all work; and the next version's packs can be
+  put beside this one's before an update, which a folder Velopack replaces can't hold.
+- **Packs update with the app** (decided 2026-11-26): the packs the user chose are fetched for
+  the new version before the restart (§10.5).
+- **A chosen pack the new version doesn't have is asked about** before the update, with Update
+  Anyway and Later. usdcc doesn't hold an update back for a pack, nor go ahead without saying.
+- **In View > Plugins,** where an installed pack's plugins show anyway, not in a dialog of its own.
+- **Not an update channel per set of packs** (usdcc with the pack, as the second disk image is):
+  with several packs it is a channel per combination, or one that gives everyone everything.
+
+### 10.2 The store
+
+`<user data>/packs` (`%LOCALAPPDATA%\usdcc_config\packs` on Windows), `PackStore` in
+[pack_store.h](../src/cpp/scripting/include/usdcc/scripting/pack_store.h):
+
+```text
+packs/
+  wanted.json                      the packs the user installed; kept over every update
+  26.12.1-linux-x64/               one per usdcc version and platform
+    moonray/                       a usdcc plugin folder, laid out as an install
+      usdcc-plugin.json            id org.usdcc.pack.moonray, "usd": ["plugin/usd"]
+      pack.json                    what was installed, and its content hash
+      plugin/usd/plugInfo.json     includes */resources/
+      plugin/usd/<its folders>/    as the pack is built
+      bin/                         Windows only: the pack's own DLLs
+      lib -> <usdcc>/lib           Linux and macOS: a link, made again at every start
+      licenses/  .in-use
+  26.12.2-linux-x64/moonray/       fetched before the update to 26.12.2
+  .downloads/                      archives, and packs being unpacked
+```
+
+- **Found as a plugin.** This version's folder is one of the plugin manager's, after the user's
+  own and the added folders and before the shipped one, so a pack's USD folder is registered
+  before the first stage, in usdcc and in usdcc_node, with no loader of its own. View > Plugins
+  lists it among the plugins, with what it added. A development build uses the folder of the
+  release it follows (`26.11.10` for `26.11.10+8.75b11df`).
+- **Made loadable at the start,** before the plugins are scanned (`PackStore::prepare()`).
+  OpenUSD loads a plugin's library by its full path and nothing more, so what that library
+  needs has to be found:
+  - *Windows:* the pack's `bin` goes on the process's `PATH` (tried, §10.6), in front of what
+    the machine has there, so that a DLL of the same name somewhere on the user's `PATH` can't
+    take a pack's place. usdcc's own DLLs are found before `PATH`, in its own folder.
+  - *Linux and macOS:* the pack's `lib` is a link to usdcc's own `lib`, where the files' RUNPATHs
+    lead as they did in the install the pack was built in. Made again at each start, as an
+    AppImage is mounted somewhere else each time. While another usdcc uses the pack the link
+    stays where that one loads from.
+  - A pack that can't be made loadable, or was made for another version, is listed as Not
+    loaded with the reason, and nothing of it is registered. On macOS a pack loaded without
+    its link doesn't fail, a render with it never ends (§10.6), so this is checked, not assumed.
+- **Never changed in place.** An install unpacks in `.downloads`, writes `pack.json` last and
+  renames the finished folder into place; a failed or cancelled one leaves the store as it was.
+  Each running usdcc holds `.in-use` open in the packs it loaded
+  ([in_use_marker.h](../src/cpp/scripting/include/usdcc/scripting/in_use_marker.h), the rule of
+  PYTHON_PACKAGES.md §3), and nothing in use is deleted. Installing and removing take effect at
+  the next start.
+- **Other versions' folders** are deleted at a start once this version is the newer one and no
+  usdcc uses them. A newer version's stay: fetched for an update that isn't installed yet.
+
+### 10.3 What a release publishes
+
+Per platform, as files of the release itself, beside the usdcc archives:
+
+- `usdcc-<version>-<platform>-pack-<name>.zip` on Windows, `.tar.xz` elsewhere (links and
+  executable bits), whose one top folder is the pack's folder as above, without `lib`.
+- `usdcc-<version>-<platform>-packs.json`, the index: per pack its name, title, description,
+  version, licence, homepage, renderers, the archive's name, size and SHA-256, the installed size,
+  and `content`, a SHA-256 over the pack's file names and each file's hash. Two releases' packs
+  with one `content` are the same files. A platform without packs publishes an empty list; a
+  release without an index (an older one, or a failed job) counts as having no packs.
+- usdcc reads both by their plain download addresses
+  (`.../releases/download/<tag>/<file>`), not GitHub's API, so its hourly limit doesn't count.
+
+How they are made:
+
+- `tools/deploy.py --pack-folders DIR` writes each optional pack as the folder usdcc installs,
+  `DIR/<pack>/`: from the files `--optional-packs` deployed and checked (Linux; on macOS from the
+  signed copy of the bundle, so each binary has its own signature), and on Windows from the
+  pack itself. Title and description come from [deps/packs.json](../deps/packs.json), not the
+  pins: an edit to a pin, or to `usd_plugin_asset.py`, renames and rebuilds packs.
+- **On Linux and macOS a pack may have nothing in `lib/`,** where the installed pack has its link:
+  it keeps its own libraries under `plugin/usd/`, as MoonRay's does. `deploy.py` fails on one
+  that doesn't. **Cycles' pack doesn't yet** on those two (Open Image Denoise is in `lib/`, §7
+  phase 5): its hook has to change before it is published there.
+- `tools/ci/pack_index.py --packs DIR --version V --out DIR` archives them and writes the index.
+- `tools/ci/check_pack_install.py --deploy D --packs DIR` installs each with the deploy's own
+  usdcc (`--install-packs`, into a test profile), starts it and checks that OpenUSD registered
+  the pack from the data folder, that the plugins its pin's `check` names load and its
+  renderers are listed, and removes it again. `release.yml` runs the three in each platform's job.
+- `tools/make_test_pack.py <folder> --version V ...` makes a tiny pack without binaries (a
+  codeless schema, the prim type `UsdccHelloThing`) with archives and indexes for the versions
+  given, to try all of this without a release.
+
+### 10.4 In the app
+
+`AppPacks` ([app_packs.h](../src/cpp/app/app_packs.h)), the feature `USDCC_BUILD_PACKS`
+([BUILD_OPTIONS.md](BUILD_OPTIONS.md)). Off, usdcc downloads nothing and has no Packs section;
+a pack that is in the store all the same is still loaded.
+
+- **View > Plugins > Packs** lists what this version's release offers and what is installed:
+  title, size and state, and under each its description, renderers, version, licence, and why
+  an install failed or a pack isn't loaded. For the pack selected:
+
+  | State | Buttons |
+  |---|---|
+  | Not installed | Install |
+  | Downloading 42%, Unpacking... | Cancel |
+  | Restart to use | Restart Now, Remove... |
+  | Installed | Remove... |
+  | Removed at the next start | Restart Now, Keep |
+  | Not loaded (why) | Remove... |
+  | Not for this version (chosen, and this release has none) | Remove... |
+
+- **The list is read when the panel is first opened,** and with its refresh button: nothing asks
+  the network for a panel nobody looked at.
+- **Install:** a check that the drive has room, the download with Qt Network and the system's
+  proxy, its size and SHA-256 against the index, unpacking in a process of usdcc's own Python
+  (`zipfile` / `tarfile` with the `data` filter: no path or link may lead out of the folder), a
+  check that it is one folder with a `usdcc-plugin.json`, the rename, and the pack joins
+  `wanted.json`. Then "MoonRay is installed" with **Restart Now**.
+- **Remove...** asks once, naming the pack and the room it frees. The pack leaves `wanted.json`
+  at once, so no update and no start fetches it again. One this usdcc hasn't loaded is deleted at
+  once; a loaded one is marked, goes at the next start, and **Keep** takes that back.
+- **Nowhere else.** The viewport's Renderer menu has no entry for packs: a pack is plugins of any
+  kind, and View > Plugins is where they are managed.
+- **Trust** is that of the app's own updates: HTTPS and GitHub ([UPDATES.md](UPDATES.md) §2).
+  The index decides what is downloaded; its hash protects the archive, not the index.
+- **A development build, or a test profile,** asks no release. `USDCC_PACKS_URL` names a folder,
+  or a URL of one, with the index and archives to read instead; a studio can point it at a copy
+  of its own.
+- **`usdcc --install-packs <names>`** and **`--remove-packs <names>`**, names separated by commas,
+  for farm machines, as `--install-plugin-packages`: no window; 0 when done, 2 when a pack isn't
+  offered for this version (or isn't installed), 1 when something failed. `--install-packs chosen`
+  installs those of `wanted.json`. A render node loads the packs the app installed.
+
+### 10.5 With an update of usdcc
+
+**Settings > Updates > Keep installed packs up to date** (on). With it, **Download and Install**
+([UPDATES.md](UPDATES.md) §4) does this first, so that an update which installs itself at the
+next start never does so with a question open:
+
+1. Reads the new version's index. A chosen pack it doesn't offer: "MoonRay isn't available for
+   usdcc 26.12.2 yet", with **Update Anyway** and **Later**. The "is available" notification
+   says so already, and counts the packs' download in its size.
+2. Puts each chosen pack into the new version's folder, beside this one's, which stays in use:
+   copied when the index's `content` is the installed pack's (hard links where the drive allows),
+   downloaded otherwise. A failure asks as in 1, with **Retry**.
+3. Downloads the app's own package. After Restart Now the new version starts with its packs: one
+   restart, and nothing to fetch or unpack at the start.
+
+Why the content can be the same: a usdcc release doesn't build packs. `deps-usd-plugins.yml`
+builds one per pin and OpenUSD asset and skips what is published (§4); `release.yml` downloads
+that zip and `deploy.py` repackages it. It differs with a new OpenUSD pin, an edit to
+`build_usd_plugin.py` or `usd_plugin_asset.py`, a pack with a C++ plugin of usdcc's, and on
+macOS once a Developer ID signs each release's binaries anew. It is never assumed: only an equal
+hash copies.
+
+**At a start that lacks a chosen pack** (a new 7z or tar.xz, or Update Anyway), a few seconds
+after the window shows and after the update check: the pack is fetched once this version's index
+has it, then "MoonRay is ready" with **Restart Now**.
+
+**Only packs.** Plugins the user put into `usdcc_config/plugins` are left alone, as before:
+Python and schema plugins keep working, and a C++ plugin built for the old usdcc stops loading.
+That is what the parked registry is for.
+
+### 10.6 Tried
+
+**In the app on Windows (2026-11-26),** a development build with a test profile, the test pack
+and `USDCC_PACKS_URL`, a script pressing the panel's own buttons:
+
+- Install: Not installed, then Restart to use, the notification, the pack in the store. At the
+  next start Installed, and `UsdccHelloThing` exists; before, it didn't.
+- Remove..., cancelled: nothing. Remove: Removed at the next start; Keep: Installed again; Remove
+  again, and at the next start the type and the folder are gone and nothing fetches it.
+- Install and Remove before any restart: deleted at once.
+- `--install-packs`: 0, and 2 with a name that isn't offered; without a source, 1 and why.
+  `--remove-packs`: 0, then 2 for a pack that isn't there.
+- `tools/ci/check_pack_install.py` against that build: installs, finds the pack registered from
+  the data folder, removes it; with one byte added to the archive it fails.
+
+**A pack outside the app on Windows (2026-11-26):** the local build of hdCycles (§7.1) laid out
+as a pack folder in a temporary folder, `hdCycles.dll` in `plugin/usd` and Open Image Denoise's
+three DLLs in the pack's `bin`, registered with `--plugin-path`; a script loads the plugin and
+records a frame of `test_data/cycles/check.usda`:
+
+| What is done about the pack's `bin` | The plugin | A frame |
+|---|---|---|
+| Nothing | "The specified module could not be found" | |
+| Appended to the process's `PATH` | loads | renders; Open Image Denoise from the pack's `bin` |
+| `AddDllDirectory` alone | "The specified module could not be found" | |
+| Its DLLs loaded by full path first | loads | renders |
+
+So `PATH`, which loads nothing until a pack is used. `AddDllDirectory` isn't enough, as
+PLUGIN_REGISTRY.md §7 expected: OpenUSD's plain `LoadLibraryW` doesn't look there.
+
+Then the same folder in the store itself, with a `pack.json`, in a test profile's
+`packs/26.11.10-windows-x64/cycles`, and nothing else done: usdcc's own start put its `bin` on
+`PATH`, the plugin loaded from the store, Open Image Denoise from the pack's `bin`, and the
+frame rendered. That folder was laid out by hand from a local build, not made by `deploy.py`
+from a pack.
+
+**The link on Linux (2026-11-26; WSL, Ubuntu 24.04),** with the deploy and the MoonRay pack of
+2026-11-24, the deploy without PySide6. The pack's folders were moved to a folder of their
+own, laid out as an install, with a `plugin/usd/plugInfo.json` and a `usdcc-plugin.json`:
+
+- *Without the link* the renderers are listed but no plugin loads: `libusd_pegtl.so: cannot open
+  shared object file`, a library of OpenUSD that usdcc hadn't loaded by then.
+- *With the link* all three plugins load from the data folder and both delegates render, the
+  Arras one too, whose `execComp` is a process of its own and finds everything through the link.
+  The pictures are the control's (the pack inside the deploy). The process has 57 MoonRay
+  libraries from the data folder and the rest from the app or the system; none is mapped twice,
+  none is there under one name from two places, and libfreetype is the app's.
+- *With the app's folder renamed and the link made again,* as an AppImage's next start would
+  have it: the same.
+
+**On macOS (2026-11-26; Apple silicon),** with usdcc 26.11.10 from `/Applications` and its
+MoonRay pack, which is older than the shader nodes (MOONRAY.md phase 5) and so has three of the
+check's five plugins:
+
+- *With the link* the three load from the data folder and both delegates render, as in the
+  control; the pack's `@loader_path/../../../../lib` leads through the link as the RUNPATH does on
+  Linux. 57 MoonRay libraries come from the data folder; none is loaded twice or under one name
+  from two places. *With the app's folder renamed* the same.
+- *Without the link* it doesn't fail, it hangs: the debug delegate records the right picture,
+  then the Arras one never finishes (killed after 5 minutes). dyld finds a library by install
+  name when the process already has it, so more loads than on Linux, and what is missing shows
+  only later.
+- *Signing:* taking the pack out of the copied bundle breaks its seal (`codesign --verify`: a
+  sealed resource is missing), as expected; the programs and libraries keep their own signatures
+  and run. A pack in the data folder leaves the bundle whole.
+
+To run the Linux and macOS trials again: `python tools/try_pack_outside_app.py --deploy <a deploy
+with the pack in it>`. It does the four runs (the pack inside, outside without the link, with
+it, and with the app moved) with the pin's own check scene, and says where each library of the
+process came from. Those trials had one folder for all packs; the store has a folder and a link
+per pack, which leads to the same place.
+
+**Tests:** `pack_store_test.cpp` (the store, what a start does to it, a pack as a plugin),
+`pack_index_test.cpp` (the index: names, addresses, what is left out), `pack_installer_test.cpp`
+(from archives in a folder: a wrong hash, a wrong size, a path out of the folder, a file that is
+no pack, a cancel, a copy in place of a download), `app_packs_test.cpp` (the list, install, remove
+and keep, what a new version means for the chosen packs, the unattended install), and
+`pack_tools_test.py` (the folder `deploy.py` writes, the archive, the index, the test pack).
+
+**Not tried, and not done:**
+
+- **Anything on Linux or macOS** as built: the link made by `PackStore`, unpacking a `tar.xz`
+  with the deploy's Python (it needs `lzma`), a real AppImage (read-only, mounted by FUSE), a
+  notarized bundle beside a data folder Gatekeeper may treat as downloaded, and whether a file
+  usdcc downloads is quarantined.
+- **An update of an installed usdcc with packs:** UPDATES.md §6's two packages and a
+  `make_test_pack.py` folder for both versions. The packs' side of it is in `app_packs_test.cpp`;
+  the questions before the download, in an install, weren't seen. It needs `vpk`.
+- **A real pack through the whole route,** and a `release.yml` run with the new steps.
+- **A pack that isn't render delegates or a schema:** file formats, a usdcc plugin in Python or C++.
+- **Two usdcc at once from one AppImage** are mounted in two places and share one link. While
+  the first runs, the second loads through the first's mount, which is the same version; when
+  the first quits, what the second loads afterwards (a shader, a new `execComp`) is missing. A
+  link folder per process doesn't help as it is, since `..` in a RUNPATH is followed from the
+  pack's real folder; hard links of the pack per process would.
+- **A new pack takes effect at the next start,** a renderer's too, though OpenUSD could register
+  one while usdcc runs.
+- **macOS packs carry their debug symbols:** the folder is made before `split_dsym.py` strips
+  the bundle they come from.
+- **Retiring the old route:** the archives to unpack over usdcc, and the second disk image.
