@@ -1,13 +1,15 @@
 {
   "repository": "https://github.com/Autodesk/arnold-usd",
   "commit": "1f022c168ba742df01aad7de57d0c4f2125d080e",
-  "version": "7.5.4.0",
+  "version": "7.5.4.2",
   "patches": ["patches/arnold-usd-26.08.patch"],
   "sdks": {
     "arnold": {
-      "description": "Arnold SDK 7.5.4 (7.5.4.0 or later) for this platform, from Autodesk Account",
-      "files": {"win64": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "EULA.txt"],
-                "macos-arm64": ["include/ai.h", "include/ai_version.h", "bin/libai.dylib", "EULA.txt"]}
+      "description": "Arnold SDK 7.5.4 for this platform, from Autodesk Account",
+      "files": {"win64": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "bin/kick.exe",
+                          "bin/maketx.exe", "EULA.txt"],
+                "macos-arm64": ["include/ai.h", "include/ai_version.h", "bin/libai.dylib", "bin/kick", "bin/maketx",
+                                "EULA.txt"]}
     }
   },
   "cmake": ["-Wno-dev", "-DARNOLD_LOCATION={arnold}", "-DUSD_LOCATION={usd}",

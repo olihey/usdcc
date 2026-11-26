@@ -31,7 +31,7 @@ Arnold). `deps-usd-plugins.yml` leaves the `local` set out entirely.
 
 ## 2. The private repository
 
-Proposed name: `olihey/usdcc-arnold` (open, §5 item 1). Private; collaborators only people who
+`olihey/usdcc-arnold`, created 2026-11-26. Private; collaborators only people who
 hold an Arnold licence of their own: access to the repository hands over the SDK, which the
 Terms of Use forbid (§8.1, "make available … to a third party").
 
@@ -45,15 +45,37 @@ usdcc-arnold/
 The SDKs are release assets of a release `sdk` (not in Git: `ai.dll` is 174 MB and GitHub refuses
 files over 100 MB; release assets allow 2 GiB each and have no bandwidth quota, which LFS has):
 
-| Asset | From | Size |
-|---|---|---|
-| `Arnold-7.5.4.0-windows.zip` | Autodesk Account, the Windows SDK the pin was proven with | ~ (`ai.dll` alone 174 MB) |
-| `Arnold-7.5.4.2-darwin.tgz` | Autodesk Account, `~/deps/Arnold-7.5.4.2-darwin` | 1.2 GB unpacked (`libai.dylib` 331 MB, universal) |
+Uploaded 2026-11-26, all three trimmed from Autodesk's 7.5.4.2 SDKs (GitHub's SHA-256 checked
+against the local archive's):
 
-A trimmed SDK is enough and much smaller (§5 item 3): the build needs `include/`, the core
-(`bin/ai.dll` with `lib/ai.lib`; `bin/libai.dylib`) and `EULA.txt`. The check also loads the core,
-which loads its licensing libraries from beside it (macOS: `libAdskLicensingSDK.10.dylib`,
-`libAdClmHub.3.dylib`, `libcer.dylib` in `bin/`), so those stay too.
+| Asset | Size | Unpacked (whole SDK) | SHA-256 |
+|---|---|---|---|
+| `Arnold-7.5.4.2-darwin-trimmed.tgz` | 180 MB | 350 MB (1.2 GB) | `f16aa14ed9a9e23ba5aba2badcf6aa4ea40037e6c7794ba477e472f39b4ba570` |
+| `Arnold-7.5.4.2-windows-trimmed.zip` | 136 MB | 217 MB | `7ef63f163785a39e1bfb5496f62bcacc5356723c2aadef226617e8b56c7382f7` |
+| `Arnold-7.5.4.2-linux-trimmed.tgz` | 148 MB | 259 MB | `b54e9c04f81e918e821c8755d3defe5834acd974f18cee811643ecd40e91026a` |
+
+Each holds one folder, `Arnold-7.5.4.2-<darwin|windows|linux>/`. The whole SDKs stay on the
+maintainer's machine. Trimmed to what the build and the check need (§5 item 3):
+
+- `include/` and `EULA.txt`;
+- the core: `bin/libai.dylib` (macOS), `bin/ai.dll` and `lib/ai.lib` (Windows), `bin/libai.so`
+  (Linux);
+- what the core loads from beside it, read from its imports (`otool -L`, `llvm-objdump -p`);
+  none of these loads anything else from the SDK:
+  - macOS: `libcer.dylib`, `libAdClmHub.3.dylib`, `libAdskLicensingSDK.10.dylib`;
+  - Windows: `cer.dll`, `AdClmHub_3.4.0.dll`, `AdskLicensingSDK_10.0.1.dll`,
+    `aiOpenImageDenoise_core.dll`;
+  - Linux: `libcer.so`, `libAdClmHub.so.3`, `libAdskLicensingSDK.so.10`,
+    `libaiOpenImageDenoise_core.so.2.5.0` (found through its `$ORIGIN` rpath);
+- `bin/kick` and `bin/maketx` (`.exe` on Windows): arnold-usd's `FindArnold.cmake` requires both
+  to exist, though the build doesn't run them.
+
+The pin's SDK `files` lists the core, `kick`, `maketx`, two headers and `EULA.txt`, so an SDK
+trimmed too far fails at the start with a message, not in CMake.
+
+Tried on macOS only: hdArnold built from the trimmed SDK is the same 13 files as from the whole
+one, and the core starts and stops (`AiBegin`, `AiEnd`) from it. Windows and Linux are first
+tried by the workflow's own run.
 
 ## 3. The workflow
 
@@ -110,10 +132,10 @@ published `optional` sets.)
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | The private repository's name and owner | `olihey/usdcc-arnold`, private |
+| 1 | The private repository's name and owner | **Decided:** `olihey/usdcc-arnold`, private, created |
 | 2 | Where the SDK comes from in CI: release assets of the private repository, or Autodesk's own download for open-source CI (`forgithubci.solidangle.com`, user and password as secrets, as Gaffer's `installArnold.py` does) | Release assets now; ask Autodesk for the CI download at the same time as §6.3, and switch if they give it: then nothing of Autodesk's is stored by us |
-| 3 | Whole SDKs or trimmed ones (§2) | Trimmed: less storage and less to leak; the full ones stay on your machine |
-| 4 | Which Arnold the pin names: `version` is 7.5.4.0, the Mac SDK is 7.5.4.2. usdcc accepts a core of the same 7.5 that is at least `version`, so a pack built with 7.5.4.2 headers runs on 7.5.4.0 cores too in usdcc's eyes | Keep 7.5.4.0 and both SDKs as they are; bump the pin (and the Windows SDK) together at the next arnold-usd tag |
+| 3 | Whole SDKs or trimmed ones (§2) | **Decided:** trimmed, as archives; the full ones stay on your machine |
+| 4 | Which Arnold the pin names | **Decided:** `version` 7.5.4.2, the SDKs CI builds with (2026-11-26). arnold-usd stays at its 7.5.4.0 tag, which has no newer one. usdcc then wants a 7.5.4.2 core or a later 7.5 |
 | 5 | What starts a build | By hand. Later also from `olihey/usdcc`'s `deps-usd.yml` when an OpenUSD asset is published (a `repository_dispatch` with a token that may only start that workflow) |
 | 6 | Keep packs for how long | All of them, as releases: an older usdcc tag's pins name an older pack, as for the public packs |
 | 7 | Cost: private repositories pay for Actions minutes beyond the plan's allowance, and macOS and Windows minutes count several times a Linux minute | Small: the build takes about a minute plus fetching OpenUSD (238 MB) and the SDK. Check GitHub's current pricing before setting it up |
@@ -141,9 +163,11 @@ Not legal advice: what is above is what the texts say, read by us.
 
 ## 7. Phases
 
-1. **Set up** (you): create the private repository, upload the two SDK archives (trimmed or not,
-   §5 item 3) to its `sdk` release, note their SHA-256 in `sdk.json`.
-2. **The workflow** (Claude): `arnold.yml`, `README.md`, `sdk.json` as above, and in
+1. **Set up. Done 2026-11-26:** the private repository with its README, and the three trimmed SDK
+   archives in its `sdk` release (§2). Their SHA-256 go into `sdk.json` with phase 2.
+2. **The workflow** (Claude). Written 2026-11-26: `arnold.yml`, `ci.py` (checks and unpacks the
+   SDK, and refuses a pack holding any SDK file) and `sdk.json`, as §3, with one job per platform
+   in Git Bash on Windows too. Before: `arnold.yml`, `README.md`, `sdk.json` as above, and in
    `olihey/usdcc` a line in [USD_PLUGINS.md](USD_PLUGINS.md) §4 pointing here. Done when a manual
    run builds and checks both packs and they are in the private release for the current OpenUSD
    asset.
