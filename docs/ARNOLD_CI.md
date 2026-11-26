@@ -166,7 +166,9 @@ Not legal advice: what is above is what the texts say, read by us.
 
 1. **Set up. Done 2026-11-26:** the private repository with its README, and the three trimmed SDK
    archives in its `sdk` release (§2). Their SHA-256 go into `sdk.json` with phase 2.
-2. **The workflow** (Claude). Written 2026-11-26: `arnold.yml`, `ci.py` (checks and unpacks the
+2. **The workflow** (Claude). **Done 2026-11-26:** all three platforms build, hold no SDK file and
+   pass the check, and their packs are in `olihey/usdcc-arnold`'s release
+   `deps/usd-70c45e83b-76ce049f` (1.2 MB macOS, 1.7 MB Windows, 1.8 MB Linux). Written: `arnold.yml`, `ci.py` (checks and unpacks the
    SDK, and refuses a pack holding any SDK file) and `sdk.json`, as §3, with one job per platform
    in Git Bash on Windows too. Before: `arnold.yml`, `README.md`, `sdk.json` as above, and in
    `olihey/usdcc` a line in [USD_PLUGINS.md](USD_PLUGINS.md) §4 pointing here. Done when a manual
