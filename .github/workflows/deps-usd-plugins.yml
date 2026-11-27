@@ -201,10 +201,11 @@ jobs:
 
       # A pack whose pin says "publish": false is built and checked like the
       # others, so a break shows, but isn't attached to the release: whether it
-      # may be published isn't decided (docs/USD_PLUGINS.md section 5). Its zip
+      # may be published isn't decided (docs/USD_PLUGINS.md section 5). Nor is a
+      # pack built from another branch than master, which is still under review. Its zip
       # is kept with the run for two weeks instead.
       - name: Keep it with the run
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish != 'true'
+        if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.asset.outputs.name }}
@@ -213,7 +214,7 @@ jobs:
           retention-days: 14
 
       - name: Publish
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true'
+        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true' && github.ref == 'refs/heads/master'
         run: |
           # Next to this pack's earlier builds, which stay: an older usdcc tag's
           # pins name them, and release.yml can be run again for that tag.
@@ -326,7 +327,7 @@ jobs:
           python tools/ci/check_usd_plugin.py '${{ matrix.pack }}' --usd "$RUNNER_TEMP/deps/usd"             --pack-dir "$RUNNER_TEMP/pack-check" --forbid "$RUNNER_TEMP/b" --forbid "$RUNNER_TEMP/pack"
 
       - name: Keep it with the run
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish != 'true'
+        if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.asset.outputs.name }}
@@ -335,7 +336,7 @@ jobs:
           retention-days: 14
 
       - name: Publish
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true'
+        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true' && github.ref == 'refs/heads/master'
         run: gh release upload '${{ steps.asset.outputs.tag }}' "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" --clobber
 
   # The same on macOS on Apple Silicon, for the packs whose pins list macos-arm64
@@ -434,7 +435,7 @@ jobs:
             --pack-dir "$RUNNER_TEMP/pack-check" --forbid "$RUNNER_TEMP/b" --forbid "$RUNNER_TEMP/pack"
 
       - name: Keep it with the run
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish != 'true'
+        if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.asset.outputs.name }}
@@ -443,5 +444,5 @@ jobs:
           retention-days: 14
 
       - name: Publish
-        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true'
+        if: steps.published.outputs.found != 'true' && steps.asset.outputs.publish == 'true' && github.ref == 'refs/heads/master'
         run: gh release upload '${{ steps.asset.outputs.tag }}' "$RUNNER_TEMP/${{ steps.asset.outputs.zip }}" --clobber

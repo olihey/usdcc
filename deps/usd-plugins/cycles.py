@@ -11,8 +11,12 @@ Cycles checkout is at the pinned commit with patches/cycles-usdcc.patch applied.
    Everything else Cycles needs is the OpenUSD install's: OpenImageIO, OpenVDB,
    OpenSubdiv, TBB, OpenColorIO, OpenEXR, Imath and Embree, which Cycles is built
    against, so one copy of each is loaded.
-2. Cycles' CMake build, the Hydra delegate only: no standalone cycles, no GPU
-   devices, no OSL, no Alembic.
+2. Cycles' CMake build, the Hydra delegate only: no standalone cycles, no OSL, no
+   Alembic. Of the GPU devices only Metal, on macOS: it needs no SDK, and compiles its
+   kernels when it first renders, from the kernel sources the install puts in source/,
+   which the pack has in hdCycles/resources/source, where Cycles looks (path_get("source")
+   from the plugin's resources). usdcc picks the device with CYCLES_DEVICE (Settings >
+   Renderers > Cycles).
 3. Into the pack: plugin/usd/hdCycles.<dll|so|dylib> and its resources, and Open
    Image Denoise's base library, core and CPU device (bin/ on Windows,
    plugin/usd/hdCycles/lib elsewhere: an installed pack's lib is a link to usdcc's
@@ -31,6 +35,7 @@ them as {name: folder}.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -88,8 +93,10 @@ if WINDOWS:
          "ab620b4fe865583cca883b258f728f7f2234802f7c1b8d74fdb6a4dd2642ae2c"),
     ]
 
-# Open Image Denoise's libraries the pack takes: not its CUDA, HIP and SYCL devices.
-OIDN_PARTS = ("OpenImageDenoise", "OpenImageDenoise_core", "OpenImageDenoise_device_cpu")
+# Open Image Denoise's libraries the pack takes: not its CUDA, HIP and SYCL devices. On
+# macOS its Metal device too, so Cycles on Metal denoises on the GPU as well.
+OIDN_PARTS = ("OpenImageDenoise", "OpenImageDenoise_core", "OpenImageDenoise_device_cpu") \
+    + (("OpenImageDenoise_device_metal",) if MACOS else ())
 
 
 def _git(*arguments, cwd, env=None, check=True):
@@ -211,6 +218,11 @@ def build(ctx):
     env = dict(os.environ)
     if WINDOWS and boost:
         env["CL"] = f"/I{boost[-1]} " + env.get("CL", "")
+    if MACOS:
+        # The fmt inside OpenImageIO's headers (10.0) makes a consteval call that Apple
+        # clang 21 (Xcode 26) rejects in C++20. Without consteval, fmt checks its format
+        # strings at run time instead; nothing else changes.
+        env["CXXFLAGS"] = "-DFMT_CONSTEVAL= " + env.get("CXXFLAGS", "")
     if LINUX and shutil.which("g++-14"):
         # Cycles is C++20, and GCC 13 refuses a constructor in OpenUSD's
         # retainedDataSource.h there, which GCC 14 only warns about.
@@ -227,7 +239,8 @@ def build(ctx):
         "-DWITH_CYCLES_EMBREE=ON", "-DWITH_CYCLES_HYDRA_RENDER_DELEGATE=ON", "-DWITH_CYCLES_USD=OFF",
         "-DWITH_CYCLES_STANDALONE=OFF", "-DWITH_CYCLES_STANDALONE_GUI=OFF",
         "-DWITH_CYCLES_DEVICE_CUDA=OFF", "-DWITH_CYCLES_DEVICE_OPTIX=OFF", "-DWITH_CYCLES_DEVICE_HIP=OFF",
-        "-DWITH_CYCLES_DEVICE_HIPRT=OFF", "-DWITH_CYCLES_DEVICE_ONEAPI=OFF", "-DWITH_CYCLES_DEVICE_METAL=OFF",
+        "-DWITH_CYCLES_DEVICE_HIPRT=OFF", "-DWITH_CYCLES_DEVICE_ONEAPI=OFF",
+        f"-DWITH_CYCLES_DEVICE_METAL={'ON' if MACOS else 'OFF'}",
         "-DWITH_CYCLES_OSL=OFF", "-DWITH_CYCLES_ALEMBIC=OFF", "-DWITH_CYCLES_OPENIMAGEDENOISE=ON",
         *_python(work, ctx.python_root),
     ]
@@ -247,10 +260,24 @@ def build(ctx):
     resources = install / "hydra" / "hdCycles" / "resources"
     if not (resources / "plugInfo.json").is_file():
         fail(f"Cycles' install has no {resources / 'plugInfo.json'}")
+    kernels = install / "source"
+    if MACOS and not (kernels / "kernel" / "device" / "metal" / "kernel.metal").is_file():
+        fail(f"Cycles' install has no Metal kernel source in {kernels}")
     plugins = prefix / "plugin" / "usd"
     plugins.mkdir(parents=True, exist_ok=True)
     copy_file(library, plugins)
     shutil.copytree(resources, plugins / "hdCycles" / "resources")
+    # Cycles finds its data from the plugin's resource path (path_init() in hydra/plugin.cpp).
+    # Upstream's plugInfo.json points it two folders up, at the root of Cycles' own
+    # install, where source/ is; in a pack that would be plugin/. Here it's the
+    # delegate's resources folder, which has everything Cycles reads.
+    info_file = plugins / "hdCycles" / "resources" / "plugInfo.json"
+    info = json.loads(info_file.read_text(encoding="utf-8"))
+    for plugin in info["Plugins"]:
+        plugin["ResourcePath"] = "resources"
+    info_file.write_text(json.dumps(info, indent=4) + "\n", encoding="utf-8", newline="\n")
+    if MACOS:
+        shutil.copytree(kernels, plugins / "hdCycles" / "resources" / "source")
 
     # Open Image Denoise: on Windows in bin/, beside the DLLs it's found with; elsewhere in
     # a folder of the delegate's, as MoonRay keeps its libraries under plugin/usd/moonray.

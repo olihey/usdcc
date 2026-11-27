@@ -22,6 +22,10 @@ inline constexpr const char* kUsdAssetSearchPathsKey = "USD/assetSearchPaths";  
 inline constexpr const char* kUsdMaterialXFoldersKey = "USD/materialXFolders";  // PXR_MTLX_PLUGIN_SEARCH_PATHS
 inline constexpr const char* kUsdThreadLimitKey = "USD/threadLimit";            // WorkSetConcurrencyLimitArgument()
 inline constexpr const char* kUsdArnoldFolderKey = "USD/arnoldFolder";          // enableArnold() (arnold_runtime.h)
+// CYCLES_DEVICE, which the Cycles pack's render delegate reads when it's created:
+// "CPU" (the default) or "GPU" (Metal). macOS only, the one platform whose pack has a GPU device
+// (docs/USD_PLUGINS.md section 7 phase 5).
+inline constexpr const char* kUsdCyclesDeviceKey = "USD/cyclesDevice";
 
 void defineUsdEnvironmentSettings(core::Settings& settings = core::Settings::instance());
 
@@ -41,6 +45,10 @@ std::string mergeSearchPaths(std::string_view environment, std::string_view sett
 // For the variables other features set from their settings, such as OCIO
 // (color_management.h).
 void setUsdEnvironmentVariable(const std::string& variable, const std::string& value, std::string source);
+
+// CYCLES_DEVICE's value for the Cycles device setting's: "METAL" for "GPU", ""
+// (Cycles' own default, the CPU) for anything else.
+std::string cyclesDeviceVariable(std::string_view setting);
 
 // Where applyUsdEnvironmentSettings() got `variable`'s value from: "Settings",
 // "environment and Settings", or "" when it didn't set it. For the thread

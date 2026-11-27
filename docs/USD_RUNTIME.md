@@ -58,6 +58,7 @@ these settings is `appliesAtNextStart`.
 | Asset search paths | `USD/assetSearchPaths` | `PXR_AR_DEFAULT_SEARCH_PATH` |
 | MaterialX node folders | `USD/materialXFolders` | `PXR_MTLX_PLUGIN_SEARCH_PATHS` |
 | Thread limit | `USD/threadLimit` | `WorkSetConcurrencyLimitArgument()` |
+| Cycles device (on the Renderers page, in its Cycles group; macOS only) | `USD/cyclesDevice` | `CYCLES_DEVICE`: `METAL` for GPU, unset for CPU (the default), which the Cycles pack's delegate reads when it's created ([USD_PLUGINS.md](USD_PLUGINS.md) §3) |
 | Arnold folder (on the Renderers page, in its Arnold group) | `USD/arnoldFolder` | `enableArnold()`: loads that Arnold and registers the Arnold plugins ([USD_PLUGINS.md](USD_PLUGINS.md) §3) |
 
 **The environment usdcc starts with stays in control**, so a studio's launcher can still
