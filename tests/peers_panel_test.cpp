@@ -843,6 +843,11 @@ USDCC_TEST(peers_rooms_joined_at_start) {
     Room* room = anna->host({"Studio", Admission::Invited, {}, false}, &error);
     CHECK(room, "couldn't host: %s", qPrintable(error));
     if (!room) return;
+    // Why each of Ben's rooms closed, for when joining again fails.
+    QStringList benClosed;
+    QObject::connect(ben->peers(), &Peers::roomAdded, ben.get(), [&benClosed](Room* added) {
+        QObject::connect(added, &Room::closed, added, [&benClosed](const QString& reason) { benClosed.append(reason); });
+    });
     usdcc::core::Settings::instance().setValue(PeersController::startRoomsKey,
                                                (QStringLiteral("not-a-link ") + room->link()).toStdString());
     CHECK(ben->startLinks() == QStringList{room->link()}, "the start links are %s", qPrintable(ben->startLinks().join(" ")));
@@ -856,9 +861,15 @@ USDCC_TEST(peers_rooms_joined_at_start) {
     // Removed by the host: joined again after a while.
     const PeerId benId = benRoom()->me().id;
     room->remove(benId, QStringLiteral("Testing"));
+    // Tried again after 5 s, and 10 s after that if the first try fails.
     CHECK(QTest::qWaitFor([&] { return benRoom() && benRoom()->state() == Room::State::Open && room->peers().size() == 2; },
-                          15000),
-          "Ben wasn't joined again");
+                          25000),
+          "Ben wasn't joined again: his room is %s, the host has %lld peers; his rooms closed with: %s",
+          benRoom() ? qPrintable(QString::number(int(benRoom()->state()))) : "gone", qlonglong(room->peers().size()),
+          qPrintable(benClosed.join(" ; ")));
+    if (!benRoom() || benRoom()->state() != Room::State::Open) {
+        return;
+    }
 
     // Left by Ben: not joined again; and taken off the list from the room's menu.
     QPointer<Room> left = benRoom();

@@ -93,53 +93,59 @@ def main() -> int:
                                 str(arguments.members + 10), "--print-links", "--log-level", "warning"],
                                stdout=subprocess.PIPE, text=True, env=environment)
         link = json.loads(hub.stdout.readline())["rooms"][0]["link"]
-    pipes = []
-    started = time.monotonic()
-    share = -(-arguments.members // arguments.workers)
-    for index in range(arguments.workers):
-        first = index * share
-        count = min(share, arguments.members - first)
-        if count <= 0:
-            break
-        ours, theirs = multiprocessing.Pipe()
-        process = multiprocessing.Process(target=worker, args=(link, first, count, arguments.members, theirs),
-                                          daemon=True)
-        process.start()
-        pipes.append(ours)
-    for pipe in pipes:
-        pipe.recv()
-    joined = time.monotonic() - started
-    print(f"{arguments.members} members in {len(pipes)} processes joined in {joined:.1f} s")
-    for pipe in pipes:
-        pipe.recv()
-    print(f"Everyone saw everyone after {time.monotonic() - started:.1f} s")
-    time.sleep(1)
-    if hub:
-        print(f"The hub with everyone idle: {hub_memory_mb(hub.pid):.0f} MB")
+    try:
+        pipes = []
+        started = time.monotonic()
+        share = -(-arguments.members // arguments.workers)
+        for index in range(arguments.workers):
+            first = index * share
+            count = min(share, arguments.members - first)
+            if count <= 0:
+                break
+            ours, theirs = multiprocessing.Pipe()
+            process = multiprocessing.Process(target=worker, args=(link, first, count, arguments.members, theirs),
+                                              daemon=True)
+            process.start()
+            pipes.append(ours)
+        for pipe in pipes:
+            pipe.recv()
+        joined = time.monotonic() - started
+        print(f"{arguments.members} members in {len(pipes)} processes joined in {joined:.1f} s")
+        for pipe in pipes:
+            pipe.recv()
+        print(f"Everyone saw everyone after {time.monotonic() - started:.1f} s")
+        time.sleep(1)
+        if hub:
+            print(f"The hub with everyone idle: {hub_memory_mb(hub.pid):.0f} MB")
 
-    times = []
-    for n in range(arguments.rounds):
-        sent = time.time()
-        pipes[0].send(("send", n, arguments.size))
-        time.sleep(max(0.5, arguments.members / 2000))
-        latest, got = 0.0, 0
+        times = []
+        for n in range(arguments.rounds):
+            sent = time.time()
+            pipes[0].send(("send", n, arguments.size))
+            time.sleep(max(0.5, arguments.members / 2000))
+            latest, got = 0.0, 0
+            for pipe in pipes:
+                pipe.send(("report",))
+            for pipe in pipes:
+                arrivals = pipe.recv()[1].get(n, (0, 0.0))
+                got += arrivals[0]
+                latest = max(latest, arrivals[1])
+            times.append((latest - sent) * 1000 if got == arguments.members else float("inf"))
+        print(f"A message to everyone reached all {arguments.members}: median {statistics.median(times):.0f} ms, "
+              f"worst {max(times):.0f} ms over {arguments.rounds} rounds")
         for pipe in pipes:
-            pipe.send(("report",))
+            pipe.send(("stop",))
         for pipe in pipes:
-            arrivals = pipe.recv()[1].get(n, (0, 0.0))
-            got += arrivals[0]
-            latest = max(latest, arrivals[1])
-        times.append((latest - sent) * 1000 if got == arguments.members else float("inf"))
-    print(f"A message to everyone reached all {arguments.members}: median {statistics.median(times):.0f} ms, "
-          f"worst {max(times):.0f} ms over {arguments.rounds} rounds")
-    for pipe in pipes:
-        pipe.send(("stop",))
-    for pipe in pipes:
-        pipe.recv()
-    if hub:
-        hub.terminate()
-        hub.wait(10)
-    folder.cleanup()
+            pipe.recv()
+    finally:
+        # Also when a run stops early (an error, a timeout, Ctrl-C): the hub doesn't outlive it.
+        if hub:
+            hub.terminate()
+            try:
+                hub.wait(10)
+            except subprocess.TimeoutExpired:
+                hub.kill()
+        folder.cleanup()
     return 0
 
 
