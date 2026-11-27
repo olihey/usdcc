@@ -25,6 +25,7 @@
 #include <pybind11/stl.h>
 
 #include <map>
+#include <functional>
 #include <memory>
 
 namespace py = pybind11;
@@ -142,19 +143,18 @@ py::dict messageDict(const Message& message) {
 
 // Calls Python with the GIL, which making its arguments (dicts, strings) needs too: so
 // `arguments` makes them once the GIL is held. An exception is logged, like any callback's.
-template <typename MakeArguments>
-void call(const std::shared_ptr<PythonObject>& callback, MakeArguments arguments) {
+// A plain function, not a template unpacking a tuple: MSVC for arm64 crashes (C1001) on
+// that instantiated inside the nested lambdas below.
+void call(const std::shared_ptr<PythonObject>& callback, const std::function<py::tuple()>& arguments) {
     py::gil_scoped_acquire gil;
     try {
-        std::apply([&](auto&&... values) { callback->object(std::forward<decltype(values)>(values)...); }, arguments());
+        callback->object(*arguments());
     } catch (py::error_already_set& error) {
         logPythonError(error);
     }
 }
 
 // A connection Python holds: everything connected with `context` ends with it.
-// Callers take the pair apart into plain variables: MSVC for arm64 crashes (C1001) when
-// nested lambdas capture a structured binding of it.
 std::pair<int, QObject*> newConnection() {
     const int id = s_nextConnection++;
     auto context = std::make_unique<QObject>();
@@ -165,6 +165,38 @@ std::pair<int, QObject*> newConnection() {
 
 std::string roomTypeText(RoomType type) {
     return roomTypeName(type).toStdString();
+}
+
+void callWithRoom(const std::shared_ptr<PythonObject>& held, Room* room) {
+    call(held, [room] { return py::make_tuple(handleOf(room)); });
+}
+
+// peers.connect(): room_joined (a room opened: hosted, or joined and welcomed) and
+// room_left (it closed). A function of its own, not a lambda in m.def(): MSVC for arm64
+// crashed (C1001) compiling it there.
+int peersConnect(const std::string& event, py::object callback) {
+    auto held = std::make_shared<PythonObject>(std::move(callback));
+    const std::pair<int, QObject*> connection = newConnection();
+    const int id = connection.first;
+    QObject* const context = connection.second;
+    Peers* peers = controller().peers();
+    if (event == "room_joined") {
+        QObject::connect(peers, &Peers::roomAdded, context, [context, held](Room* room) {
+            if (room->state() == Room::State::Open) {
+                callWithRoom(held, room);
+            } else {
+                QObject::connect(room, &Room::opened, context, [held, room] { callWithRoom(held, room); },
+                                 Qt::SingleShotConnection);
+            }
+        });
+    } else if (event == "room_left") {
+        QObject::connect(peers, &Peers::roomRemoved, context, [held](Room* room) { callWithRoom(held, room); });
+    } else {
+        s_connections.erase(id);
+        throw std::invalid_argument("peers.connect() takes room_joined or room_left; a room's own "
+                                    "on() takes peer_joined, peer_left and closed");
+    }
+    return id;
 }
 
 }  // namespace
@@ -226,35 +258,7 @@ void bindPeers(py::module_& m) {
         },
         py::arg("link"), py::arg("password"), py::arg("type"));
     // room_joined (a room opened: hosted, or joined and welcomed) and room_left (it closed).
-    m.def(
-        "peers_connect",
-        [](const std::string& event, py::object callback) {
-            auto held = std::make_shared<PythonObject>(std::move(callback));
-            const std::pair<int, QObject*> connection = newConnection();
-            const int id = connection.first;
-            QObject* const context = connection.second;
-            Peers* peers = controller().peers();
-            if (event == "room_joined") {
-                const auto opened = [held](Room* room) { call(held, [&] { return std::make_tuple(handleOf(room)); }); };
-                QObject::connect(peers, &Peers::roomAdded, context, [context, opened](Room* room) {
-                    if (room->state() == Room::State::Open) {
-                        opened(room);
-                    } else {
-                        QObject::connect(room, &Room::opened, context, [opened, room] { opened(room); },
-                                         Qt::SingleShotConnection);
-                    }
-                });
-            } else if (event == "room_left") {
-                QObject::connect(peers, &Peers::roomRemoved, context,
-                                 [held](Room* room) { call(held, [&] { return std::make_tuple(handleOf(room)); }); });
-            } else {
-                s_connections.erase(id);
-                throw std::invalid_argument("peers.connect() takes room_joined or room_left; a room's own "
-                                            "on() takes peer_joined, peer_left and closed");
-            }
-            return id;
-        },
-        py::arg("event"), py::arg("callback"));
+    m.def("peers_connect", &peersConnect, py::arg("event"), py::arg("callback"));
     m.def("peers_disconnect", [](int id) { s_connections.erase(id); }, py::arg("id"));
 
     m.def("room_info", [](int handle) {
@@ -293,14 +297,14 @@ void bindPeers(py::module_& m) {
             const int id = connection.first;
             QObject* const context = connection.second;
             if (event == "peer_joined") {
-                QObject::connect(&room, &Room::peerJoined, context, [held](const Peer& peer) { call(held, [&] { return std::make_tuple(peerDict(peer)); }); });
+                QObject::connect(&room, &Room::peerJoined, context, [held](const Peer& peer) { call(held, [&] { return py::make_tuple(peerDict(peer)); }); });
             } else if (event == "peer_left") {
                 QObject::connect(&room, &Room::peerLeft, context, [held](const Peer& peer, const QString& reason) {
-                    call(held, [&] { return std::make_tuple(peerDict(peer), reason.toStdString()); });
+                    call(held, [&] { return py::make_tuple(peerDict(peer), reason.toStdString()); });
                 });
             } else if (event == "closed") {
                 QObject::connect(&room, &Room::closed, context,
-                                 [held](const QString& reason) { call(held, [&] { return std::make_tuple(reason.toStdString()); }); });
+                                 [held](const QString& reason) { call(held, [&] { return py::make_tuple(reason.toStdString()); }); });
             } else {
                 s_connections.erase(id);
                 throw std::invalid_argument("A room's on() takes peer_joined, peer_left or closed");
@@ -340,12 +344,12 @@ void bindPeers(py::module_& m) {
             if (!onMessage.is_none()) {
                 auto held = std::make_shared<PythonObject>(std::move(onMessage));
                 QObject::connect(&opened, &Channel::received, context,
-                                 [held](const Message& message) { call(held, [&] { return std::make_tuple(messageDict(message)); }); });
+                                 [held](const Message& message) { call(held, [&] { return py::make_tuple(messageDict(message)); }); });
             }
             if (!onRefused.is_none()) {
                 auto held = std::make_shared<PythonObject>(std::move(onRefused));
                 QObject::connect(&opened, &Channel::refused, context, [held](const QString& type, const QString& reason) {
-                    call(held, [&] { return std::make_tuple(type.toStdString(), reason.toStdString()); });
+                    call(held, [&] { return py::make_tuple(type.toStdString(), reason.toStdString()); });
                 });
             }
             return id;
@@ -388,7 +392,7 @@ void bindPeers(py::module_& m) {
             QObject* const context = connection.second;
             QObject::connect(&state, &StateMap::changed, context,
                              [held](const QString& key, const QJsonValue& value, const Peer& by) {
-                                 call(held, [&] { return std::make_tuple(key.toStdString(), valueText(value), peerDict(by)); });
+                                 call(held, [&] { return py::make_tuple(key.toStdString(), valueText(value), peerDict(by)); });
                              });
             return id;
         },
@@ -427,7 +431,7 @@ void bindPeers(py::module_& m) {
             const int id = connection.first;
             QObject* const context = connection.second;
             QObject::connect(&state, &PeerState::changed, context, [held](const Peer& peer, const QJsonValue& value) {
-                call(held, [&] { return std::make_tuple(peerDict(peer), valueText(value)); });
+                call(held, [&] { return py::make_tuple(peerDict(peer), valueText(value)); });
             });
             return id;
         },
