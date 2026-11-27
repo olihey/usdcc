@@ -634,20 +634,8 @@ bool Room::Impl::listen(QString* error) {
     http->page = options.page;
     http->pageDirectory = options.pageDirectory;
     http->allowedOrigins = options.allowedOrigins;
-    if (!http->bind(tcp)) {
-        if (error) {
-            *error = QStringLiteral("Couldn't serve the room's port");
-        }
-        return false;
-    }
-    QObject::connect(http, &QAbstractHttpServer::newWebSocketConnection, q, [this] {
-        while (http->hasPendingWebSocketConnections()) {
-            std::unique_ptr<QWebSocket> socket = http->nextPendingWebSocketConnection();
-            if (socket) {
-                accept(socket.release());
-            }
-        }
-    });
+    http->onWebSocket = [this](QWebSocket* socket) { accept(socket); };
+    http->bind(tcp);
     return true;
 }
 

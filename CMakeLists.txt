@@ -108,10 +108,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 # already requires (see docs/PLAN.md milestone M5/M3). Svg: the Outliner's
 # prim icons, rendered with QSvgRenderer (docs/PRIM_ICONS.md); no SVG
 # plugins are needed for that. Test: only for the tests (key presses that go
-# through the shortcut map, QTest::keyClick). Network, WebSockets and
-# HttpServer: rooms of usdcc_peers and the page they serve to guests
-# (docs/PEERS.md §13; HttpServer from the overlay port in cmake/ports).
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test Network WebSockets HttpServer)
+# through the shortcut map, QTest::keyClick). Network and WebSockets: rooms of
+# usdcc_peers and the page they serve to guests (docs/PEERS.md §13). Not Qt HTTP
+# Server, Charts or any other module that is GPL-3.0 only: the release is
+# BSD-3-Clause (docs/RELEASE.md §6), and tools/deploy.py fails a deploy that has one.
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL Svg Test Network WebSockets)
 find_package(qtadvanceddocking-qt6 CONFIG REQUIRED)
 find_package(QtNodes CONFIG REQUIRED)
 # Jolt Physics, the first physics backend (docs/PHYSICS.md). Its Debug build
