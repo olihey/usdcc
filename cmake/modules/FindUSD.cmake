@@ -91,6 +91,93 @@ if(WIN32 AND NOT DEFINED Python3_EXECUTABLE AND EXISTS "${USD_INSTALL}/pxrConfig
     unset(_usd_config)
 endif()
 
+# The same on macOS and Linux, where CI's OpenUSD names the runner's uv Python
+# (/Users/runner/.local/share/uv/python/..., /opt/hostedtoolcache/...). There it
+# is worse: its libusd_python links @rpath/libpython3.XY, which the programs find
+# through the Python rpath CMakeLists.txt adds only once a Python is found, so
+# without one usdcc doesn't even start. This machine's Python of the same version:
+# uv's first (the one docs/MACOS.md and CI use; the pinned patch version of
+# deps/usd.json if uv has it), then python3.XY and python3 on PATH. Only one with
+# a shared libpython: the app embeds it (not a macOS framework build, docs/MACOS.md).
+if(NOT WIN32 AND NOT DEFINED Python3_EXECUTABLE AND EXISTS "${USD_INSTALL}/pxrConfig.cmake")
+    file(READ "${USD_INSTALL}/pxrConfig.cmake" _usd_config)
+    set(_usd_python_built "")
+    if(_usd_config MATCHES "set\\(Python3_EXECUTABLE \\[\\[([^]]*)\\]\\]\\)")
+        set(_usd_python_built "${CMAKE_MATCH_1}")
+    endif()
+    if(NOT EXISTS "${_usd_python_built}"
+       AND _usd_config MATCHES "find_dependency\\(Python3 \"([0-9]+)\\.([0-9]+)\"")
+        set(_usd_python_version "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+        set(_usd_python_candidates "")
+        set(_usd_python_requests "${_usd_python_version}")
+        if(EXISTS "${CMAKE_SOURCE_DIR}/deps/usd.json")
+            file(READ "${CMAKE_SOURCE_DIR}/deps/usd.json" _usd_pin)
+            string(JSON _usd_pinned ERROR_VARIABLE _usd_pin_error GET "${_usd_pin}" python)
+            if(NOT _usd_pin_error AND _usd_pinned MATCHES "^${_usd_python_version}\\.")
+                list(PREPEND _usd_python_requests "${_usd_pinned}")
+            endif()
+        endif()
+        find_program(_usd_uv uv)
+        if(_usd_uv)
+            foreach(_request IN LISTS _usd_python_requests)
+                execute_process(
+                    COMMAND "${_usd_uv}" python find --no-project --managed-python "${_request}"
+                    OUTPUT_VARIABLE _python RESULT_VARIABLE _result ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+                if(_result EQUAL 0 AND _python)
+                    list(APPEND _usd_python_candidates "${_python}")
+                endif()
+            endforeach()
+        endif()
+        unset(_usd_uv CACHE)
+        foreach(_name "python${_usd_python_version}" python3)
+            find_program(_usd_python_on_path NAMES "${_name}" NO_CACHE)
+            if(_usd_python_on_path)
+                list(APPEND _usd_python_candidates "${_usd_python_on_path}")
+            endif()
+        endforeach()
+        foreach(_python IN LISTS _usd_python_candidates)
+            if(NOT EXISTS "${_python}" OR _python MATCHES "/vcpkg_installed/")
+                continue()
+            endif()
+            execute_process(
+                COMMAND "${_python}" -c
+                        "import sys, sysconfig; print('%d.%d' % sys.version_info[:2]); print(sys.executable); print(sysconfig.get_config_var('LIBDIR') or ''); print(sysconfig.get_config_var('LDLIBRARY') or ''); print(sysconfig.get_path('include'))"
+                OUTPUT_VARIABLE _probe RESULT_VARIABLE _result ERROR_QUIET)
+            string(STRIP "${_probe}" _probe)
+            string(REPLACE "\n" ";" _probe "${_probe}")
+            list(LENGTH _probe _probe_length)
+            if(NOT _result EQUAL 0 OR NOT _probe_length EQUAL 5)
+                continue()
+            endif()
+            list(GET _probe 0 _version)
+            list(GET _probe 1 _executable)
+            list(GET _probe 2 _libdir)
+            list(GET _probe 3 _ldlibrary)
+            list(GET _probe 4 _include)
+            if(_version STREQUAL _usd_python_version AND _ldlibrary MATCHES "[.](so|dylib)$"
+               AND EXISTS "${_libdir}/${_ldlibrary}" AND EXISTS "${_include}/Python.h")
+                set(Python3_EXECUTABLE "${_executable}" CACHE FILEPATH "OpenUSD's Python")
+                set(Python3_LIBRARY "${_libdir}/${_ldlibrary}" CACHE FILEPATH "OpenUSD's Python")
+                set(Python3_INCLUDE_DIR "${_include}" CACHE PATH "OpenUSD's Python")
+                message(STATUS "OpenUSD's Python ${_usd_python_version}: ${_executable} (built with ${_usd_python_built})")
+                break()
+            endif()
+        endforeach()
+        if(NOT DEFINED Python3_EXECUTABLE)
+            message(WARNING "OpenUSD was built with Python ${_usd_python_version} (${_usd_python_built}), which isn't "
+                            "on this machine, and no other Python ${_usd_python_version} with a shared libpython was "
+                            "found (uv's, or on PATH). Install it (uv python install ${_usd_python_version}), or pass "
+                            "-DPython3_EXECUTABLE, -DPython3_LIBRARY and -DPython3_INCLUDE_DIR. Without it scripting is "
+                            "off, and on macOS usdcc won't start: OpenUSD's libusd_python needs libpython.")
+        endif()
+        unset(_usd_python_candidates)
+        unset(_usd_python_requests)
+        unset(_usd_pin)
+        unset(_usd_pinned)
+    endif()
+    unset(_usd_config)
+endif()
+
 # find_package() keeps the folder it found pxrConfig.cmake in (pxr_DIR) and
 # goes straight back there on every later configure, whatever USD_INSTALL says
 # by then. So after -DUSD_INSTALL (or run.py's --usd-install) names a different

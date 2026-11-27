@@ -84,6 +84,12 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
   them and signs each file again, ad hoc: Apple Silicon doesn't run code whose signature no
   longer fits. `tools/ci/relocate_usd.py` uses it too. A prebuilt OpenUSD links
   `@rpath/libpython3.13.dylib`, which usdcc's programs have an rpath for.
+- **CI's OpenUSD on another Mac** (`tools/fetch_usd.py`): its `pxrConfig.cmake` names the
+  runner's Python, `/Users/runner/.local/share/uv/python/…`. `cmake/modules/FindUSD.cmake` then
+  takes this machine's Python of the same version: uv's (the patch version `deps/usd.json` pins,
+  if uv has it), else `python3.13` or `python3` on `PATH`, only with a shared `libpython`. Without
+  one, usdcc would build without scripting and not start, as `libusd_python` needs
+  `libpython3.13.dylib`; CMake warns and says what to do. Linux the same, Windows by the registry.
 - **The Blender backend's `*_inline.cc` files** aren't compiled by themselves, as in Blender's
   own build: Clang ignores `#pragma once` in the file it compiles.
 - **Paths** compare without case, as APFS does by default.
@@ -113,8 +119,9 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
 ## 5. Not done
 
 - The release job hasn't run; a Developer ID and notarization. The
-  deploy leaves Blender mesh tools out, as the other releases do. The Gatling (no MDL SDK download) and Arnold
-  packs. MoonRay builds and renders ([MOONRAY.md](MOONRAY.md) §7.6); CI hasn't built it.
+  deploy leaves Blender mesh tools out, as the other releases do. The Gatling pack (no MDL SDK download).
+  Arnold builds and renders ([USD_PLUGINS.md](USD_PLUGINS.md) §3, Arnold); this repository's CI
+  doesn't build it, a private repository's does ([ARNOLD_CI.md](ARNOLD_CI.md)). MoonRay builds and renders ([MOONRAY.md](MOONRAY.md) §7.6); CI hasn't built it.
 - Checked in the running app by script: a Python panel, Mesh > Triangulate and its undo, a glTF
   file, Storm and Embree in the viewport, the Outline and Wireframe selection, full screen and
   back, quitting. Seen only in frames the app saved, not on the screen, so without the HUD.

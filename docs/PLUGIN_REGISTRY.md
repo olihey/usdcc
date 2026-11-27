@@ -19,7 +19,9 @@ at each update.
   §7, phase 4). `built_for` would name an SDK version, or a range of them, in place of the usdcc
   version. They are left in as written, as the record of why it is parked.
 - **The optional packs are no longer part of this.** A pack, of plugins of any kind, gets a
-  download of its own in the app ([USD_PLUGINS.md](USD_PLUGINS.md) §9), without a registry. The
+  download of its own in the app ([USD_PLUGINS.md](USD_PLUGINS.md) §10, built 2026-11-26), without a
+  registry. What it took from this plan: a store beside the user's `plugins` folder, folders never
+  changed in place, `.in-use`, a hash from an index, unpacking with usdcc's Python. The
   first are the renderers (MoonRay, Cycles), which is why this plan calls them the renderer
   packs; where it names them (§2, §7, phase 5), that is what was considered.
 - **Still decided, for when it comes back:** the official registry holds only what usdcc builds
@@ -439,7 +441,7 @@ from registries that are trusted: there is nobody to ask.
 **A USD pack as a plugin** is a folder with a manifest and the pack's files under `usd/`, which
 `registerUsdFolders()` registers before the first stage. Two things are unproven. The packs'
 own download in the app avoids both where it unpacks over usdcc's folder, and meets the second
-only on macOS and in the AppImage (USD_PLUGINS.md §9):
+only on macOS and in the AppImage (USD_PLUGINS.md §10):
 
 - **Windows:** OpenUSD loads a plugin's library with plain `LoadLibraryW`, which doesn't look in
   that library's folder for the DLLs it needs ([deploy.py](../tools/deploy.py), at
@@ -451,7 +453,7 @@ only on macOS and in the AppImage (USD_PLUGINS.md §9):
 - **Linux and macOS:** a pack's files have RUNPATHs relative to an OpenUSD install
   (USD_PLUGINS.md §5), which a plugin folder isn't laid out as. *On Linux, tried 2026-11-26:*
   a folder laid out as an install, with `lib` a link to the app's, is enough for MoonRay's
-  pack (USD_PLUGINS.md §9). macOS isn't tried.
+  pack (USD_PLUGINS.md §10). macOS isn't tried.
 
 ## 8. Considered, and not chosen
 

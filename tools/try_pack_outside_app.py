@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tries a USD plugin pack outside the app's folder (docs/USD_PLUGINS.md section 9).
+"""Tries a USD plugin pack outside the app's folder (docs/USD_PLUGINS.md section 10.6).
 
 A trial, not part of a build or of CI. It answers one question, on Linux and macOS: does
 an optional pack still load and work when its files are in a folder of their own, laid out
@@ -222,7 +222,8 @@ def main(argv=None):
     parser.add_argument("--timeout-seconds", type=int, default=300)
     args = parser.parse_args(argv)
     if WINDOWS:
-        fail("Linux and macOS only: on Windows a pack is unpacked over usdcc's folder (docs/USD_PLUGINS.md section 9).")
+        fail("Linux and macOS only: this tries the link to the app's lib, which Windows doesn't have. What was tried "
+             "there, a pack's own bin on usdcc's PATH, is in docs/USD_PLUGINS.md section 10.6.")
 
     given = App(args.deploy)
     record = given.root / "usd-plugins" / f"{args.pack}.json"

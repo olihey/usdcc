@@ -56,7 +56,9 @@ with V-Ray in a helper process, following the viewport camera and edits ([VRAY_R
 2. `USDCC_PLUGIN_PATH` (a studio's);
 3. `%LOCALAPPDATA%/usdcc_config/plugins` (the user's);
 4. the folders added in **Edit > Settings > Plugins > Plugin folders**, in their order;
-5. `plugins/` next to `bin/`, the plugins shipped with usdcc: V-Ray Render and RTX Render.
+5. `%LOCALAPPDATA%/usdcc_config/packs/<version>-<platform>`, the optional packs usdcc downloaded for this
+   version in View > Plugins > Packs ([USD_PLUGINS.md](USD_PLUGINS.md) §10): each is a plugin folder;
+6. `plugins/` next to `bin/`, the plugins shipped with usdcc: V-Ray Render and RTX Render.
 
 The setting lists the user's folder and the shipped one as fixed rows, greyed, around the ones you add, remove and reorder. It takes effect at the next start, as plugins are found before the window opens. The cog button in View > Plugins opens it.
 

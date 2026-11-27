@@ -53,7 +53,7 @@ CI_PLATFORMS = {
 SETS = ("standard", "optional", "local")
 _KEYS = {"repository", "commit", "version", "submodules", "patches", "downloads", "sdks", "cmake", "targets",
          "install_prefix", "install_components", "licenses", "platforms", "license", "set", "publish", "check",
-         "hook"}
+         "hook", "preloaded"}
 _REQUIRED = {"repository", "commit", "platforms", "license", "set"}
 
 

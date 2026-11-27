@@ -29,8 +29,9 @@ this machine's environment, does what the pin's "check" asks:
 A pack that is off unless the user turns it on (Arnold's, in plugin/arnold)
 names its folder in "plugin_folders", which the check puts on
 PXR_PLUGINPATH_NAME, and a library it needs that isn't in the pack in
-"preload", which is loaded by its full path first, as usdcc does: "{arnold}"
-there is the folder given with --sdk arnold=<folder>.
+"preload" (a list, or {platform: list}), which is loaded by its full path
+first, as usdcc does: "{arnold}" there is the folder given with --sdk
+arnold=<folder>.
 
 --usd is changed by this (the pack is copied into it), so pass a throwaway copy
 of the OpenUSD asset.
@@ -51,7 +52,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import MACOS, REPO, WINDOWS, copy_tree, fail  # noqa: E402
+from _common import ASSET_PLATFORM, MACOS, REPO, WINDOWS, copy_tree, fail  # noqa: E402
 import usd_plugin_asset  # noqa: E402
 
 MANIFEST_DIR = "usd-plugins"
@@ -297,6 +298,8 @@ def main(argv=None):
     for entry in check["open"] + check["render"]:
         if not Path(entry["file"]).is_file():
             fail(f"deps/usd-plugins/{pack}.json: no such file {entry['file']}")
+    if isinstance(check.get("preload"), dict):  # by platform
+        check["preload"] = check["preload"].get(ASSET_PLATFORM, [])
     for name in spec.get("sdks", {}):
         if name not in sdks and any(f"{{{name}}}" in library for library in check.get("preload", [])):
             fail(f"The {pack} pack's check needs the {spec['sdks'][name]['description']}: pass --sdk {name}=<its folder>")

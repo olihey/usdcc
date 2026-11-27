@@ -55,6 +55,9 @@ public:
         // §6.3), and given back on loading. Null: none kept.
         std::function<QString()> workspace;
         std::function<void(const QString& id)> setWorkspace;
+        // Whether the user removed this optional pack (PackStore::removed()): a session
+        // saved with its plugins loads without them and says nothing. Null: none was.
+        std::function<bool(const QString& pack)> packRemoved;
     };
 
     // The answers a load or save needs from the user. Each has a dialog by default.

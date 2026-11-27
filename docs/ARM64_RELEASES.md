@@ -142,7 +142,7 @@ who has the SDK.
 | MoonRay | **Later, Linux only** | Linux x64 | Apache-2.0, but no Windows build. Not proven against our OpenUSD, and its libraries' licences are unread. Upstream supports Linux x64 and macOS arm64, not Linux arm64 |
 | Aurora | **Don't ship** | Windows x64 at most | Apache-2.0, but built on Autodesk's own USD fork and DXR; unproven with ours. Quiet upstream |
 | Gatling | **Not in the standard package; optional after a review** | x64; Linux arm64 possible | GPL-3.0: in-process it makes the whole package GPL. Works and is built in CI, unpublished. The MDL SDK 2026.0.2 has a Linux aarch64 download, none for Windows arm64. Needs a ray tracing GPU |
-| Arnold | **Local only** | Windows x64 | The SDK is behind an Autodesk login. Its EULA allows embedding only under terms our BSD licence doesn't give, so shipping needs terms of its own. Autodesk names x86-64 for Linux, and no arm64 outside macOS |
+| Arnold | **Local only** | Windows x64, macOS arm64, Linux x64 (built in a private repository's CI, [ARNOLD_CI.md](ARNOLD_CI.md)) | The SDK is behind an Autodesk login. Its EULA allows embedding only under terms our BSD licence doesn't give, so shipping needs terms of its own. Autodesk names x86-64 for Linux, and no arm64 outside macOS |
 | `usdfbx` (Adobe) | **Local only** | x64 | Links Autodesk's FBX SDK statically, so a binary would redistribute it; its licence is unread |
 | `usdsbsar` (Adobe) | **Local only** | x64 | Needs Adobe's Substance SDK, which can't be republished |
 | Draco | **Can ship** | All four | Apache-2.0. `--draco` in the OpenUSD build, then Draco glTF in Adobe's pack. Costs one OpenUSD rebuild |

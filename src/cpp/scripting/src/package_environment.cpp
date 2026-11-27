@@ -1,6 +1,7 @@
 #include "usdcc/scripting/package_environment.h"
 
 #include "usdcc/core/log.h"
+#include "usdcc/scripting/in_use_marker.h"
 #include "usdcc/ui/settings.h"
 
 #include <QCoreApplication>
@@ -21,12 +22,6 @@
 #include <algorithm>
 #include <set>
 
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
-#endif
-
 // What the deploy's tools/uv holds (tools/deploy.py): uv.exe on Windows, uv elsewhere.
 #if defined(_WIN32)
 #define USDCC_EXE_SUFFIX ".exe"
@@ -39,7 +34,6 @@ namespace usdcc::scripting {
 namespace {
 constexpr auto kCacheFolder = ".cache";
 constexpr auto kLockFile = ".install.lock";
-constexpr auto kInUseFile = ".in-use";
 constexpr auto kRecordFile = "environment.json";
 constexpr auto kRequirementsFile = "requirements.lock";
 
@@ -140,41 +134,13 @@ EnvironmentRecord PackageEnvironment::record() const {
 void PackageEnvironment::markInUse() {
     const auto folder = activeFolder();
     if (!folder) return;
-    // On Windows Qt opens files sharing reading and writing but not deleting, so
-    // that other apps can hold it too and nothing can remove it while one does.
-    // Elsewhere an open file can be deleted, so it's held with a shared flock(),
-    // which removeUnused() asks for exclusively.
-    m_inUse = std::make_unique<QFile>(toQString(*folder / kInUseFile));
-    if (!m_inUse->open(QIODevice::Append)) {
-        USDCC_LOG_WARNING("usdcc.packages", "Can't mark {} as in use: another usdcc could remove it", m_inUse->fileName().toStdString());
+    // Which removeUnused() asks about before it removes a folder.
+    m_inUse = std::make_unique<InUseMarker>(*folder);
+    if (!m_inUse->isHeld()) {
+        USDCC_LOG_WARNING("usdcc.packages", "Can't mark {} as in use: another usdcc could remove it", toQString(*folder).toStdString());
         m_inUse.reset();
-        return;
     }
-#if !defined(_WIN32)
-    if (::flock(m_inUse->handle(), LOCK_SH | LOCK_NB) != 0) {
-        USDCC_LOG_WARNING("usdcc.packages", "Can't lock {} as in use: another usdcc could remove it", m_inUse->fileName().toStdString());
-    }
-#endif
 }
-
-namespace {
-// Removes a folder's in-use marker unless an app holds it (markInUse()); false if one does.
-bool removeInUseMarker(const QString& marker) {
-    if (!QFile::exists(marker)) return true;
-#if defined(_WIN32)
-    return QFile::remove(marker);  // fails while an app has it open
-#else
-    const int fd = ::open(QFile::encodeName(marker).constData(), O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return !QFile::exists(marker);
-    // flock() locks belong to the open file, so this fails against another open of
-    // it in this process too. Removed while locked, so no app can take it meanwhile.
-    const bool free = ::flock(fd, LOCK_EX | LOCK_NB) == 0;
-    const bool removed = free && QFile::remove(marker);
-    ::close(fd);
-    return removed;
-#endif
-}
-}  // namespace
 
 void PackageEnvironment::removeUnused() const {
     std::error_code error;
@@ -198,8 +164,7 @@ void PackageEnvironment::removeUnused() const {
         remove.push_back(entry.path());
     }
     for (const std::filesystem::path& folder : remove) {
-        const QString marker = toQString(folder / kInUseFile);
-        if (!removeInUseMarker(marker)) continue;  // an app has it in use
+        if (!releaseInUseMarker(folder)) continue;  // an app has it in use
         std::filesystem::remove_all(folder, error);
         if (error) {
             USDCC_LOG_WARNING("usdcc.packages", "Can't remove the old environment {}: {}", toQString(folder).toStdString(), error.message());

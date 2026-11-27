@@ -78,6 +78,7 @@
 
 namespace usdcc::scripting {
 
+#if USDCC_HAS_PYTHON
 // The Python class of a render view panel's handle (scripted_render_view_panel.cpp).
 void bindRenderViewPanelHandle(pybind11::module_& m);
 // Final renderers from Python (scripted_final_renderer.cpp).
@@ -86,6 +87,7 @@ void removeScriptedFinalRenderers();
 // Primvar views from Python (scripted_primvar_view.cpp).
 void bindPrimvarViews(pybind11::module_& m);
 void removeScriptedPrimvarViews();
+#endif
 
 namespace {
 const AppContext* s_context = nullptr;
