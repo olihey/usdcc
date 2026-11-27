@@ -523,7 +523,8 @@ USDCC_TEST(assets_context_holds_stacks_and_no_secrets) {
     const std::shared_ptr<const Stack> prodStack = prod.stack("fake", "studio");
     CHECK(prodStack && stack && prodStack->id != stack->id, "another environment's stack has another id");
     CHECK(!test.stack("fake", "lib") && !test.stack("webdav", "studio"), "no stack for an unknown name or scheme");
-    CHECK(test.names("fake") == std::vector<std::string>({"studio"}), "its names");
+    CHECK(test.names("fake") == std::vector<std::string>({"prod", "studio", "test"}),
+          "its names: the one it gives, and each server by its id");
 
     CHECK(test == testAgain && !(test == prod), "equal when environment and stacks are");
     CHECK(hash_value(test) == hash_value(testAgain) && (test < prod) != (prod < test), "hashed and ordered");
@@ -538,6 +539,87 @@ USDCC_TEST(assets_context_holds_stacks_and_no_secrets) {
 
     const Context nowhere(fixture.config, "staging");
     CHECK(nowhere.names("fake").empty(), "an environment the configuration doesn't have has no names");
+    CHECK(nowhere.whyNoName("lib") == "the environment 'staging' has no server named 'lib'", "and says so: %s",
+          nowhere.whyNoName("lib").c_str());
+}
+
+// Servers alone are a configuration (docs/REMOTE_ASSETS.md §4.1): each is a name by itself,
+// with no environment and in any of its configuration's.
+USDCC_TEST(assets_servers_are_names_by_themselves) {
+    Fixture fixture;
+    transport();
+    const std::string url = fixture.config.endpoints["prod"].url;
+    const Result<Config> parsed = Config::parse(R"({ "endpoints": { "nas": { "scheme": "fake", "url": "somewhere" } } })");
+    CHECK(parsed.ok() && parsed.value.chosenEnvironment().empty(), "servers with no environment are a configuration: %s",
+          parsed.message.c_str());
+    Config config = parsed.value;
+    config.endpoints["nas"].url = url;
+    config.endpoints["test"] = fixture.config.endpoints["test"];
+    // Ids a path can't spell: one with capitals, and a source's.
+    config.endpoints["NAS"] = config.endpoints["nas"];
+    config.endpoints["studio-a/nas"] = config.endpoints["nas"];
+
+    const Context none(config, "");
+    CHECK(none.names("fake") == std::vector<std::string>({"nas", "test"}), "each server whose id can be a name is one");
+    const std::shared_ptr<const Stack> stack = none.stack("fake", "nas");
+    CHECK(stack && stack->endpoints.size() == 1 && stack->endpoints[0].url == url && findStack(stack->id) == stack,
+          "a stack of that one server, found by its id");
+    CHECK(!none.stack("webdav", "nas"), "of its own protocol only");
+    CHECK(none.whyNoName("lib") == "there is no server named 'lib'", "a name it lacks: %s", none.whyNoName("lib").c_str());
+    CHECK(none == Context(config, "") && !(none == Context(fixture.config, "prod")), "compared as any context");
+
+    // In an environment too, beside the names it gives.
+    const Context prod(fixture.config, "prod");
+    const std::shared_ptr<const Stack> alone = prod.stack("fake", "test");
+    CHECK(prod.names("fake") == std::vector<std::string>({"prod", "studio", "test"}) && alone &&
+              alone->endpoints.size() == 1 && alone->endpoints[0].id == "test",
+          "an environment has its names, and each server by its id");
+    // A name the environment gives a stack is that stack, whatever server has the id.
+    Config overlaid = fixture.config;
+    overlaid.environments["test"]["fake"]["prod"] = {"test", "prod"};
+    const std::shared_ptr<const Stack> given = Context(overlaid, "test").stack("fake", "prod");
+    CHECK(given && given->endpoints.size() == 2 && given->endpoints[0].id == "test", "the environment's stack wins over the id");
+    const std::shared_ptr<const Stack> plain = Context(overlaid, "prod").stack("fake", "prod");
+    CHECK(plain && plain->endpoints.size() == 1, "in another environment the id is the server alone");
+    const Context unknown(config, "staging");
+    CHECK(unknown.names("fake").empty(), "an environment that isn't configured has no names, servers or not");
+
+    // A source's servers are names in its own environments, and yours aren't there.
+    Config merged = config;
+    merged.endpoints.erase("studio-a/nas");
+    merged.endpoints["studio-a/lib"] = config.endpoints["nas"];
+    merged.environments["studio-a/prod"]["fake"]["studio"] = {"studio-a/lib"};
+    merged.environments["mine"]["fake"]["studio"] = {"nas"};
+    CHECK(Context(merged, "studio-a/prod").names("fake") == std::vector<std::string>({"lib", "studio"}),
+          "a source's environment has its own servers by their ids, and none of yours");
+    CHECK(Context(merged, "mine").names("fake") == std::vector<std::string>({"nas", "studio", "test"}) &&
+              !Context(merged, "").stack("fake", "lib"),
+          "and yours have none of a source's");
+    CHECK(ownName("nas", "mine") == "nas" && ownName("nas", "") == "nas" && ownName("NAS", "").empty() &&
+              ownName("nas", "studio-a/prod").empty() && ownName("studio-a/lib", "studio-a/prod") == "lib" &&
+              ownName("studio-a/lib", "mine").empty(),
+          "ownName() says which");
+    CHECK(environmentsWithName(merged, "fake", "nas") == std::vector<std::string>({"mine"}) &&
+              environmentsWithName(merged, "fake", "lib") == std::vector<std::string>({"studio-a/prod"}),
+          "an environment is offered for a name that is a server's id in it");
+
+    // Through OpenUSD, with no context given: what usdcat would do.
+    setDefaultConfig(config);
+    const UsdStageRefPtr stage = UsdStage::Open("fake://nas/shots/shot.usda");
+    CHECK(stage, "a stage opens from a server named by its id");
+    if (stage) {
+        CHECK(stringAttribute(stage, "/Shot/Hero", "origin") == "prod" &&
+                  stringAttribute(stage, "/Shot/Hero/Geo", "geoOrigin") == "prod",
+              "and its relative references come from that server");
+        CHECK(stage->GetRootLayer()->GetResolvedPath().GetPathString() == "fake://nas~" + stack->id + "/shots/shot.usda",
+              "its resolved path names the stack: %s", stage->GetRootLayer()->GetResolvedPath().GetPathString().c_str());
+    }
+    ArResolver& resolver = ArGetResolver();
+    CHECK(!resolver.Resolve("fake://test/chars/hero.usda").empty(), "the other server by its id");
+    CHECK(resolver.Resolve("fake://test/chars/geo.usda").empty(), "which is only itself: PROD's file isn't behind it");
+    CHECK(resolver.Resolve("fake://studio/chars/hero.usda").empty(), "and no name nobody gave");
+    const Result<std::vector<ListedEntry>> listed = listUri("fake://nas/chars/", none);
+    CHECK(listed.ok() && listed.value.size() == 3, "its folders are listed, as the picker does: %s", listed.message.c_str());
 }
 
 USDCC_TEST(assets_credentials_come_from_the_callback_then_the_environment) {

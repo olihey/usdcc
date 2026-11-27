@@ -90,7 +90,8 @@ How the AWS command line and other tools write S3 paths. When the part after `//
 environment has, it's a bucket on AWS, as an address is for WebDAV
 ([WEBDAV_RESOLVER.md](WEBDAV_RESOLVER.md) §2.1):
 
-- **A configured name wins** over a bucket of the same name.
+- **A configured name wins** over a bucket of the same name: a name of any environment, and the id
+  of an S3 server, which is a name by itself ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4.1).
 - **A single endpoint:** no environment, no stack, no stack id. The resolved path is the
   identifier.
 - **The region** is found as above; **the credential** is AWS's own lookup (§4.2).

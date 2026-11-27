@@ -88,7 +88,10 @@ know, so an older usdcc leaves `sources` alone.
 | A web host's login in two sources | Personal first, then the list's order; shown as a warning |
 
 **A studio's environment is exactly what the studio defined.** Personal names aren't added to it,
-so a stage resolves the same for everyone using that environment.
+so a stage resolves the same for everyone using that environment. That includes the studio's
+servers by their own ids, and none of yours ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4.1, *added
+2026-11-27*); a mixed environment has yours by their ids, and a source's only under the names of
+what it extends.
 
 **Mixing** is a personal environment:
 
@@ -367,7 +370,9 @@ Built 2026-11-24, as §3 to §5 and §10 have it, but for what follows. The libr
   from any thread) about a name its environment lacks. The app shows a sticky toast once per name
   and environment, with a button per environment to reopen the stage in it: a source's default when
   it has the name, else each of its environments that has, and personal ones. With none, it says
-  so and offers the Asset Servers editor; without any environment configured, only the Log says.
+  so and offers the Asset Servers editor; with neither a server nor an environment configured, only
+  the Log says. (*Changed 2026-11-27:* servers alone are a configuration,
+  [REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4.1; before, it took an environment for the toast.)
   Set up before the stage named on the command line opens, so it's offered for that one too.
 - **Remembered per folder** (`asset-folders.json` in the app's local data; a tool or test without one
   remembers nothing): what the offer reopened a stage in, or **Use <environment> for This Folder** in

@@ -42,6 +42,13 @@ std::string aliasOf(const std::string& id) {
     return slash == std::string::npos ? std::string() : id.substr(0, slash);
 }
 
+std::string ownName(const std::string& id, const std::string& environment) {
+    const std::string alias = aliasOf(environment);
+    if (aliasOf(id) != alias) return std::string();
+    const std::string name = alias.empty() ? id : id.substr(alias.size() + 1);
+    return isValidName(name) ? name : std::string();
+}
+
 namespace {
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -479,7 +486,12 @@ std::vector<std::string> environmentsWithName(const Config& config, const std::s
     std::vector<std::string> found;
     for (const auto& [environment, schemes] : config.environments) {
         const auto ofScheme = schemes.find(scheme);
-        if (ofScheme != schemes.end() && ofScheme->second.count(name)) found.push_back(environment);
+        bool has = ofScheme != schemes.end() && ofScheme->second.count(name);
+        // Or a server of its configuration, by its id (docs/REMOTE_ASSETS.md §4.1).
+        for (auto endpoint = config.endpoints.begin(); !has && endpoint != config.endpoints.end(); ++endpoint) {
+            has = endpoint->second.scheme == scheme && ownName(endpoint->first, environment) == name;
+        }
+        if (has) found.push_back(environment);
     }
     return found;
 }

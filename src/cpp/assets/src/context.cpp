@@ -3,12 +3,14 @@
 #include "usdcc/assets/activity.h"
 #include "usdcc/assets/disk_cache.h"
 #include "usdcc/assets/lookup.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/uri.h"
 
 #include <pxr/base/tf/diagnostic.h>
 
 #include <functional>
 #include <mutex>
+#include <set>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -97,18 +99,36 @@ std::shared_ptr<const Stack> findStack(const std::string& id) {
 
 Context::Context(const Config& config, std::string environment) : m_environment(std::move(environment)) {
     const auto ofEnvironment = config.environments.find(m_environment);
-    if (ofEnvironment == config.environments.end()) return;
-    for (const auto& [scheme, names] : ofEnvironment->second) {
-        for (const auto& [name, ids] : names) {
-            Stack stack;
-            stack.scheme = scheme;
-            stack.name = name;
-            for (const std::string& id : ids) {
-                const auto endpoint = config.endpoints.find(id);
-                if (endpoint != config.endpoints.end()) stack.endpoints.push_back(endpoint->second);
+    // One that isn't configured has no names: a job naming an environment this machine lacks
+    // finds nothing, rather than other files. No environment (an empty one) is the servers alone.
+    if (ofEnvironment == config.environments.end() && !m_environment.empty()) return;
+    // The names the environment gives, whether or not their servers are there.
+    std::set<std::pair<std::string, std::string>> given;
+    if (ofEnvironment != config.environments.end()) {
+        for (const auto& [scheme, names] : ofEnvironment->second) {
+            for (const auto& [name, ids] : names) {
+                given.insert({scheme, name});
+                Stack stack;
+                stack.scheme = scheme;
+                stack.name = name;
+                for (const std::string& id : ids) {
+                    const auto endpoint = config.endpoints.find(id);
+                    if (endpoint != config.endpoints.end()) stack.endpoints.push_back(endpoint->second);
+                }
+                if (!stack.endpoints.empty()) m_stacks[{scheme, name}] = registerStack(std::move(stack));
             }
-            if (!stack.endpoints.empty()) m_stacks[{scheme, name}] = registerStack(std::move(stack));
         }
+    }
+    // Each server is a name by itself too, its id (docs/REMOTE_ASSETS.md §4.1), where the
+    // environment gives that name no stack of its own.
+    for (const auto& [id, endpoint] : config.endpoints) {
+        const std::string name = ownName(id, m_environment);
+        if (name.empty() || given.count({endpoint.scheme, name})) continue;
+        Stack stack;
+        stack.scheme = endpoint.scheme;
+        stack.name = name;
+        stack.endpoints.push_back(endpoint);
+        m_stacks[{endpoint.scheme, name}] = registerStack(std::move(stack));
     }
 }
 
@@ -123,6 +143,11 @@ std::vector<std::string> Context::names(const std::string& scheme) const {
         if (key.first == scheme) names.push_back(key.second);
     }
     return names;
+}
+
+std::string Context::whyNoName(const std::string& name) const {
+    if (m_environment.empty()) return "there is no server named '" + name + "'";
+    return "the environment '" + m_environment + "' has no server named '" + name + "'";
 }
 
 bool Context::operator==(const Context& other) const {

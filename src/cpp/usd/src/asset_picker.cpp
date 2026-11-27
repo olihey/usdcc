@@ -185,6 +185,8 @@ QString unreachableBecause(const QString& path, const PXR_NS::ArResolverContext&
     std::string rest;
     std::string normalized;
     if (parser && parser(path.toStdString(), &endpoint, &rest, &normalized)) return {};
+    // With no environment, a server's id is its name (docs/REMOTE_ASSETS.md §4.1).
+    if (assets.environment().empty()) return QObject::tr("There is no server named '%1'").arg(QString::fromStdString(uri.name));
     return QObject::tr("The environment '%1' has no server named '%2'")
         .arg(QString::fromStdString(assets.environment()), QString::fromStdString(uri.name));
 }

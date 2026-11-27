@@ -41,6 +41,11 @@ std::string qualifiedId(const std::string& alias, const std::string& id);
 std::string qualifiedCredential(const std::string& alias, const std::string& id);
 // The alias of a qualified id; empty for a personal one.
 std::string aliasOf(const std::string& id);
+// The name the server `id` has by itself in `environment` (docs/REMOTE_ASSETS.md §4.1): its
+// id as its own configuration has it, when a path can spell that (isValidName()). Empty for
+// a server of another configuration than the environment's: a source's environment has its
+// own servers, and none of yours. No environment (an empty one) is yours.
+std::string ownName(const std::string& id, const std::string& environment);
 
 // Reads `personal`'s sources, a path relative to `personalFile`'s folder. Each whose file
 // can't be read, or isn't a configuration, has its problem said and is left out.

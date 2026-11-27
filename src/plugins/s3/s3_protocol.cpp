@@ -12,6 +12,7 @@
 #include "usdcc/assets/context.h"
 #include "usdcc/assets/credentials.h"
 #include "usdcc/assets/http_client.h"
+#include "usdcc/assets/sources.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/assets/uri.h"
 
@@ -637,9 +638,15 @@ bool bucketEndpoint(const std::string& uri, Endpoint* endpoint, std::string* pat
 }
 
 // Whether `name` is a server name of s3:// in any environment of the default
-// configuration: such a name is never taken for a bucket.
+// configuration, or the id of an S3 server, which is a name by itself
+// (docs/REMOTE_ASSETS.md §4.1): such a name is never taken for a bucket.
 bool isConfiguredName(const std::string& name) {
     const Config config = defaultConfig();
+    for (const auto& [id, endpoint] : config.endpoints) {
+        // In its own configuration's environments: yours, or a source's ("studio-a/lib"), which
+        // `id` stands for here, having the same alias.
+        if (endpoint.scheme == "s3" && ownName(id, id) == name) return true;
+    }
     for (const auto& [environment, schemes] : config.environments) {
         const auto s3 = schemes.find("s3");
         if (s3 != schemes.end() && s3->second.count(name)) return true;

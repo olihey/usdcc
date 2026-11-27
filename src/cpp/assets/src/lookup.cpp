@@ -243,9 +243,8 @@ Result<bool> browsedStack(const std::string& uri, const Context& context, Stack*
     std::string path;
     std::string normalized;
     if (!parser || !parser(uri, &endpoint, &path, &normalized)) {
-        return Located::failure(Status::Missing, named.name.empty() ? "it isn't a server's path"
-                                                                    : "the environment '" + context.environment() +
-                                                                          "' has no server named '" + named.name + "'");
+        return Located::failure(Status::Missing,
+                                named.name.empty() ? "it isn't a server's path" : context.whyNoName(named.name));
     }
     const size_t start = normalized.find("://") + 3;
     std::string host = normalized.substr(start, normalized.find('/', start) - start);

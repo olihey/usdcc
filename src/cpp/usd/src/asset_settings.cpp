@@ -126,7 +126,15 @@ void clearCache() {
 
 void apply(core::Settings& settings, const std::string& key) {
     if (key.empty() || key == kAssetEnvironmentKey) {
-        setPreferredAssetEnvironment(settings.get<std::string>(kAssetEnvironmentKey));
+        const std::string environment = settings.get<std::string>(kAssetEnvironmentKey);
+        setPreferredAssetEnvironment(environment);
+        // Kept, as it may come back with a source; said, as nothing else shows it.
+        if (!environment.empty() && !hasAssetEnvironment(environment)) {
+            USDCC_LOG_WARNING("usdcc.assets",
+                              "Settings > Assets > Environment is '{}', which the asset configuration doesn't have: "
+                              "stages open in the configuration's own choice instead.",
+                              environment);
+        }
     }
     if (key.empty() || key == kAssetOfflineKey) usdcc::assets::setOffline(settings.get<bool>(kAssetOfflineKey));
     if (key.empty() || key == kAssetCacheLimitKey) {
@@ -150,10 +158,11 @@ void apply(core::Settings& settings, const std::string& key) {
 
 std::string environmentsText() {
     const std::vector<std::string> environments = assetEnvironments();
-    if (environments.empty()) return "The configuration names no environments.";
+    const std::string byId = " A server is opened by its id (webdav://<id>/...) in any of yours, or with none.";
+    if (environments.empty()) return "The configuration names no environments." + byId;
     std::string text = "The configuration's: ";
     for (size_t i = 0; i < environments.size(); ++i) text += (i ? ", " : "") + environments[i];
-    return text + ".";
+    return text + "." + byId;
 }
 
 core::Signal<const std::string&>::Connection& settingsConnection() {
@@ -293,7 +302,8 @@ void defineAssetSettings(core::Settings& settings) {
                      .group = "Servers",
                      .label = "Environment",
                      .description = "Which servers a path such as webdav://studio/... means, and in which order: TEST "
-                                    "over PROD, say. Empty for the configuration's own choice. Open Stage with Options "
+                                    "over PROD, say. Empty for the configuration's own choice, which one the configuration "
+                                    "doesn't have gives too. Open Stage with Options "
                                     "can open one stage in another. " +
                                     environmentsText() + " The servers are in " + config + ".",
                      .type = SettingType::String,

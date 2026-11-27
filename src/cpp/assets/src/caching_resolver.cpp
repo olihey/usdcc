@@ -246,7 +246,7 @@ bool CachingResolver::_Locate(const std::string& assetPath, Location* location, 
         const Context& context = bound ? *bound : *fallback;
         location->stack = context.stack(uri.scheme, uri.name);
         if (!location->stack) {
-            *why = "the environment '" + context.environment() + "' has no server named '" + uri.name + "'";
+            *why = context.whyNoName(uri.name);
             unknownName(uri.scheme, uri.name, context.environment());
             return false;
         }

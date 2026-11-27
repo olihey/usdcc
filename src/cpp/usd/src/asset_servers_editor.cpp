@@ -323,6 +323,11 @@ void AssetServersDialog::build() {
     };
     m_servers->setItemDelegateForColumn(kCredential, new CredentialDelegate(credentialIds, m_servers));
     serversLayout->addWidget(m_servers, 1);
+    m_ownNames = new QLabel(serversPage);
+    m_ownNames->setObjectName(QStringLiteral("assetServersOwnNames"));
+    m_ownNames->setWordWrap(true);
+    m_ownNames->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    serversLayout->addWidget(m_ownNames);
     connect(m_servers, &QTableWidget::cellChanged, this, &AssetServersDialog::serverCellChanged);
     connect(m_servers, &QTableWidget::itemSelectionChanged, this, &AssetServersDialog::refreshServerDetails);
 
@@ -385,7 +390,8 @@ void AssetServersDialog::build() {
 
     connect(m_addServer, &QPushButton::clicked, this, [this]() {
         bool ok = false;
-        const QString id = QInputDialog::getText(this, tr("Add Server"), tr("Id (as stacks name it, such as prod):"),
+        const QString id = QInputDialog::getText(this, tr("Add Server"),
+                                                 tr("Id (as paths and stacks name it, such as nas or prod):"),
                                                  QLineEdit::Normal, QString(), &ok)
                                .trimmed();
         if (!ok || id.isEmpty()) return;
@@ -1263,7 +1269,56 @@ void AssetServersDialog::refreshDefaultEnvironment() {
     }
 }
 
+void AssetServersDialog::refreshOwnNames() {
+    // A source's servers are names in its own environments, not in yours.
+    const bool personal = m_editor == m_personal.get();
+    m_ownNames->setVisible(personal);
+    if (!personal) return;
+    const assets::Config& config = m_personal->config();
+    // The names the default environment gives a stack of its own: there, the id means that.
+    const auto chosen = config.environments.find(config.environment);
+    const auto stacked = [&](const std::string& scheme, const std::string& id) {
+        if (chosen == config.environments.end()) return false;
+        const auto ofScheme = chosen->second.find(scheme);
+        return ofScheme != chosen->second.end() && ofScheme->second.count(id) > 0;
+    };
+    const auto listed = [](const QStringList& all) {
+        constexpr int kShown = 4;
+        const int more = static_cast<int>(all.size()) - kShown;
+        return all.mid(0, kShown).join(QStringLiteral(", ")) + (more > 0 ? tr(" and %1 more").arg(more) : QString());
+    };
+    QStringList paths;
+    QStringList stacks;
+    QStringList unnamed;
+    for (const auto& [id, endpoint] : config.endpoints) {
+        if (!assets::isValidName(id)) {
+            unnamed << qs(id);
+        } else if (stacked(endpoint.scheme, id)) {
+            stacks << qs(endpoint.scheme + "://" + id + "/");
+        } else {
+            paths << qs(endpoint.scheme + "://" + id + "/");
+        }
+    }
+    QStringList lines;
+    if (paths.isEmpty() && stacks.isEmpty()) {
+        lines << tr("A server is opened by its id, as webdav://nas/: it needs no environment.");
+    } else if (!paths.isEmpty()) {
+        lines << tr("Each server is opened by its id, in any environment of yours or none: %1.").arg(listed(paths));
+    }
+    if (!stacks.isEmpty()) {
+        lines << tr("In the default environment, %1, %2 is the stack that environment gives the name (Environments).")
+                     .arg(qs(config.environment), listed(stacks));
+    }
+    if (!unnamed.isEmpty()) {
+        lines << tr("Not %1: an id in a path is lowercase letters, digits, '-', '_' and '.'.")
+                     .arg(unnamed.join(QStringLiteral(", ")));
+    }
+    m_ownNames->setText(lines.join(QLatin1Char('\n')));
+}
+
 void AssetServersDialog::refreshProblems() {
+    // Any change may be to a server's id or protocol, or to the default environment.
+    refreshOwnNames();
     // Any change may be to a credential, or to what uses one.
     refreshLogins();
     // The personal file's, which keep it from being saved; a source's are at its row.

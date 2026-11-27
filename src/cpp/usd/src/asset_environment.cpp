@@ -75,10 +75,11 @@ void installAssetEnvironmentOffer(usdcc::ui::MainWindow* window, StageManager* s
         QMetaObject::invokeMethod(
             qApp,
             [target, stageManager, scheme, name, environment]() {
-                // Without any environment there's nothing to offer; the Log says what didn't resolve.
-                if (!target || assetEnvironments().empty()) return;
-                std::vector<std::string> offered = usdcc::assets::offeredEnvironments(
-                    usdcc::assets::defaultConfig(), scheme, name);
+                // With nothing configured there's nothing to offer; the Log says what didn't resolve.
+                // Servers alone are a configuration (docs/REMOTE_ASSETS.md §4.1).
+                const usdcc::assets::Config config = usdcc::assets::defaultConfig();
+                if (!target || (config.environments.empty() && config.endpoints.empty())) return;
+                std::vector<std::string> offered = usdcc::assets::offeredEnvironments(config, scheme, name);
                 offered.erase(std::remove(offered.begin(), offered.end(), environment), offered.end());
                 // The stage it's about: the current one, if it's in that environment, else one that is.
                 StageRefPtr stage = stageManager->currentStage();
@@ -94,16 +95,21 @@ void installAssetEnvironmentOffer(usdcc::ui::MainWindow* window, StageManager* s
                 QList<usdcc::ui::ToastAction> actions;
                 if (offered.empty()) {
                     request.title = QObject::tr("%1 isn't configured").arg(path).toStdString();
-                    request.body = QObject::tr("The asset environment %1 has no server named %2, and nor has any other.")
-                                       .arg(environmentText(environment), qs(name))
+                    request.body = (environment.empty()
+                                        ? QObject::tr("There is no asset server named %1.").arg(qs(name))
+                                        : QObject::tr("The asset environment %1 has no server named %2, and nor has any other.")
+                                              .arg(environmentText(environment), qs(name)))
                                        .toStdString();
                     actions.append({QObject::tr("Asset Servers..."), [target]() { showAssetServersEditor(target); }});
                 } else {
                     request.title = QObject::tr("%1 is in another environment").arg(path).toStdString();
                     QStringList names;
                     for (const std::string& each : offered) names << qs(each);
-                    request.body = QObject::tr("%1 has no server named %2. %3 has.")
-                                       .arg(environmentText(environment), qs(name), names.join(QStringLiteral(", ")))
+                    request.body = (environment.empty()
+                                        ? QObject::tr("There is no server named %1. %2 has one.")
+                                              .arg(qs(name), names.join(QStringLiteral(", ")))
+                                        : QObject::tr("%1 has no server named %2. %3 has.")
+                                              .arg(environmentText(environment), qs(name), names.join(QStringLiteral(", "))))
                                        .toStdString();
                     // Offered, never switched silently: switching contacts that source's servers.
                     for (size_t i = 0; i < offered.size() && i < 3 && stage; ++i) {
