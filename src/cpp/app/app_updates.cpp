@@ -1,7 +1,11 @@
 #include "app_updates.h"
 
+#if USDCC_FEATURE_PACKS
+#include "app_packs.h"
+#endif
 #include "release_check.h"
 #include "running_programs.h"
+#include "system_proxy.h"
 
 #include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
@@ -65,12 +69,6 @@ QUrl releaseListUrl() {
     url.replace(QLatin1String("https://github.com/"), QLatin1String("https://api.github.com/repos/"));
     return QUrl(url + QStringLiteral("/releases?per_page=100"));
 }
-
-// The system's proxy, for these requests alone.
-class SystemProxy : public QNetworkProxyFactory {
-public:
-    QList<QNetworkProxy> queryProxy(const QNetworkProxyQuery& query) override { return systemProxyForQuery(query); }
-};
 
 // What this program is, for installing updates.
 InstallLocation ownLocation() {
@@ -378,18 +376,36 @@ void AppUpdates::check(bool interactive) {
             for (const Velopack::VelopackAsset& delta : update->DeltasToTarget) size += delta.Size;
             if (size == 0) size = target.Size;
             USDCC_LOG_INFO(kCategory, "usdcc {} is available ({} bytes to download)", target.Version, size);
-            self.m_availableToast =
-                toasts->show({.kind = ToastKind::Info,
-                              .title = tr("usdcc %1 is available").arg(version).toStdString(),
-                              .body = tr("You have %1. The update downloads in the background (%2 MB); then "
-                                         "usdcc restarts to install it.")
-                                          .arg(QString::fromLatin1(core::version()), megabytes(size))
-                                          .toStdString(),
-                              .durationMs = ToastRequest::kSticky},
-                             // The AppUpdates by pointer: `self` is this call's parameter.
-                             {{tr("Download and Install"), [updates = &self]() { updates->download(); }},
-                              {tr("Release Notes"),
-                               [updates = &self]() { QDesktopServices::openUrl(QUrl(updates->releasesUrl())); }}});
+            // The AppUpdates by pointer: `self` is this call's parameter. `packs`: what the
+            // update means for the optional packs, said with it; `packBytes` are theirs.
+            const auto announce = [updates = &self, version, size](const QString& packs, quint64 packBytes) {
+                QString body = tr("You have %1. The update downloads in the background (%2 MB); then "
+                                  "usdcc restarts to install it.")
+                                   .arg(QString::fromLatin1(core::version()), megabytes(size + packBytes));
+                if (!packs.isEmpty()) body += QLatin1Char(' ') + packs;
+                updates->m_availableToast = updates->m_window->toasts()->show(
+                    {.kind = ToastKind::Info,
+                     .title = tr("usdcc %1 is available").arg(version).toStdString(),
+                     .body = body.toStdString(),
+                     .durationMs = ToastRequest::kSticky},
+                    {{tr("Download and Install"), [updates]() { updates->download(); }},
+                     {tr("Release Notes"), [updates]() { QDesktopServices::openUrl(QUrl(updates->releasesUrl())); }}});
+            };
+#if USDCC_FEATURE_PACKS
+            // The packs the user chose come with it, where the new version has them.
+            if (self.m_packs && self.m_packs->keepsPacks()) {
+                self.m_packs->checkFor(version, [announce](const AppPacks::ForVersion& packs) {
+                    QStringList notes;
+                    if (!packs.fetch.isEmpty()) notes << tr("Your packs come with it: %1.").arg(packs.fetch.join(QStringLiteral(", ")));
+                    if (!packs.missing.isEmpty()) {
+                        notes << tr("Not available for it yet: %1.").arg(packs.missing.join(QStringLiteral(", ")));
+                    }
+                    announce(notes.join(QLatin1Char(' ')), static_cast<quint64>(packs.downloadBytes));
+                });
+                return;
+            }
+#endif
+            announce({}, 0);
         });
     }).detach();
 #endif
@@ -486,6 +502,102 @@ void AppUpdates::download() {
     if (m_availableToast) m_window->toasts()->dismiss(m_availableToast);
     m_availableToast = 0;
     updateMenuAction();
+    m_packsFetched.clear();
+#if USDCC_FEATURE_PACKS
+    // The packs first (docs/USD_PLUGINS.md §10): a downloaded update installs itself at the
+    // next start, with nobody asked, so what there is to ask about them is asked before.
+    if (m_packs && m_packs->keepsPacks()) {
+        fetchPacksThenDownload();
+        return;
+    }
+#endif
+    downloadPackage();
+#endif
+}
+
+void AppUpdates::stopDownloading() {
+    m_state->busy = false;
+    m_state->downloading = false;
+    updateMenuAction();
+    m_window->statusBar()->clearMessage();
+}
+
+AppUpdates::PackChoice AppUpdates::askAboutPacks(const QString& text, bool retry) {
+    QMessageBox box(QMessageBox::Question, tr("Update usdcc"), text, QMessageBox::NoButton, m_window);
+    box.setObjectName(QStringLiteral("updatePacksQuestion"));
+    const QPushButton* update = box.addButton(tr("Update Anyway"), QMessageBox::AcceptRole);
+    const QPushButton* again = retry ? box.addButton(tr("Retry"), QMessageBox::ActionRole) : nullptr;
+    box.setDefaultButton(box.addButton(tr("Later"), QMessageBox::RejectRole));
+    box.exec();
+    if (box.clickedButton() == update) return PackChoice::UpdateAnyway;
+    return again && box.clickedButton() == again ? PackChoice::Retry : PackChoice::Later;
+}
+
+void AppUpdates::fetchPacksThenDownload() {
+#if defined(USDCC_HAS_VELOPACK) && USDCC_FEATURE_PACKS
+    const QString version = QString::fromStdString(m_state->update->TargetFullRelease.Version);
+    m_window->statusBar()->showMessage(tr("Looking for the packs of usdcc %1...").arg(version));
+    m_packs->checkFor(version, [this, version](const AppPacks::ForVersion& packs) {
+        if (!m_state->downloading) return;
+        if (!packs.missing.isEmpty()) {
+            const QString names = packs.missing.join(QStringLiteral(", "));
+            USDCC_LOG_WARNING(kCategory, "usdcc {} has no {} pack{}", version.toStdString(), names.toStdString(),
+                              packs.error.isEmpty() ? std::string() : " (" + packs.error.toStdString() + ")");
+            QString text = packs.error.isEmpty()
+                               ? (packs.missing.size() == 1 ? tr("%1 isn't available for usdcc %2 yet.")
+                                                            : tr("%1 aren't available for usdcc %2 yet."))
+                                     .arg(names, version)
+                               : tr("The packs of usdcc %1 couldn't be looked up: %2").arg(version, packs.error);
+            text += QStringLiteral("\n\n") +
+                    tr("Updating now leaves usdcc without %1 until it is there; usdcc then fetches it on its own.")
+                        .arg(packs.missing.size() == 1 ? names : tr("them"));
+            if (askAboutPacks(text, false) != PackChoice::UpdateAnyway) {
+                stopDownloading();
+                return;
+            }
+        }
+        m_packsFetched = packs.fetch.join(QStringLiteral(", "));
+        fetchPacks(version);
+    });
+#endif
+}
+
+void AppUpdates::fetchPacks(const QString& version) {
+#if defined(USDCC_HAS_VELOPACK) && USDCC_FEATURE_PACKS
+    m_window->statusBar()->showMessage(tr("Fetching your packs for usdcc %1...").arg(version));
+    m_packs->fetchFor(version, [this, version](const QStringList& failed, const QString& reason) {
+        if (!m_state->downloading) return;
+        if (!failed.isEmpty()) {
+            const QString names = failed.join(QStringLiteral(", "));
+            const QString text = tr("%1 couldn't be fetched for usdcc %2: %3").arg(names, version, reason) + QStringLiteral("\n\n") +
+                                 tr("Updating now leaves usdcc without %1 until usdcc can fetch it.")
+                                     .arg(failed.size() == 1 ? names : tr("them"));
+            switch (askAboutPacks(text, true)) {
+                case PackChoice::Retry:
+                    fetchPacks(version);
+                    return;
+                case PackChoice::Later:
+                    stopDownloading();
+                    return;
+                case PackChoice::UpdateAnyway:
+                    m_packsFetched.clear();  // not all of them: the notification names none
+                    break;
+            }
+        }
+        downloadPackage();
+    });
+#else
+    (void)version;
+#endif
+}
+
+// The app's own package, once what goes with it is there. download() has set the state.
+void AppUpdates::downloadPackage() {
+#ifdef USDCC_HAS_VELOPACK
+    if (m_state->ready || !m_state->manager || !m_state->update) {
+        stopDownloading();
+        return;
+    }
     m_state->lastProgress = -1;
     const QString version = QString::fromStdString(m_state->update->TargetFullRelease.Version);
     m_window->statusBar()->showMessage(tr("Downloading usdcc %1...").arg(version));
@@ -535,11 +647,11 @@ void AppUpdates::showReady() {
 #ifdef USDCC_HAS_VELOPACK
     if (!m_state->update) return;
     const QString version = QString::fromStdString(m_state->update->TargetFullRelease.Version);
+    QString body = tr("Restart usdcc to finish updating. Otherwise it updates the next time usdcc starts.");
+    if (!m_packsFetched.isEmpty()) body += QLatin1Char(' ') + tr("Your packs are there for it: %1.").arg(m_packsFetched);
     m_window->toasts()->show({.kind = ToastKind::Success,
                               .title = tr("usdcc %1 is ready").arg(version).toStdString(),
-                              .body = tr("Restart usdcc to finish updating. Otherwise it updates the next time "
-                                         "usdcc starts.")
-                                          .toStdString(),
+                              .body = body.toStdString(),
                               .durationMs = ToastRequest::kSticky},
                              {{tr("Restart Now"), [this]() { restartNow(); }}});
 #endif

@@ -7,6 +7,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/peers/peers.h"
+#include "usdcc/scripting/plugin_manager.h"
 
 #include <QString>
 #include <QStringList>
@@ -18,7 +19,7 @@
 class QCoreApplication;
 
 namespace usdcc::scripting {
-class PluginManager;
+class PackStore;
 }
 
 namespace usdcc::app {
@@ -63,6 +64,14 @@ void installSettings();
 
 // The plugin folders given with --plugin-path, made absolute.
 std::vector<std::filesystem::path> pluginFolders(const QStringList& values);
+
+// What the plugin manager is made with: PluginManager::defaultOptions() with the
+// --plugin-path folders first, and the downloaded packs of this version
+// (docs/USD_PLUGINS.md §10) made loadable by `packs` before anything is scanned. `packs`
+// holds them in use from here on, so it is declared before the plugin manager. Not
+// `enabled` (--no-plugins): no pack is touched or loaded either.
+usdcc::scripting::PluginManager::Options pluginOptions(const QStringList& pluginPaths, bool enabled,
+                                                       usdcc::scripting::PackStore& packs);
 
 // After PluginManager::scan(): the codeless schema libraries in the plugins' USD folders
 // (docs/SCHEMAS.md §5.1), and Settings > Assets' servers (docs/REMOTE_ASSETS.md §10).

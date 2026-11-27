@@ -1,30 +1,39 @@
 {
   "repository": "https://github.com/Autodesk/arnold-usd",
   "commit": "1f022c168ba742df01aad7de57d0c4f2125d080e",
-  "version": "7.5.4.0",
+  "version": "7.5.4.2",
   "patches": ["patches/arnold-usd-26.08.patch"],
   "sdks": {
     "arnold": {
-      "description": "Arnold SDK 7.5.4.0 for Windows, from Autodesk Account",
-      "files": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "EULA.txt"]
+      "description": "Arnold SDK 7.5.4 for this platform, from Autodesk Account",
+      "files": {"win64": ["include/ai.h", "include/ai_version.h", "lib/ai.lib", "bin/ai.dll", "bin/kick.exe",
+                          "bin/maketx.exe", "EULA.txt"],
+                "macos-arm64": ["include/ai.h", "include/ai_version.h", "bin/libai.dylib", "bin/kick", "bin/maketx",
+                                "EULA.txt"],
+                "linux-x64": ["include/ai.h", "include/ai_version.h", "bin/libai.so", "bin/kick", "bin/maketx",
+                              "EULA.txt"]}
     }
   },
   "cmake": ["-Wno-dev", "-DARNOLD_LOCATION={arnold}", "-DUSD_LOCATION={usd}",
             "-DBUILD_RENDER_DELEGATE=ON", "-DBUILD_NDR_PLUGIN=ON", "-DBUILD_USD_IMAGING_PLUGIN=ON",
             "-DBUILD_SCENE_INDEX_PLUGIN=ON", "-DBUILD_PROCEDURAL=OFF", "-DBUILD_SCHEMAS=OFF",
-            "-DBUILD_TESTSUITE=OFF", "-DBUILD_DOCS=OFF", "-DPREFIX_PLUGINS=."],
+            "-DBUILD_TESTSUITE=OFF", "-DBUILD_DOCS=OFF", "-DPREFIX_PLUGINS=.",
+            {"linux-x64": ["-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-as-needed", "-DCMAKE_MODULE_LINKER_FLAGS=-Wl,--no-as-needed"]}],
   "install_prefix": "plugin/arnold",
+  "preloaded": {"linux-x64": ["libai.so"]},
   "licenses": {
     "arnold-sdk": ["{arnold}/EULA.txt"]
   },
-  "platforms": ["win64"],
+  "platforms": ["win64", "macos-arm64", "linux-x64"],
   "license": "Apache-2.0",
   "set": "local",
   "publish": false,
   "check": {
-    "preload": ["{arnold}/bin/ai.dll"],
+    "preload": {"win64": ["{arnold}/bin/ai.dll"], "macos-arm64": ["{arnold}/bin/libai.dylib"],
+                "linux-x64": ["{arnold}/bin/libai.so"]},
     "plugin_folders": ["plugin/arnold"],
     "plugins": ["hdArnold", "nodeRegistryArnold", "sceneIndexArnold", "usdImagingArnold"],
-    "renderers": ["HdArnoldRendererPlugin"]
+    "renderers": ["HdArnoldRendererPlugin"],
+    "render": [{"file": "test_data/arnold/check.usda", "renderer": "HdArnoldRendererPlugin", "min_mean": 0.05}]
   }
 }

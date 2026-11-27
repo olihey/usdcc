@@ -12,6 +12,7 @@
 #include "usdcc/plugin/plugin.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/scripting/app_module.h"
+#include "usdcc/scripting/pack_store.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/scripting/python_settings.h"
 #include "usdcc/tools/tool_set.h"
@@ -55,6 +56,8 @@ namespace usdcc::scripting {
 
 namespace {
 constexpr const char* kManifestName = "usdcc-plugin.json";
+// What makes a folder among the downloaded packs a finished one (pack_store.h).
+constexpr const char* kPackRecordName = "pack.json";
 constexpr auto kDisabledKey = "Plugins/disabled";
 constexpr auto kCrashedKey = "Plugins/crashed";
 constexpr const char* kLeftOutReason = "Left out of this build.";
@@ -404,6 +407,11 @@ PluginManager::Options PluginManager::defaultOptions(const std::vector<std::file
     for (const auto& folder : environmentFolders("USDCC_PLUGIN_PATH")) options.folders.push_back(folder);
     options.folders.push_back(userFolder());
     for (const auto& folder : addedFolders()) options.folders.push_back(folder);
+    // After what the user put somewhere, before what usdcc ships.
+    if (const PackStore::Options packs = PackStore::defaultOptions(); !packs.platform.empty()) {
+        options.packsFolder = PackStore(packs).folder();
+        options.folders.push_back(options.packsFolder);
+    }
     options.folders.push_back(shippedFolder());
 
     options.pythonPackageFolders = environmentFolders("USDCC_PYTHON_PATH");
@@ -471,16 +479,28 @@ const PluginInfo* PluginManager::find(const std::string& id) const {
 void PluginManager::readManifests() {
     std::error_code error;
     for (const std::filesystem::path& root : m_options.folders) {
+        const bool packs = !m_options.packsFolder.empty() && root == m_options.packsFolder;
         std::vector<std::filesystem::path> folders;
         for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
             if (entry.is_regular_file(error) || !std::filesystem::exists(entry.path() / kManifestName, error)) continue;
+            // A pack is there once its record is, which an install writes last; one
+            // marked for removal is as good as gone.
+            if (packs && (!std::filesystem::exists(entry.path() / kPackRecordName, error) ||
+                          m_options.packsRemoved.count(toUtf8(entry.path().filename())))) {
+                continue;
+            }
             folders.push_back(entry.path());
         }
         std::sort(folders.begin(), folders.end());
         for (const std::filesystem::path& folder : folders) {
             PluginInfo plugin;
             plugin.manifest.folder = folder;
-            const std::string problem = parseManifest(folder / kManifestName, plugin.manifest);
+            plugin.pack = packs;
+            std::string problem = parseManifest(folder / kManifestName, plugin.manifest);
+            if (packs && problem.empty()) {
+                const auto refused = m_options.packsRefused.find(toUtf8(folder.filename()));
+                if (refused != m_options.packsRefused.end()) problem = refused->second;
+            }
             // Skip retired RTX copies even when their package declarations are
             // invalid, before an unusable ID can affect the native replacement.
             if (plugin.manifest.id == "org.usdcc.rtx-render" && !plugin.manifest.pythonModule.empty()) {
