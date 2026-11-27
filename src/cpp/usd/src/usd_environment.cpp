@@ -23,6 +23,7 @@ namespace {
 
 constexpr const char* kCategory = "USD";
 constexpr const char* kThreadLimitVariable = "PXR_WORK_THREAD_LIMIT";
+constexpr const char* kCyclesDeviceVariable = "CYCLES_DEVICE";
 
 struct PathVariable {
     const char* key;
@@ -116,6 +117,25 @@ void defineUsdEnvironmentSettings(core::Settings& settings) {
                      .type = SettingType::Folder,
                      .defaultValue = std::string(),
                      .appliesAtNextStart = true});
+#if defined(ARCH_OS_DARWIN)
+    // With Cycles' own settings, which renderer_settings.cpp groups under "Cycles".
+    settings.define({.key = kUsdCyclesDeviceKey,
+                     .category = "Renderers",
+                     .group = "Cycles",
+                     .label = "Device",
+                     .description = "What Cycles renders on: the CPU, or the GPU through Metal. The GPU is much "
+                                    "faster, but compiles Cycles' kernels the first time it renders, and again after "
+                                    "each Cycles update: a few minutes with nothing in the viewport (3 on an M5 Pro). "
+                                    "Later renders use the compiled ones. CYCLES_DEVICE wins when it's set.",
+                     .type = SettingType::Choice,
+                     .defaultValue = std::string("CPU"),
+                     .choices = {"CPU", "GPU"},
+                     .appliesAtNextStart = true});
+#endif
+}
+
+std::string cyclesDeviceVariable(std::string_view setting) {
+    return setting == "GPU" ? "METAL" : "";
 }
 
 std::string mergeSearchPaths(std::string_view environment, std::string_view setting) {
@@ -190,6 +210,18 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
         USDCC_LOG_INFO("usdcc.usd", "OpenUSD plugins registered from Settings > USD's plugin folders: {} (from {} folders)",
                        registered.size(), newPluginFolders.size());
     }
+
+#if defined(ARCH_OS_DARWIN)
+    // Read by the Cycles delegate when it's created, so any time before the first one.
+    if (!PXR_NS::ArchGetEnv(kCyclesDeviceVariable).empty()) {
+        USDCC_LOG_INFO("usdcc.usd", "The Cycles device in Settings > Renderers is ignored, as {} is set",
+                       kCyclesDeviceVariable);
+    } else if (const std::string device = cyclesDeviceVariable(settings.get<std::string>(kUsdCyclesDeviceKey));
+               !device.empty()) {
+        setVariable(kCyclesDeviceVariable, device);
+        sources()[kCyclesDeviceVariable] = "Settings";
+    }
+#endif
 
     // After the thread limit, which wants nothing to have started threads yet.
     const ArnoldStatus arnold = enableArnold(settings.get<std::string>(kUsdArnoldFolderKey));

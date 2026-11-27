@@ -108,9 +108,21 @@ Notes:
     2021.12 (§7 phase 4). Open Image Denoise is the one shipped library that uses it: the
     18 TBB functions its core and CPU device import on Windows are all in the asset's
     `tbb12.dll`.
-  - **CPU first.** The CPU renderer needs no SDK, so the pack check renders a frame on a
-    hosted runner. The GPU devices each need a vendor SDK at build time and come after,
-    one at a time (§7 phase 5): Metal on macOS needs none; CUDA and OptiX need NVIDIA's
+  - **CPU first, then Metal.** The CPU renderer needs no SDK, so the pack check renders a
+    frame on a hosted runner. The GPU devices each need a vendor SDK at build time and come
+    after, one at a time (§7 phase 5).
+    - **Metal on macOS** (2026-11-27) needs none. The hook builds it on macOS only, and ships
+      Open Image Denoise's Metal device too. Metal compiles Cycles' kernels when it first
+      renders, from the kernel sources the pack carries in `hdCycles/resources/source`; the
+      hook points the plugin's `ResourcePath` at `resources`, where Cycles looks for them
+      (upstream points it at Cycles' own install root). usdcc picks the device with
+      `CYCLES_DEVICE`: Settings > Renderers > Cycles > Device (`USD/cyclesDevice`, macOS
+      only). **CPU by default:** tried on an M5 Pro (2026-11-27, `test_data/cycles/check.usda`),
+      Metal's first render compiled kernels for 183 s before its first sample, with nothing
+      to show meanwhile; a second process started rendering after 0.26 s, from the cache.
+      The compile comes back after each Cycles update. The picture matched the CPU's. The
+      pack check still renders on the CPU, as hosted runners' GPUs are virtual.
+    - The others: CUDA and OptiX need NVIDIA's
     CUDA Toolkit and OptiX headers, which build on a runner without a GPU, though
     compiling kernels for many GPU generations is slow against the 6-hour job limit, so
     the pin names a few; HIP and oneAPI last.

@@ -140,6 +140,35 @@ USDCC_TEST(usd_environment_settings) {
     }
 #endif
 
+    // The Cycles device: Metal for "GPU", Cycles' own CPU default otherwise.
+    CHECK(cyclesDeviceVariable("GPU") == "METAL" && cyclesDeviceVariable("CPU").empty(), "Cycles device values");
+#if defined(__APPLE__)
+    {
+        const auto* device = settings.definition(kUsdCyclesDeviceKey);
+        CHECK(device && device->group == "Cycles" && std::get<std::string>(device->defaultValue) == "CPU",
+              "the Cycles device, CPU by default, with Cycles' own settings");
+        const char* cycles = "CYCLES_DEVICE";
+        const bool hadDevice = PXR_NS::ArchHasEnv(cycles);
+        const std::string deviceBefore = PXR_NS::ArchGetEnv(cycles);
+        unsetenv(cycles);
+        settings.setValue(kUsdCyclesDeviceKey, std::string("GPU"));
+        applyUsdEnvironmentSettings(settings);
+        CHECK(PXR_NS::ArchGetEnv(cycles) == "METAL" && usdEnvironmentSource(cycles) == "Settings",
+              "GPU sets CYCLES_DEVICE=METAL: %s", PXR_NS::ArchGetEnv(cycles).c_str());
+        setenv(cycles, "CPU", 1);
+        applyUsdEnvironmentSettings(settings);
+        CHECK(PXR_NS::ArchGetEnv(cycles) == "CPU" && usdEnvironmentSource(cycles).empty(),
+              "the environment's CYCLES_DEVICE wins");
+        unsetenv(cycles);
+        settings.setValue(kUsdCyclesDeviceKey, std::string("CPU"));
+        applyUsdEnvironmentSettings(settings);
+        CHECK(!PXR_NS::ArchHasEnv(cycles), "CPU leaves it unset, Cycles' default");
+        if (hadDevice) setenv(cycles, deviceBefore.c_str(), 1);
+    }
+#else
+    CHECK(!settings.definition(kUsdCyclesDeviceKey), "no Cycles device setting where the pack has no GPU device");
+#endif
+
     if (PXR_NS::ArchHasEnv("PXR_WORK_THREAD_LIMIT")) return;
     const unsigned threads = PXR_NS::WorkGetConcurrencyLimit();
     settings.setValue(kUsdMaterialXFoldersKey, std::string());
