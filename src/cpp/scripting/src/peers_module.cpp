@@ -520,7 +520,7 @@ void bindPeers(py::module_& m) {
                     for (const TransferFile& file : transfer->manifest().files) files.push_back(file.path.toStdString());
                     Peer known = from;
                     if (!known.isValid()) known.id = transfer->peer();
-                    return std::make_tuple(transfer->directory().toStdString(), files, peerDict(known));
+                    return py::make_tuple(transfer->directory().toStdString(), files, peerDict(known));
                 });
             });
             return id;
