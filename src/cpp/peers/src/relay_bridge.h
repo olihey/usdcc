@@ -60,7 +60,11 @@ private:
         QWebSocket* socket = nullptr;
         QList<QByteArray> waiting;  // From the member, before the loopback connection is open
         bool open = false;
+        bool ended = false;  // The member left the relay before the loopback connection opened
     };
+
+    // Ends a member's loopback connection once what it sent has gone in.
+    void endMember(QWebSocket* socket);
 
     void connectToRelay();
     void onRelayData(const QByteArray& data);
@@ -74,6 +78,7 @@ private:
 
     QUrl m_relay;
     QString m_token;
+    QString m_socketError;  // Why the last connection to the relay failed, if it said
     quint16 m_port;
     QWebSocket* m_socket = nullptr;
     QString m_roomId;  // Kept when the relay is lost, to ask for it again

@@ -20,6 +20,7 @@ class Outbox:
         self.queued_bytes = 0
         self.open = True
         self.closed = False
+        self._sending = False
 
     def push(self, data: bytes, key: str = "", seal: bool = False) -> None:
         if self.closed:
@@ -45,6 +46,16 @@ class Outbox:
         self._entries.clear()
         self.queued_bytes = 0
 
+    async def drain(self, timeout: float) -> bool:
+        """Waits until what's queued has been handed to the socket; False if it took too long."""
+        loop = asyncio.get_running_loop()
+        end = loop.time() + timeout
+        while (self._entries or self._sending) and self.open and not self.closed:
+            if loop.time() >= end:
+                return False
+            await asyncio.sleep(0.01)
+        return not self._entries
+
     def close(self) -> None:
         self.closed = True
         self.clear()
@@ -61,4 +72,8 @@ class Outbox:
             self.queued_bytes -= len(data)
             if seal and self.sealer:
                 data = self.sealer(data)
-            await websocket.send(data)
+            self._sending = True
+            try:
+                await websocket.send(data)
+            finally:
+                self._sending = False
