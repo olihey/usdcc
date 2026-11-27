@@ -9,15 +9,18 @@
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/side_panel.h"
 
+#include <AutoHideDockContainer.h>
 #include <AutoHideTab.h>
 #include <DockAreaWidget.h>
 #include <DockManager.h>
 #include <DockWidget.h>
+#include <ResizeHandle.h>
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QTextEdit>
 
@@ -204,4 +207,42 @@ USDCC_TEST(side_panel_can_close) {
     CHECK(!window.close() && window.isVisible(), "a panel can keep the window open");
     busy->allow = true;
     CHECK(window.close(), "and let it close");
+}
+
+// A slid-out panel's edge follows the mouse on the screen. In the app the panel is a native
+// window, and a mouse move reported before the panel last moved comes with the place it had on
+// the handle back then: taken from that, as ADS does, each such move resizes it too far and the
+// panel flickers as it is dragged.
+USDCC_TEST(side_panel_slid_out_resize_follows_the_mouse) {
+    TestSettings settings;
+    MainWindow window;
+    Panels panels(window);
+    window.restoreLayout();
+    window.show();
+    settle(window);
+
+    // Three moves of 10 px each, all reported where the handle was before the first of them.
+    const auto drag = [&](SidePanel* panel, QPointF step) {
+        panel->reveal();
+        settle(window);
+        ads::CAutoHideDockContainer* container = panel->autoHideDockContainer();
+        auto* handle = container ? container->findChild<ads::CResizeHandle*>() : nullptr;
+        CHECK(handle && handle->isVisible(), "%s is slid out, with an edge to drag", qPrintable(panel->objectName()));
+        if (!handle) return QSize();
+        const QSize before = container->size();
+        const QPointF onHandle = handle->rect().center();
+        const QPointF onScreen = handle->mapToGlobal(onHandle);
+        const auto send = [&](QEvent::Type type, int steps, Qt::MouseButton button, Qt::MouseButtons buttons) {
+            QMouseEvent event(type, onHandle + steps * step, onScreen + steps * step, button, buttons, Qt::NoModifier);
+            QApplication::sendEvent(handle, &event);
+        };
+        send(QEvent::MouseButtonPress, 0, Qt::LeftButton, Qt::LeftButton);
+        for (int i = 1; i <= 3; ++i) send(QEvent::MouseMove, i, Qt::NoButton, Qt::LeftButton);
+        send(QEvent::MouseButtonRelease, 3, Qt::LeftButton, Qt::NoButton);
+        return container->size() - before;
+    };
+    const QSize bottom = drag(panels.notes, QPointF(0, -10));
+    CHECK(bottom == QSize(0, 30), "a bottom panel dragged 30 up is 30 taller: %d x %d", bottom.width(), bottom.height());
+    const QSize right = drag(panels.scripts, QPointF(-10, 0));
+    CHECK(right == QSize(30, 0), "a right panel dragged 30 left is 30 wider: %d x %d", right.width(), right.height());
 }

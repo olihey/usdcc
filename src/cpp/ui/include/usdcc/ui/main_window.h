@@ -217,6 +217,8 @@ private:
     QVariantMap m_places;
     bool m_layoutSettled = false;
     QTimer m_settleTimer;
+    // While eventFilter() sends a resize handle its mouse event again, with the position put right.
+    bool m_resendingMouse = false;
     // Set by buildViewMenu(); panels added later go in before
     // m_viewMenuPanelsEnd (the separator above the toolbars, if any).
     QMenu* m_viewMenu = nullptr;

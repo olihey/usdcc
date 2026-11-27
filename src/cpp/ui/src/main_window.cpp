@@ -4,6 +4,7 @@
 #include <AutoHideDockContainer.h>
 #include <DockManager.h>
 #include <DockWidget.h>
+#include <ResizeHandle.h>
 #include <QAbstractButton>
 #include <QChildEvent>
 #include <QCloseEvent>
@@ -11,6 +12,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
+#include <QScopedValueRollback>
 #include <QSet>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -126,6 +128,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_dockManager, &ads::CDockContainerWidget::autoHideWidgetCreated, this,
             [this](ads::CAutoHideDockContainer* container) {
                 container->installEventFilter(this);
+                // Its edge is dragged by where the mouse is on the screen (eventFilter()).
+                for (ads::CResizeHandle* handle : container->findChildren<ads::CResizeHandle*>()) {
+                    handle->installEventFilter(this);
+                }
                 // Qt's offscreen platform (the tests') crashes taking native children down.
                 if (QGuiApplication::platformName() == QLatin1String("offscreen")) return;
                 container->setAttribute(Qt::WA_DontCreateNativeAncestors);
@@ -321,6 +327,27 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             // One at a time: they'd cover each other.
             for (ads::CAutoHideDockContainer* other : m_dockManager->autoHideWidgets()) {
                 if (other != container && other->isVisible()) other->collapseView(true);
+            }
+        }
+    }
+    // ADS resizes a slid-out panel by where the mouse is on its handle. The panel is a native
+    // window, so that position is the one the mouse had on it when the system reported the
+    // move. Dragged by its left or top edge, the panel moves with each resize, and a move
+    // reported before a resize but handled after it has a position that is off by that much:
+    // the panel overshoots, the next move pulls it back, and it flickers, the more the faster
+    // it is dragged and the longer the window takes to draw. Where the mouse is on the screen
+    // doesn't change with the panel, so the handle gets its position worked out from that.
+    if (auto* handle = qobject_cast<ads::CResizeHandle*>(watched); handle && !m_resendingMouse) {
+        const QEvent::Type type = event->type();
+        if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove || type == QEvent::MouseButtonRelease) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            const QPointF position = handle->mapFromGlobal(mouse->globalPosition());
+            if (position.toPoint() != mouse->position().toPoint()) {
+                QMouseEvent corrected(type, position, mouse->globalPosition(), mouse->button(), mouse->buttons(),
+                                      mouse->modifiers(), mouse->pointingDevice());
+                const QScopedValueRollback resending(m_resendingMouse, true);
+                QCoreApplication::sendEvent(handle, &corrected);
+                return true;
             }
         }
     }
