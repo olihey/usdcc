@@ -400,7 +400,7 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished: its licences are read, but GPL atomics headers are compiled in, §5), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished: its licences are read and the GPL atomics replaced; publishing waits on the rebuilt packs, §5), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
 | `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
 
 How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
@@ -471,29 +471,33 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
 
   **The list read (2026-11-27)**, from the three CPU packs `deps-usd-plugins.yml` built
   for the pin (run 45945194968, hash `231aea80`, `091c8c2e` on macOS) and the Cycles
-  source at `3eb35f8`. Cycles' pin keeps `"set": "optional"` with `"publish": false`
-  until item 1 is fixed:
-  1. **Blocker: GPL code compiled in.** `src/util/atomic.h` includes Blender's
+  source at `3eb35f8`. Three problems, all fixed in `cycles-usdcc.patch` and the hook
+  (2026-11-27); Cycles' pin keeps `"set": "optional"` with `"publish": false` until the
+  packs built with the fix have been checked:
+  1. **GPL code compiled in (the blocker).** `src/util/atomic.h` included Blender's
      `third_party/atomic/atomic_ops.h` for every CPU build, and those headers
      (`atomic_ops.h`, `intern/atomic_ops_{ext,unix,msvc,utils}.h`) are jemalloc's
      BSD-2-Clause code with Blender Foundation's 2016 changes under a GPL-2.0-or-later
-     licence block. Their inline functions end up in `hdCycles` on all three platforms,
-     so the pack isn't the Apache-2.0-only work the standard zip needs. Blender itself
-     still ships them this way (`intern/atomic`, v4.5). The fix is a patch that has
-     `util/atomic.h` implement the dozen or so operations Cycles uses (fetch-and-add,
-     compare-and-swap for 32/64-bit integers, size_t and float) on compiler builtins
-     (`__atomic_*` with GCC and Clang, `Interlocked*` with MSVC), written fresh and not
-     taken from those headers, and drops `third_party/atomic` from the include path, so
-     a build that still includes them fails.
-  2. **Our patch mislabels OpenUSD code.** `cycles-usdcc.patch` adds
-     `hydra/implicit_surfaces.{h,cpp}`, adapted from hdEmbree, under
-     `SPDX-License-Identifier: Apache-2.0`. OpenUSD's file is under OpenUSD's licence,
-     the Tomorrow Open Source Technology License 1.0. usdcc ships that licence anyway,
-     but the header should name it ("Licensed under the terms set forth in the
-     LICENSE.txt file available at https://openusd.org/license").
+     licence block. Their inline functions ended up in `hdCycles` on all three platforms,
+     so the pack wasn't the Apache-2.0-only work the standard zip needs. Blender itself
+     still ships them this way (`intern/atomic`, v4.5).
+     **Fix:** the patch has `util/atomic.h` implement the CPU atomics Cycles calls, with
+     the same names and signatures and sequentially consistent ordering, written fresh:
+     fetch-and-add, -sub and -or, add-and-fetch, compare-and-swap for `uint32_t`,
+     `unsigned int` and `size_t`, a max update, and float compare-and-swap and add by
+     the float's bits. They use `__atomic_*` built-ins with GCC and Clang, and
+     `std::atomic_ref` with MSVC (Cycles is C++20). The patch also takes
+     `third_party/atomic` off the include path, and the hook deletes the folder before
+     configuring, so a later Cycles that includes it again fails to build. The GPU
+     branches of `util/atomic.h` are unchanged. A threaded test of every operation
+     (8 threads, exact totals) passes with Apple clang, under ThreadSanitizer too.
+  2. **Our patch mislabelled OpenUSD code.** `hydra/implicit_surfaces.{h,cpp}`, adapted
+     from hdEmbree, said `SPDX-License-Identifier: Apache-2.0`. OpenUSD's file is under
+     OpenUSD's own licence, the Tomorrow Open Source Technology License 1.0, which usdcc
+     ships anyway. **Fix:** the headers now name that licence, as OpenUSD's own files do.
   3. **A changed file without a notice.** The patch changes `hydra/light.cpp` (a dome
-     light's strength) and doesn't mark it as changed, which Apache-2.0 §4(b) asks for. A
-     one-line comment there is enough. The CMake files the patch changes aren't shipped.
+     light's strength), which Apache-2.0 §4(b) asks to be marked. **Fix:** its header says
+     so. The CMake files the patch changes aren't shipped.
 
   Fine as it is:
   - **What's linked at run time:** only OpenUSD's asset (its USD libraries, OpenImageIO,

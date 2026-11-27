@@ -207,10 +207,10 @@ index 94fe778e..52426bb0 100644
                  }
              },
 diff --git a/src/util/atomic.h b/src/util/atomic.h
-index 697df947..9d7af5e7 100644
+index 697df947..736b924e 100644
 --- a/src/util/atomic.h
 +++ b/src/util/atomic.h
-@@ -1,13 +1,179 @@
+@@ -1,13 +1,187 @@
  /* SPDX-FileCopyrightText: 2014-2022 Blender Foundation
   *
 - * SPDX-License-Identifier: Apache-2.0 */
@@ -226,9 +226,17 @@ index 697df947..9d7af5e7 100644
  
 -/* Using atomic ops header from Blender. */
 -#  include "atomic_ops.h"  // IWYU pragma: export
++/* What Blender's atomic_ops.h included, as Cycles' files rely on it (assert, for one). */
++#  include <cassert>
++#  include <climits>
 +#  include <cstddef>
 +#  include <cstdint>
++#  include <cstdlib>
 +#  include <cstring>
++#  if defined(_MSC_VER)
++#    include <intrin.h>
++#    include <windows.h>
++#  endif
 +#  if defined(_MSC_VER) && !defined(__clang__)
 +#    include <atomic>
 +#  endif
