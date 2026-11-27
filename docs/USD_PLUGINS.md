@@ -400,10 +400,10 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished: its licences are read and the GPL atomics replaced; publishing waits on the rebuilt packs, §5), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
-| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
+| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `cycles` (published since 2026-11-27; Windows x64: a download usdcc installs itself, §10; Linux x64: `usdcc-<version>-linux-x64-cycles.tar.xz`; macOS: `usdcc-<version>-macos-arm64-cycles.dmg`), `gatling` (unpublished) |
 
-How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
+How an optional pack ships (Linux, and macOS in the last point; on Windows only as a download usdcc installs itself, §10, the first being Cycles):
 
 - `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
   says `"publish": true`.
@@ -527,9 +527,12 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   for the pin (run 45945194968, hash `231aea80`, `091c8c2e` on macOS) and the Cycles
   source at `3eb35f8`. Three problems, all fixed in `cycles-usdcc.patch` and the hook
   (2026-11-27). The packs built with the fix pass their check, rendering included, on
-  Windows x64, Linux x64 and macOS arm64 (run 46039453918). Cycles' pin still says
-  `"set": "optional"` with `"publish": false`: publishing it, and moving it to the
-  standard set, is the next step:
+  Windows x64, Linux x64 and macOS arm64 (run 46039453918). **Published (2026-11-27)**,
+  in the `optional` set (decided then: a download of its own, not in the usdcc zip):
+  its pin says `"publish": true`, so `deps-usd-plugins.yml` attaches the packs to the
+  OpenUSD asset's release once the pin is on `master`, and `release.yml` then requires
+  them, as it does MoonRay's. `release.yml`'s Windows job now fetches the optional set
+  too (`--optional`), which no Windows pack needed before. Problems found:
   1. **GPL code compiled in (the blocker).** `src/util/atomic.h` included Blender's
      `third_party/atomic/atomic_ops.h` for every CPU build, and those headers
      (`atomic_ops.h`, `intern/atomic_ops_{ext,unix,msvc,utils}.h`) are jemalloc's
@@ -947,8 +950,9 @@ the second disk image on macOS. Not through a plugin registry:
 tests of §10.6; nothing is released with it. On Linux and macOS none of it has run yet: its
 parts were tried by hand before (§10.6). The release workflow's new steps haven't run either;
 a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stay
-until a release has shown that this works, and no Windows optional pack is published yet
-(Cycles and Gatling say `"publish": false`), so Windows users see an empty list until one is.
+until a release has shown that this works. Cycles is the first Windows optional pack
+(published 2026-11-27, §5), so the first release after it is also the first to run these
+Windows steps with a real pack.
 
 ### 10.1 Decisions
 

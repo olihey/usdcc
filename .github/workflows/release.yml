@@ -153,10 +153,12 @@ jobs:
           if ($LASTEXITCODE) { throw 'unzipping failed' }
 
       # Required here, unlike in build.yml: a release has every USD plugin pack
-      # of the standard set (docs/USD_PLUGINS.md section 5).
+      # of the standard set, and the published ones of the optional set, which the
+      # deploy below turns into downloads usdcc installs itself (Cycles on x64;
+      # docs/USD_PLUGINS.md sections 5 and 10).
       - name: Download the USD plugin packs
         run: |
-          python tools/fetch_usd.py $env:USD_INSTALL --packs-only --require-packs
+          python tools/fetch_usd.py $env:USD_INSTALL --packs-only --require-packs --optional
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       # Required here, unlike in build.yml: a release without it couldn't make
