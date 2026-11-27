@@ -423,15 +423,58 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
 | `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never published | `arnold`, `usdfbx`, `usdsbsar` |
 
-- **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,
-  the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
-  stays out of the standard zip, which remains BSD-3-Clause. Whether usdcc may publish even
-  a separate pack needs the same review as the Blender configuration, with OpenUSD's TOST
-  licence in it. Until then it is built and checked in CI and used locally: its pin says
-  `"publish": false`, so `deps-usd-plugins.yml` keeps the zip with the workflow run for
-  two weeks and attaches nothing to the release. The pack already carries what a GPL
-  binary has to: the licence texts of Gatling, its 24 submodules and the MDL SDK
-  (BSD-3-Clause), and `SOURCES.txt` naming the commit and the SDK it was built from.
+- **Gatling is GPL-3.0-or-later.** Loaded into usdcc's process it makes the whole a combined
+  work, the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
+  stays out of the standard zip, which remains BSD-3-Clause. Its pin says `"publish": false`,
+  so `deps-usd-plugins.yml` keeps the zip with the workflow run for two weeks and attaches
+  nothing to the release.
+
+  **Reviewed 2026-11-27**, from the packs CI built for the pin (run 45945194968, hash
+  `546ef27c`, Windows x64 and Linux x64), the same way as the
+  [Blender configuration](BLENDER_DISTRIBUTION_REVIEW.md). Not legal advice.
+  1. **The pack's own contents are fine.** Gatling is GPL-3.0-or-later. Everything else in
+     the pack is permissive and compatible with GPL-3.0, with its licence text included:
+     - its 26 submodules (MIT, BSD, Apache-2.0, zlib, libtiff, and the MIT-or-Apache Vulkan
+       headers; glslang's Bison-generated files are GPL-3.0 with the Bison exception);
+     - NVIDIA's MDL SDK 2026.0.2 (`libmdl_sdk`, BSD-3-Clause; its third-party list is
+       permissive or Apache-2.0 with LLVM exceptions, and its only GPL text is dxc's
+       build-only `config.guess`);
+     - the `Omni*.mdl` and `nvidia/*.mdl` materials (NVIDIA, BSD-3-Clause), and the
+       MaterialX files (Apache-2.0).
+  2. **OpenUSD's TOST licence is compatible.** Compared word by word with Apache-2.0,
+     TOST-1.0 differs only in §6: it grants less trademark use (and covers the Licensor's
+     affiliates). GPL-3.0 §7(e) allows "declining to grant rights under trademark law", so
+     TOST works with GPL-3.0 just as Apache-2.0 does. The Blender review reached the same
+     conclusion. The rest of usdcc's process (Qt and PySide6 under LGPL-3.0, ADS under
+     LGPL-2.1-or-later, Python, TBB, Embree, MaterialX, OpenSSL 3 and others) is covered
+     by that review's table too.
+  3. **What rules out a separate pack for the standard release:**
+     - *Proprietary integrations.* The standard deploy ships the RTX Render plugin, which
+       loads NVIDIA's proprietary ovrtx into the process, and the V-Ray plugin (Chaos'
+       App SDK, in a helper process). Arnold (`local`, the user's own `libai` loaded
+       in-process), FBX and Substance would join them where installed. The Blender
+       review leaves all of these out of a GPL configuration, and Gatling has to do the
+       same.
+     - *Corresponding source.* Under that review's reading, a separate download is no
+       licence boundary. So whoever receives Gatling has to get the full source of the
+       combination: usdcc, the OpenUSD fork and its dependencies, Gatling with its
+       submodules and our two patches, and the MDL SDK at `2026.0.2`. The pack's
+       licence texts and `SOURCES.txt` aren't enough on their own. The standard release
+       provides none of this, but the Blender configuration's `source/` folder and
+       source receipt already do (`tools/blender_distribution.py`).
+     - *The MDL SDK binary.* The pack ships NVIDIA's prebuilt `libmdl_sdk` from the
+       release archive. Its source is public at that tag, but whether NVIDIA's binary
+       matches it exactly can't be checked. Building `libmdl_sdk` from source in the
+       pack's job would settle that.
+  4. **The way to publish it:** as part of the GPL-3.0 configuration, on Windows x64 and
+     Linux x64, not as an optional pack for the standard release. That configuration
+     already excludes RTX and V-Ray, ships its full source, and has a review for each
+     platform. Adding Gatling means adding its source (the Gatling checkout with
+     submodules, the patches, and the MDL SDK source or a build from it) to the source
+     receipt, and checking its binaries in the runtime audit, as a renewed review of that
+     configuration (any change to its dependencies needs one). `"publish": true` in the
+     pin would then attach the pack beside the OpenUSD asset as usual. The in-app pack
+     download (§10) must still never offer Gatling to a standard install.
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
@@ -856,7 +899,7 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 | # | Question | Assumption until decided |
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
-| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
+| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | **Reviewed (2026-11-27, §5):** not for the standard release, which ships the RTX and V-Ray integrations and not the combination's source. Yes as part of the GPL-3.0 configuration (Blender's), once that configuration's source receipt and runtime audit include Gatling and the MDL SDK |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word before publishing. The FBX SDK's licence is still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
