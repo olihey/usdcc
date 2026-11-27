@@ -249,7 +249,8 @@ USDCC_TEST(asset_servers_editor_servers_need_no_environment) {
     setPreferredAssetEnvironment("test");
     CHECK(defaultAssetEnvironment().empty(), "a preferred environment that's gone doesn't count: '%s'",
           defaultAssetEnvironment().c_str());
-    const assets::Context* opened = stageResolverContext(std::string()).Get<assets::Context>();
+    const PXR_NS::ArResolverContext openedWith = stageResolverContext(std::string());
+    const assets::Context* opened = openedWith.Get<assets::Context>();
     CHECK(opened && opened->environment().empty() && opened->stack("edittest", "nas"),
           "so a stage opens with the servers, as with none chosen");
     setPreferredAssetEnvironment(std::string());
