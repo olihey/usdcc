@@ -93,6 +93,19 @@ The build scripts are provided to control compilation/installation; an isolated
 offline rebuild of every third-party library has not been claimed. If changing
 dependencies or generating a new binary, regenerate the source receipt and review.
 
+**The Gatling pack**, when the package has `usd-plugins/gatling.json`: its sources are in
+`sources/supplemental/` (`gatling-945f47d69d8f.tar.gz`, one `gatling-*` archive per
+submodule at the commit Gatling pins, and `MDL-SDK-2026.0.2.tar.gz`), and its patches and
+build scripts in the usdcc snapshot. `tools/build_usd_plugin.py gatling --usd-install
+<OpenUSD>` rebuilds it as CI did, fetching the same commits and NVIDIA's binary MDL SDK
+from upstream. Without network access: unpack Gatling, put each submodule archive in
+`extern/<name>` (googletest in `extern/SPIRV-Reflect/third_party/googletest`), apply
+`deps/usd-plugins/patches/gatling-*.patch`, and configure it with CMake against the
+OpenUSD install using the `cmake` arguments in `deps/usd-plugins/gatling.json`, with
+`MDL_ROOT` pointing at an MDL SDK built from its archive. A `libmdl_sdk` built that way
+can replace the shipped one in `plugin/usd/hdGatling/resources/`. As above, a complete
+offline rebuild hasn't been claimed.
+
 ## Replacing LGPL libraries and installing modifications
 
 Qt's DLLs are in `bin/`, with its plugins in their existing plugin directories.

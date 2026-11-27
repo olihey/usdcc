@@ -21,7 +21,10 @@ from pathlib import Path
 from _common import REPO, cache_value
 from _elf import elf_files
 from blender_distribution import (
+    GPL_PACKS,
     PORT_LICENSES,
+    check_gpl_packs,
+    gpl_pack_inputs,
     port_owners,
     require,
     sha256,
@@ -126,6 +129,10 @@ def inventory(package, build):
     paths = elf_files(package)
     wanted = {path.name for path in paths}
     matches = {}
+    # Before OpenUSD's folders, which the packs were unzipped into.
+    for component, path in gpl_pack_inputs(usd):
+        if path.name in wanted and path.read_bytes()[:4] == b"\x7fELF":
+            matches.setdefault((path.name, elf_identity(path)), (component, str(path)))
     for component, root in roots:
         if not root.exists():
             continue
@@ -223,8 +230,6 @@ def validate_rows(rows, system, package, build):
             not any(
                 word in path.lower()
                 for word in (
-                    "gatling",
-                    "mdl_sdk",
                     "rtx_render",
                     "vray",
                     "_debug.so",
@@ -284,6 +289,11 @@ def validate_rows(rows, system, package, build):
                 ),
                 "Unreviewed plugin runtime: " + path,
             )
+        elif component in {about["component"] for about in GPL_PACKS.values()}:
+            licences = next(about["binaries"] for about in GPL_PACKS.values()
+                            if about["component"] == component)
+            require(path.lower() in licences, f"Unreviewed {component} runtime: " + path)
+            row["license_choice"] = licences[path.lower()]
         elif component == "Ubuntu":
             require(
                 row["ubuntu"]["source_package"]
@@ -424,6 +434,7 @@ def finalize(package, work, source_bundle):
         "Incomplete source archive: " + str(sorted(required - names)[:8]),
     )
     tools = tool_sources()
+    packs = check_gpl_packs(package, json.loads(LOCK.read_text()).get("usd_plugin_packs", {}), tools)
     supplemental = (
         {"resources": tools},
         [
@@ -483,7 +494,10 @@ def finalize(package, work, source_bundle):
         "Recipients may copy, modify and redistribute; no additional EULA, activation or signature restriction applies.\n"
         "Qt/ADS and the private backend remain replaceable shared libraries; see source/BUILD-SOURCE.md.\n"
         "Ruff/uv are separately licensed unmodified CLI tools aggregated with this package.\n"
-        "Requires the Ubuntu 24.04 x86-64 system interfaces listed in binary-inventory.json.\n"
+        + "".join(f"USD plugin pack {pack} ({asset}): licences in licenses/OpenUSD-plugins/{pack}/,\n"
+                  "its complete source in source/.\n"
+                  for pack, asset in packs.items())
+        + "Requires the Ubuntu 24.04 x86-64 system interfaces listed in binary-inventory.json.\n"
         "Blender is descriptive attribution; no Blender Foundation/Pixar endorsement is claimed.\n",
         encoding="utf-8",
     )
@@ -501,7 +515,8 @@ def finalize(package, work, source_bundle):
         "review_date": "2026-11-16",
         "legal_distribution_review": "complete: licenses/DISTRIBUTION-REVIEW.md",
         "corresponding_source_review": "complete: source accompanies the inventoried Linux binaries",
-        "proprietary_renderer_integrations": "excluded (RTX, V-Ray, Gatling/MDL SDK)",
+        "proprietary_renderer_integrations": "excluded (RTX, V-Ray)",
+        "usd_plugin_packs": packs,
         "source_bundle": {
             "file": "source/" + source_bundle.name,
             "sha256": info["archive_sha256"],

@@ -469,12 +469,23 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   4. **The way to publish it:** as part of the GPL-3.0 configuration, on Windows x64 and
      Linux x64, not as an optional pack for the standard release. That configuration
      already excludes RTX and V-Ray, ships its full source, and has a review for each
-     platform. Adding Gatling means adding its source (the Gatling checkout with
-     submodules, the patches, and the MDL SDK source or a build from it) to the source
-     receipt, and checking its binaries in the runtime audit, as a renewed review of that
-     configuration (any change to its dependencies needs one). `"publish": true` in the
-     pin would then attach the pack beside the OpenUSD asset as usual. The in-app pack
-     download (§10) must still never offer Gatling to a standard install.
+     platform. The in-app pack download (§10) must never offer Gatling to a standard
+     install.
+  5. **Added to that configuration (2026-11-27)**, in its tools and reviews
+     ([BLENDER_DISTRIBUTION_REVIEW.md](BLENDER_DISTRIBUTION_REVIEW.md), "Gatling pack"):
+     - `tools/deploy.py --with-blender-mesh-tools` ships the packs in
+       `GPL_CONFIGURATION_PACKS` (Gatling) that the OpenUSD install has;
+     - both audits accept exactly the reviewed builds (`546ef27c`, Windows x64 and Linux
+       x64), and only when the pin, patches and build scripts still name that build;
+     - the source lock has Gatling, its submodules, googletest, libdeflate and the MDL SDK
+       source, by SHA-256.
+
+     Unit-tested only (`tests/blender_mesh_package_test.py`). It hasn't run end to end,
+     because the configuration as a whole still has to be reviewed again for the current
+     OpenUSD pin, and its audits refuse it until then. The pin keeps
+     `"publish": false`: the configuration takes the CI artifact, unzipped over the
+     OpenUSD install.
+
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
@@ -899,7 +910,7 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 | # | Question | Assumption until decided |
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
-| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | **Reviewed (2026-11-27, §5):** not for the standard release, which ships the RTX and V-Ray integrations and not the combination's source. Yes as part of the GPL-3.0 configuration (Blender's), once that configuration's source receipt and runtime audit include Gatling and the MDL SDK |
+| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | **Reviewed (2026-11-27, §5):** not for the standard release, which ships the RTX and V-Ray integrations and not the combination's source. Yes as part of the GPL-3.0 configuration (Blender's), whose tools and source lock now include it; that configuration's renewed review for the current OpenUSD pin is still to do |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word before publishing. The FBX SDK's licence is still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
