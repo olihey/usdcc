@@ -526,8 +526,10 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   **The list read (2026-11-27)**, from the three CPU packs `deps-usd-plugins.yml` built
   for the pin (run 45945194968, hash `231aea80`, `091c8c2e` on macOS) and the Cycles
   source at `3eb35f8`. Three problems, all fixed in `cycles-usdcc.patch` and the hook
-  (2026-11-27); Cycles' pin keeps `"set": "optional"` with `"publish": false` until the
-  packs built with the fix have been checked:
+  (2026-11-27). The packs built with the fix pass their check, rendering included, on
+  Windows x64, Linux x64 and macOS arm64 (run 46039453918). Cycles' pin still says
+  `"set": "optional"` with `"publish": false`: publishing it, and moving it to the
+  standard set, is the next step:
   1. **GPL code compiled in (the blocker).** `src/util/atomic.h` included Blender's
      `third_party/atomic/atomic_ops.h` for every CPU build, and those headers
      (`atomic_ops.h`, `intern/atomic_ops_{ext,unix,msvc,utils}.h`) are jemalloc's
