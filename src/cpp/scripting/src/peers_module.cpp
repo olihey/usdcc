@@ -481,7 +481,9 @@ void bindPeers(py::module_& m) {
             }
             auto held = std::make_shared<PythonObject>(std::move(callback));
             auto heldAccept = accept.is_none() ? nullptr : std::make_shared<PythonObject>(std::move(accept));
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             TransferInbox::Options options;
             const QString host = room.isHost() ? room.me().fingerprint : room.hostPeer().fingerprint;
             options.directory = usdcc::ui::userDataFolder() + QStringLiteral("/peers/inbox/") + host +
