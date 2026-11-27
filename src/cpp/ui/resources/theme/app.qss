@@ -1350,6 +1350,7 @@ QToolButton#toastDismissAll:hover {
 /* Auto-key on (docs/ANIMATION.md phase 2): red, as the record button of a DCC is. */
 QToolButton#timelineAutoKey:checked {
     background: #c0392b;
+    border-color: #c0392b;
     color: #ffffff;
     border-radius: 3px;
 }

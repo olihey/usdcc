@@ -263,6 +263,22 @@ ICONS["simulate"] = (
     ],
 )
 
+def _key(cx, cy, half):
+    """A key: a filled diamond, as the time ruler draws one. Outlines one inside the
+    other, close enough for the stroke to fill it."""
+    sizes = []
+    while half > 0.4:
+        sizes.append(half)
+        half -= 0.9
+    return [[(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy), (cx, cy - h)] for h in sizes] + [[(cx, cy), (cx, cy)]]
+
+
+# The timeline's keys (docs/ANIMATION.md phase 2): to the selection's previous and next
+# key (a key with a chevron pointing away from it), and Auto-key (a key in a record ring).
+ICONS["key-previous"] = (1.3, LIGHT, [[(4.4, 5.2), (1.8, 8), (4.4, 10.8)]] + _key(10.3, 8, 3.4))
+ICONS["key-next"] = (1.3, LIGHT, [[(11.6, 5.2), (14.2, 8), (11.6, 10.8)]] + _key(5.7, 8, 3.4))
+ICONS["auto-key"] = (1.3, LIGHT, [_arc(8, 8, 6.0, 0, 360, 32)] + _key(8, 8, 2.5))
+
 # The Layer Editor's toolbar: Save All, two floppy disks, one behind the other.
 ICONS["save-all"] = (
     1.2,
