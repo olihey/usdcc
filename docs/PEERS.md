@@ -13,10 +13,11 @@ Also 2026-11-17: rooms and channels (phase 1a) are built first, for
 **Built** (2026-11-17), all in C++: phase 1a (rooms and channels, §14.1), phase 1b without
 the Python module (keys, encryption, reconnecting, shared state, several rooms, §14.2), and
 phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Since built:
-phase 5's transfers without UI or Python (§14.4), phase 6, the shared stage
+phase 5 (§14.4, finished 2026-11-26 with §14.7: Send to…, asking first, Python), phase 6, the shared stage
 ([SHARED_STAGE.md](SHARED_STAGE.md)), and **phase 3** (2026-11-26, §14.5): the `usdcc_peers`
 Python package, the hub, rooms joined at start, and notifications; and **phase 4** (§14.6): the
-relay, rooms hosted through it, its links, and `wss://`. Not built: the rest of phase 5. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
+relay, rooms hosted through it, its links, and `wss://`. Every phase is built; what each left
+for later is in its "as built" section, and §14's Later row. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
 `usdcc.peers` for Python, set aside on 2026-11-17, is built since (§8.2, 2026-11-26), and with it
 1b's last criterion. Two machines haven't been tried; everything so far ran on one.
 
@@ -347,8 +348,10 @@ offered to one member, then its pieces, sent to that member alone.
 - **Only safe paths:** relative, with `/`, no `..`, no drive letters, no names Windows keeps for
   itself, and never written through a link. A limit on a transfer's size (64 GB to start with)
   and its number of files.
-- **Not built yet:** asking the user about an offer (the inbox takes a callback that decides),
-  the inbox by room, transfers in memory, to everyone at once, and Python.
+- **Built since** (§14.7): asking the user about an offer (`TransferInboxOptions::ask`, with the
+  `wait` message meanwhile), the inbox by room, to everyone at once (one transfer each), and
+  Python (`room.send_file()`, `room.on_file()`). **Not built:** transfers in memory: a plugin
+  sends up to 4 MB as a message's `data`, and a file otherwise.
 
 ### 7.4 What holds for all three
 
@@ -615,6 +618,16 @@ The receiver gets a toast and decides.
 
 Anything over a size limit (100 MB to start with) asks before it is received.
 
+*As built* (§14.7): **File > Send To**, with Stage File (its URL instead for a stage on a
+server), Stage with Everything It Uses (flattened, with its assets, as a render job is), Selected
+Prims, This Session, Script Editor Tab and Viewport Camera; each to everyone in a room or to one
+person. Everything asks first, not only what is over 100 MB: the receiver's toast has the
+kind's button (Open, Paste, Import and Load, Open in Script Editor, Look Through) and Decline,
+and no file comes before its yes. Pasted prims get a free name beside a prim of the same path,
+and are one undo step. Not built: Send To from the Outliner's and the viewport's own menus
+(File > Send To works on their selection and camera); the camera's lens (its field of view is
+sent, but a viewport's can't be set yet).
+
 ### 10.4 A shared stage
 
 Editing one stage together, each seeing the others' edits, selections and cameras. The largest use,
@@ -647,7 +660,9 @@ direct messages for jobs and tasks, and transfers for scenes and images.
 
 Name and color; whether rooms on this network are looked for; the port; rooms joined at start;
 relay URLs; ask before a join by link; toast on chat; muted rooms and senders; the inbox's size
-limit. ([SETTINGS.md](SETTINGS.md))
+limit. ([SETTINGS.md](SETTINGS.md)) *As built*: all of them, the relay as one URL and its token
+(`Peers/relayUrl`, `Peers/relayToken`), notifications' toasts (`Peers/notificationToasts`), and
+the inbox's limit as Receive up to (GB) (`Peers/inboxMaxGB`, 20).
 
 ## 12. Security and privacy
 
@@ -698,7 +713,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
 | **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list. **Built** 2026-11-26 (§14.5) | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
 | **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://`. **Built** 2026-11-26 (§14.6) | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
-| **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
+| **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4); the rest 2026-11-26 (§14.7) | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | Phases 0 and A to C built (2026-11-22); see there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
 
@@ -1060,6 +1075,35 @@ copy):
 So one relay process meets §15's target (99 of 100 within 50 ms) for 100 rooms, and 200 need two
 relays. Without `--raw`, with usdcc_peers hosts and members doing the crypto in the workers, the
 workers are what is slow, not the relay (14% of a core for 40 rooms).
+
+### 14.7 Phase 5 finished: Send to…, asking first, Python
+
+Built 2026-11-26.
+
+- **Asking first:** `TransferInboxOptions::ask` gets the offer and an answer to call later; the
+  sender meanwhile hears `wait` (PEERS_PROTOCOL.md §9) for each offer again, so it keeps
+  waiting. It is asked about a bundle that is here already too: `have` without a yes would tell
+  anyone what this member has. Unanswered after the give-up time, a no.
+- **Send to…** (`PeersController::send()`, `registerReceiver()`, `fillSendMenu()`): an item
+  (`send` channel, Direct) says what it is, and its files follow on `send-files` into an inbox of
+  the room's own (`<user data>/peers/inbox/<host's fingerprint>/`); the inbox takes only a bundle
+  an item announced, from whoever announced it, at most its size, once the user said yes. A kind
+  nobody here registered is turned down. To everyone: each member gets their own item and
+  transfer. What is sent waits in `<user data>/peers/outbox/`, emptied after a day.
+- **The kinds** (`src/cpp/app/peers_send.cpp`, the library `usdcc_send_to`): §10.3's six, the
+  stage two ways. Prims cross as USDA (`share::primsAsUsda()`, `pasteUsda()`).
+- **Python:** `room.send_file(channel, path, to=None)` (a file, or a folder and all in it) and
+  `room.on_file(channel, callback, accept=None)`, on a plugin's own channel, up to Receive up to.
+
+**Its tests:**
+
+| What | Where |
+|---|---|
+| Asked, the sender waits past its stall time on `wait`; yes, it arrives; no, it fails with Declined | `peers_transfer_asks_first` (`usdcc_peers_tests`) |
+| An item to one person: offered, nothing before Accept, then it arrives and opens; to everyone, one declines and one takes it, and the sender hears both; values only (a camera); a kind nobody opens; files nobody announced, refused (one already there included) | `peers_send_to` (`usdcc_ui_tests`) |
+| The selection as USDA, flattened (a referenced child included), pasted beside a prim of the same name, one undo step, undone | `prim_text_round_trip` (`usdcc_tests`) |
+| **The phase's criterion:** File > Send To > This Session, to everyone; the receiver accepts, and the session is imported and loads its stage | `session_sent_to_a_peer` (`usdcc_python_tests`) |
+| **The phase's criterion:** a script sends a file to a member and takes one, with its own accept | `python_peers_rooms_from_a_script` |
 
 ## 15. Testing
 

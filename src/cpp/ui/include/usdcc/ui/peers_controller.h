@@ -60,6 +60,8 @@ public:
     static constexpr auto relayUrlKey = "Peers/relayUrl";
     static constexpr auto relayTokenKey = "Peers/relayToken";
     static QString relayUrl();
+    // The most a room may send this instance in one transfer, in GB (Send to…, PEERS.md §11).
+    static constexpr auto inboxMaxKey = "Peers/inboxMaxGB";
     static void defineSettings();
 
     struct Hooks {
@@ -100,6 +102,45 @@ public:
     void notify(usdcc::peers::Room* room, const Notification& notification, const usdcc::peers::PeerId& to = {});
     // Runs an action, asking before a URL opens.
     void runAction(const NotificationAction& action);
+
+    // Send to… (PEERS.md §10.3): something usdcc can write out, sent to everyone in a room or
+    // to one person. The receiver gets a toast saying what it is and from whom, and decides:
+    // nothing comes before its yes, and nothing received is run.
+    struct SendItem {
+        QString kind;        // "prims", "file", "stage", "session", "script", "camera", "url", or a plugin's own
+        QString title;       // What the receiver sees: "3 prims from shot_010.usda"
+        QJsonObject data;    // Small values that go in the message (a URL, a camera)
+        QString root;        // Files under it go as one transfer; empty: none
+        QStringList files;   // Relative to `root`, with '/'
+    };
+    struct ReceivedItem {
+        QString id;
+        QPointer<usdcc::peers::Room> room;
+        usdcc::peers::Peer from;
+        QString kind;
+        QString title;
+        QJsonObject data;
+        QString bundleHash;  // Empty: nothing to transfer
+        qint64 bytes = 0;
+        int fileCount = 0;
+        QString directory;   // Where the files are, once they arrived
+    };
+    // What this instance does with a kind it receives: `action` names the button ("Open",
+    // "Import", "Paste"), and `open` runs on the user's click, once its files arrived. A kind
+    // nobody registered is turned down.
+    void registerReceiver(const QString& kind, const QString& action, std::function<void(const ReceivedItem&)> open);
+    // To `to`, or to everyone in the room but this instance (each their own transfer). False,
+    // with `error`, for a room that isn't open or files that can't be read.
+    bool send(usdcc::peers::Room* room, const usdcc::peers::PeerId& to, const SendItem& item, QString* error = nullptr);
+    // A Send To submenu: each chat room, and in it everyone or one person. `make` makes the
+    // item when one is picked; nullopt (it said why) sends nothing.
+    void fillSendMenu(QMenu* menu, std::function<std::optional<SendItem>(QString* error)> make);
+    // The receiver's answer to an item, by its id.
+    void acceptItem(const QString& id);
+    void declineItem(const QString& id);
+    QList<ReceivedItem> pendingItems() const { return m_items.values(); }
+    // A folder for what is about to be sent, deleted once it was (or after a day).
+    static QString newOutboxFolder();
 
     // An image shared in the chat (PEERS.md §10.1): a preview, and the original file when the
     // sender offers it. Each is a bundle of one file, fetched from the sender.
@@ -299,6 +340,11 @@ Q_SIGNALS:
     void statusChanged();
     // A shared image's file arrived, is on its way, or failed.
     void imageChanged(const QString& hash);
+    // Send to…: something came (waiting for an answer), or was opened or declined.
+    void itemOffered(const usdcc::ui::PeersController::ReceivedItem& item);
+    void itemOpened(const usdcc::ui::PeersController::ReceivedItem& item);
+    // Send to…, the sender's: how a transfer to someone ended (`error` empty: it arrived).
+    void itemSent(const QString& title, const usdcc::peers::Peer& to, const QString& error);
 
 private:
     struct Conversation {
@@ -322,6 +368,9 @@ private:
     void onNotify(usdcc::peers::Room* room, const usdcc::peers::Message& message);
     void toastNotification(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const Notification& notification);
     usdcc::peers::Room* joinStartLink(const QString& link);
+    void openSendInbox(usdcc::peers::Room* room);
+    void onItem(usdcc::peers::Room* room, const usdcc::peers::Message& message);
+    void openItem(const QString& id);
     void rejoinLater(const QString& link);
     void toastChat(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const QString& text, bool privately,
                    const std::optional<ChatImage>& image = std::nullopt);
@@ -384,6 +433,18 @@ private:
     QHash<QString, StartRoom> m_startRooms;
     // The toast of a notification that is up, by room, sender and the notification's id.
     QHash<QString, int> m_notificationToasts;
+    // Send to…: what was offered to this instance, by item id; the receivers by kind; and
+    // the answer an inbox waits for, by item id.
+    QHash<QString, ReceivedItem> m_items;
+    QHash<QString, int> m_itemToasts;
+    QHash<QString, bool> m_itemAnswers;  // Answered before the files' offer came
+    QHash<QString, std::function<void(bool)>> m_itemQuestions;
+    struct Receiver {
+        QString action;
+        std::function<void(const ReceivedItem&)> open;
+    };
+    QHash<QString, Receiver> m_receivers;
+    QHash<usdcc::peers::Room*, usdcc::peers::TransferInbox*> m_sendInboxes;
     bool m_panelShown = false;
     bool m_swarmShown = false;
 };

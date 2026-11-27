@@ -10,10 +10,13 @@
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
 #include "usdcc/peers/state.h"
+#include "usdcc/peers/transfer.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/peers_controller.h"
 
+#include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -125,6 +128,34 @@ USDCC_TEST(python_peers_rooms_from_a_script) {
     CHECK(!python("room.notify('x', actions=[{'label': 'Run', 'run': 'rm -rf /'}])\n"),
           "a notification with an action not on the list was sent");
     CHECK(!python("room.notify('x', to='nobody')\n"), "a notification to nobody didn't raise");
+
+    // Files (PEERS.md §7.3), on a plugin's own channel: from the script to Ben, and back.
+    QTemporaryDir files;
+    {
+        QFile out(files.filePath("notes.json"));
+        CHECK(out.open(QIODevice::WriteOnly) && out.write("{\"n\": 1}") > 0, "couldn't write");
+    }
+    TransferInbox::Options inboxOptions;
+    inboxOptions.directory = files.filePath("ben-inbox");
+    auto* benInbox = new TransferInbox(benRoom, "notes.files", inboxOptions, benRoom);
+    QList<Transfer*> benGot;
+    QObject::connect(benInbox, &TransferInbox::received, &context, [&](Transfer* t) { benGot.append(t); });
+    CHECK(python("got_files = []\n"
+                 "taking = room.on_file('notes.files', lambda folder, names, sender: got_files.append((names, sender.name,"
+                 " open(folder + '/' + names[0]).read())), accept=lambda sender, names, size: size < 1000)\n"
+                 "assert room.send_file('notes.files', r'" + files.filePath("notes.json").toStdString() + "', to='" +
+                 benRoom->me().id.toStdString() + "') == 1\n"),
+          "the script couldn't send a file");
+    CHECK(QTest::qWaitFor([&] { return benGot.size() == 1; }, 5000), "Ben didn't get the script's file");
+    if (!benGot.isEmpty()) {
+        QFile in(QDir(benGot.first()->directory()).filePath("notes.json"));
+        CHECK(in.open(QIODevice::ReadOnly) && in.readAll() == "{\"n\": 1}", "the file isn't what was sent");
+    }
+    QString manifestError;
+    const auto manifest = TransferManifest::fromFiles(files.path(), {"notes.json"}, &manifestError);
+    CHECK(manifest && Transfer::send(benRoom, "notes.files", annaRoom->me().id, *manifest, {}, benRoom),
+          "Ben couldn't send back: %s", qPrintable(manifestError));
+    CHECK(pythonUntil("got_files == [(['notes.json'], 'Ben', '{\"n\": 1}')]"), "the script didn't get Ben's file");
 
     // Disconnected: nothing more arrives on it.
     python("listening.disconnect()\n");

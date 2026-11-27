@@ -44,6 +44,7 @@ add_executable(usdcc_tests
     viewport_overlays_test.cpp
     prim_move_test.cpp
     prim_delete_test.cpp
+    prim_text_test.cpp
     primvar_colors_test.cpp
     primvar_edit_test.cpp
     primvar_info_test.cpp
@@ -240,7 +241,7 @@ add_executable(usdcc_python_tests
     viewport_renderer_python_test.cpp
     python_test_app.h
 )
-target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui usdcc_send_to)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data" USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # Installing an optional pack (docs/USD_PLUGINS.md §10): the app's installer, here because
 # it unpacks with usdcc's Python.

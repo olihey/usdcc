@@ -15,11 +15,16 @@
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
 #include "usdcc/peers/state.h"
+#include "usdcc/peers/transfer.h"
+#include "usdcc/core/settings.h"
+#include "usdcc/ui/settings.h"
 #include "usdcc/ui/peers_controller.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDir>
+#include <QFileInfo>
 #include <QPointer>
 
 #include <pybind11/stl.h>
@@ -436,6 +441,91 @@ void bindPeers(py::module_& m) {
             return id;
         },
         py::arg("handle"), py::arg("map"), py::arg("callback"));
+
+    // Transfers (PEERS.md §7.3) on a plugin's own channel: a file or a folder, to one member or
+    // to each. Returns how many were offered.
+    m.def(
+        "room_send_files",
+        [](int handle, const std::string& channel, const std::string& path, const std::string& to) {
+            Room& room = roomOf(handle);
+            const QFileInfo info(QString::fromStdString(path));
+            QString error;
+            std::optional<TransferManifest> manifest =
+                info.isDir() ? TransferManifest::fromDirectory(info.absoluteFilePath(), &error)
+                             : TransferManifest::fromFiles(info.absolutePath(), {info.fileName()}, &error);
+            if (!manifest) {
+                throw std::invalid_argument("Can't send " + path + ": " + error.toStdString());
+            }
+            int offered = 0;
+            for (const Peer& peer : room.peers()) {
+                if (peer.id == room.me().id || peer.kind == Peer::Kind::Guest ||
+                    (!to.empty() && peer.id != QString::fromStdString(to))) {
+                    continue;
+                }
+                if (!Transfer::send(&room, QString::fromStdString(channel), peer.id, *manifest, {}, &controller(),
+                                    &error)) {
+                    throw std::runtime_error(error.toStdString());
+                }
+                ++offered;
+            }
+            if (!to.empty() && offered == 0) {
+                throw std::invalid_argument("Nobody in the room has the id " + to);
+            }
+            return offered;
+        },
+        py::arg("handle"), py::arg("channel"), py::arg("path"), py::arg("to"));
+    // Receives on that channel: `accept(peer, files, bytes)` says yes or no (None: yes), up
+    // to Settings > Peers > Receive up to; `callback(folder, files, peer)` once it arrived.
+    m.def(
+        "room_on_files",
+        [](int handle, const std::string& channel, py::object callback, py::object accept) {
+            Room& room = roomOf(handle);
+            if (!isValidChannelName(QString::fromStdString(channel))) {
+                throw std::invalid_argument("Not a channel name: " + channel);
+            }
+            auto held = std::make_shared<PythonObject>(std::move(callback));
+            auto heldAccept = accept.is_none() ? nullptr : std::make_shared<PythonObject>(std::move(accept));
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
+            TransferInbox::Options options;
+            const QString host = room.isHost() ? room.me().fingerprint : room.hostPeer().fingerprint;
+            options.directory = usdcc::ui::userDataFolder() + QStringLiteral("/peers/inbox/") + host +
+                                QStringLiteral("/") + QString::fromStdString(channel).replace(u'/', u'_');
+            options.maxTransferBytes = qint64(usdcc::core::Settings::instance().get<int>(
+                                           usdcc::ui::PeersController::inboxMaxKey, 20)) *
+                                       1024 * 1024 * 1024;
+            if (heldAccept) {
+                options.accept = [heldAccept](const Peer& from, const TransferManifest& manifest) {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        std::vector<std::string> files;
+                        for (const TransferFile& file : manifest.files) files.push_back(file.path.toStdString());
+                        return heldAccept->object(peerDict(from), files, manifest.totalBytes()).cast<bool>();
+                    } catch (py::error_already_set& error) {
+                        logPythonError(error);
+                        return false;
+                    } catch (const py::cast_error&) {
+                        return false;
+                    }
+                };
+            }
+            // Deleted with the connection: a plugin turned off takes no more files.
+            auto* inbox = new TransferInbox(&room, QString::fromStdString(channel), options, context);
+            QPointer<Room> guard = &room;
+            QObject::connect(inbox, &TransferInbox::received, context, [held, guard](Transfer* transfer) {
+                const Peer from = guard ? guard->peer(transfer->peer()) : Peer{};
+                call(held, [&] {
+                    std::vector<std::string> files;
+                    for (const TransferFile& file : transfer->manifest().files) files.push_back(file.path.toStdString());
+                    Peer known = from;
+                    if (!known.isValid()) known.id = transfer->peer();
+                    return py::make_tuple(transfer->directory().toStdString(), files, peerDict(known));
+                });
+            });
+            return id;
+        },
+        py::arg("handle"), py::arg("channel"), py::arg("callback"), py::arg("accept"));
 
     // Notifications (PEERS.md §10.2), checked as the receiver checks them.
     m.def(

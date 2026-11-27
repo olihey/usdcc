@@ -1124,6 +1124,16 @@ void TransferInbox::onOffer(const Message& message) {
         refuse(from.id, id, QStringLiteral("Guests can't send files"), from);
         return;
     }
+    if (m_pending.contains(id)) {
+        if (m_pending.value(id).from.id == from.id) {
+            if (m_pending.value(id).since.elapsed() > m_options.giveUpMs) {
+                answer(id, false);  // Nobody answered: a no
+            } else {
+                wait(from.id, id);  // Still asking
+            }
+        }
+        return;
+    }
     if (const QPointer<Transfer> existing = m_transfers.value(id)) {
         if (existing->peer() == from.id) {
             existing->d->onReoffer();  // Again: where it is
@@ -1156,6 +1166,61 @@ void TransferInbox::onOffer(const Message& message) {
         return;
     }
 
+    if (m_options.accept && !m_options.accept(from, *manifest)) {
+        refuse(from.id, id, QStringLiteral("Declined"), from);
+        return;
+    }
+    // Asked of someone, who may take a while: the sender hears "wait" meanwhile, and again
+    // each time it offers again, so it doesn't give up (PEERS_PROTOCOL.md §9). Asked even for
+    // a bundle that is here already: "have" would tell anyone who asks what this member has.
+    if (m_options.ask) {
+        Pending& pending = m_pending[id];
+        pending.from = from;
+        pending.manifest = *manifest;
+        pending.chunk = chunk;
+        pending.since.start();
+        wait(from.id, id);
+        QPointer<TransferInbox> guard = this;
+        m_options.ask(from, *manifest, [guard, id](bool yes) {
+            if (guard) {
+                guard->answer(id, yes);
+            }
+        });
+        return;
+    }
+    begin(from, id, *manifest, chunk);
+}
+
+void TransferInbox::wait(const PeerId& to, const QString& id) {
+    if (m_channel && m_room && m_room->state() == Room::State::Open) {
+        m_channel->send(QStringLiteral("wait"), {{QStringLiteral("id"), id}}, {}, to);
+    }
+}
+
+void TransferInbox::answer(const QString& id, bool yes) {
+    const auto found = m_pending.find(id);
+    if (found == m_pending.end()) {
+        return;  // Gone meanwhile: the sender gave up or cancelled
+    }
+    const Pending pending = *found;
+    m_pending.erase(found);
+    if (!m_room || !m_room->peer(pending.from.id).isValid()) {
+        return;  // The sender left
+    }
+    if (!yes) {
+        refuse(pending.from.id, id, QStringLiteral("Declined"), pending.from);
+        return;
+    }
+    begin(pending.from, id, pending.manifest, pending.chunk);
+}
+
+bool TransferInbox::isAsking(const QString& id) const {
+    return m_pending.contains(id);
+}
+
+void TransferInbox::begin(const Peer& from, const QString& id, const TransferManifest& manifestIn, qint64 chunk) {
+    const std::optional<TransferManifest> manifest = manifestIn;
+    const qint64 total = manifest->totalBytes();
     auto* transfer = new Transfer(this);
     Transfer::Impl& d = *transfer->d;
     d.incoming = true;
@@ -1196,12 +1261,6 @@ void TransferInbox::onOffer(const Message& message) {
         m_transfers.remove(id);
         delete transfer;
         refuse(from.id, id, QStringLiteral("Not enough disk space"), from);
-        return;
-    }
-    if (m_options.accept && !m_options.accept(from, *manifest)) {
-        m_transfers.remove(id);
-        delete transfer;
-        refuse(from.id, id, QStringLiteral("Declined"), from);
         return;
     }
 

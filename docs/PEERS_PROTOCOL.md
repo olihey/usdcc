@@ -219,6 +219,7 @@ order: piece *i* is in the file whose first piece is the last one at or before *
 | `ack` | Receiver → sender | `{id, next}`: every piece before `next` arrived | |
 | `done` | Receiver → sender | `{id}`: every file arrived and matched its sha256 | |
 | `refuse` | Receiver → sender | `{id, reason}`: the offer is turned down, or the transfer can't go on | |
+| `wait` | Receiver → sender | `{id}`: someone is being asked about the offer; keep waiting. Sent for the offer, and for each `offer` again while the question is open. Unanswered after the receiver's give-up time (2 minutes), the answer is `refuse` | |
 | `cancel` | Either way | `{id, reason}`: stopped | |
 
 **The receiver**, offered a bundle:
