@@ -32,6 +32,8 @@ into a self-contained folder that runs on a machine without the dev environment:
       tools\\ruff\\   ruff.exe and its LICENSE, for the Script Editor's Ruff
                     Format and Ruff Check (the build's pinned version)
       tools\\debugpy\\  debugpy, for attaching a debugger to its Python
+      tools\\usdcc_peers\\  the Peers package for other programs and the studio's
+                    hub (docs/PEERS.md section 9), to pip install where it runs
       tools\\uv\\     uv.exe and its licenses, which install the Python packages
                     plugins ask for (the build's pinned version)
 
@@ -608,6 +610,7 @@ def main(argv=None):
              "works, but installing Python packages needs a uv on PATH.")
 
     _deploy_debugpy(debugpy_dir, deploy_dir, args)
+    _deploy_peers_package(deploy_dir)
     _deploy_stubs(deploy_dir, args)
     _deploy_vsix(deploy_dir, args)
 
@@ -808,6 +811,17 @@ def _deploy_debugpy(debugpy_dir, deploy_dir, args):
     else:
         warn(f"No debugpy in the build ('{debugpy_dir}'; reconfigure with USDCC_BUNDLE_DEBUGPY=ON while online): "
              "the deploy works, but debugging Python in it needs a debugpy among the Python packages.")
+
+
+def _deploy_peers_package(deploy_dir):
+    """tools/usdcc_peers: the Python package other programs join rooms with, and the hub
+    (docs/PEERS.md section 9). The app doesn't use it; it is there to pip install on a
+    studio's server or a render farm. Its source only: it needs websockets and PyNaCl where
+    it runs, not here."""
+    source = REPO / "src/usdcc_peers"
+    if (source / "usdcc_peers/__init__.py").is_file():
+        print("  usdcc_peers", flush=True)
+        copy_tree(source, deploy_dir / "tools/usdcc_peers", exclude_dirs=["__pycache__", "build", "*.egg-info"])
 
 
 def _deploy_stubs(deploy_dir, args):
@@ -1134,6 +1148,7 @@ def deploy_linux(args):
             warn(f"No {name} in the build ('{program}'; reconfigure while online): the deploy works, but it "
                  f"needs a {name} on PATH.")
     _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), deploy_dir, args)
+    _deploy_peers_package(deploy_dir)
     _deploy_stubs(deploy_dir, args)
     _deploy_vsix(deploy_dir, args)
 
@@ -1597,6 +1612,7 @@ def deploy_macos(args):
             warn(f"No {name} in the build ('{program}'; reconfigure while online): the deploy works, but it "
                  f"needs a {name} on PATH.")
     _deploy_debugpy(cache_value(BUILD_DIR, "USDCC_DEBUGPY_PATH"), root, args)
+    _deploy_peers_package(root)
     _deploy_stubs(root, args)
     _deploy_vsix(root, args)
 

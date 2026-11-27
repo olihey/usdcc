@@ -7,6 +7,7 @@
 
 #include "usdcc/core/export.h"
 #include "usdcc/core/log.h"
+#include "usdcc/core/toast.h"
 #include "usdcc/peers/peers.h"
 
 #include <QDateTime>
@@ -17,6 +18,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
+#include <QUrl>
 
 #include <functional>
 #include <memory>
@@ -49,6 +51,10 @@ public:
     static constexpr auto acceptImagesKey = "Peers/acceptImages";
     static constexpr auto receivedImagesMaxKey = "Peers/receivedImagesMaxGB";
     static constexpr auto keepReceivedImagesKey = "Peers/keepReceivedImagesDays";
+    // usdcc:// links, separated by spaces or lines: joined whenever usdcc runs, and again
+    // after a lost connection (PEERS.md §5.3).
+    static constexpr auto startRoomsKey = "Peers/startRooms";
+    static constexpr auto notificationToastsKey = "Peers/notificationToasts";
     static void defineSettings();
 
     struct Hooks {
@@ -56,7 +62,39 @@ public:
         std::function<void(const QString& path)> selectPrim;
         // What `presence` says this instance has open.
         std::function<QString()> currentStage;
+        // A notification's actions (PEERS.md §10.2): select prims in the current stage, open a
+        // stage by its asset path, and open a URL once the user said yes to it.
+        std::function<void(const QStringList& paths)> selectPrims;
+        std::function<void(const QString& assetPath)> openStage;
+        std::function<bool(const QUrl& url)> confirmOpen;
     };
+
+    // A notification on a room's `notify` channel (PEERS.md §10.2): from a service through
+    // the hub, a script, or a colleague's usdcc. It shows as a toast naming the room and the
+    // sender, which the host sets and a sender can't fake, and stays in the room's chat.
+    struct NotificationAction {
+        enum class Kind { Open, OpenStage, Select, Copy };
+        Kind kind = Kind::Open;
+        QString label;
+        QString target;      // the URL, asset path or text
+        QStringList paths;   // Select's prim paths
+    };
+    struct Notification {
+        QString id;          // the same id again replaces the toast that is up
+        core::ToastKind kind = core::ToastKind::Info;
+        QString title;
+        QString body;
+        bool sticky = false;
+        QList<NotificationAction> actions;
+    };
+    // From a `notify` message's body; nullopt, with why in `error`, for one that isn't right.
+    // Actions come from a fixed list, never one that runs anything.
+    static std::optional<Notification> parseNotification(const QJsonObject& body, QString* error = nullptr);
+    static QJsonObject notificationJson(const Notification& notification);
+    // Sends one to everyone in the room, or to one member.
+    void notify(usdcc::peers::Room* room, const Notification& notification, const usdcc::peers::PeerId& to = {});
+    // Runs an action, asking before a URL opens.
+    void runAction(const NotificationAction& action);
 
     // An image shared in the chat (PEERS.md §10.1): a preview, and the original file when the
     // sender offers it. Each is a bundle of one file, fetched from the sender.
@@ -90,6 +128,7 @@ public:
         std::optional<ChatImage> image;
         usdcc::peers::PeerId to;  // One member's only; empty: the room's
         QList<SharedLogRecord> records;  // Log messages someone shared
+        std::optional<Notification> notification;  // A notification, as it came
     };
 
     // A shared image's file here.
@@ -143,6 +182,18 @@ public:
                                           usdcc::peers::RoomType type = usdcc::peers::RoomType::Chat);
     // The chat rooms: what the Peers panel shows.
     QList<usdcc::peers::Room*> chatRooms() const;
+
+    // Rooms joined at start (Settings > Peers, PEERS.md §5.3): joined now, and joined again
+    // after a lost connection, until the user leaves one. A room joined by a link can be
+    // added or taken off from the Peers panel.
+    QStringList startLinks() const;
+    void joinStartRooms();
+    // The usdcc:// link a room was joined with; empty for one joined otherwise.
+    QString linkOf(usdcc::peers::Room* room) const { return m_links.value(room); }
+    bool joinsAtStart(usdcc::peers::Room* room) const;
+    void setJoinsAtStart(usdcc::peers::Room* room, bool on);
+    // The recent notifications in a room, oldest first.
+    QList<ChatLine> notifications(usdcc::peers::Room* room) const;
 
     // A conversation: the room's, with `with` empty, or a private one with that person.
     QList<ChatLine> chat(usdcc::peers::Room* room, const usdcc::peers::PeerId& with = {}) const;
@@ -261,6 +312,10 @@ private:
     Conversation* conversation(usdcc::peers::Room* room, const usdcc::peers::PeerId& with);
     void onChat(usdcc::peers::Room* room, const usdcc::peers::Message& message);
     void onTyping(usdcc::peers::Room* room, const usdcc::peers::Message& message);
+    void onNotify(usdcc::peers::Room* room, const usdcc::peers::Message& message);
+    void toastNotification(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const Notification& notification);
+    usdcc::peers::Room* joinStartLink(const QString& link);
+    void rejoinLater(const QString& link);
     void toastChat(usdcc::peers::Room* room, const usdcc::peers::Peer& from, const QString& text, bool privately,
                    const std::optional<ChatImage>& image = std::nullopt);
     void expireTypists();
@@ -310,6 +365,18 @@ private:
     QHash<QString, QDateTime> m_floodNoted;
     QHash<usdcc::peers::Room*, usdcc::peers::TransferInbox*> m_imageInboxes;
     QToolButton* m_status = nullptr;
+    // Rooms joined by a usdcc:// link, and what they were joined with.
+    QHash<usdcc::peers::Room*, QString> m_links;
+    // Rooms joined at start, by link: the room now, and how long until the next try.
+    struct StartRoom {
+        QPointer<usdcc::peers::Room> room;
+        int retryMs = 0;
+        bool left = false;  // The user left it: not joined again until usdcc starts again
+        bool pending = false;
+    };
+    QHash<QString, StartRoom> m_startRooms;
+    // The toast of a notification that is up, by room, sender and the notification's id.
+    QHash<QString, int> m_notificationToasts;
     bool m_panelShown = false;
     bool m_swarmShown = false;
 };

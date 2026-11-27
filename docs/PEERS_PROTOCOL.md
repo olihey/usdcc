@@ -248,3 +248,35 @@ side gives up after 2 minutes of silence, or when the other leaves the room. A r
 part unless it was cancelled.
 
 **Cancelling** (`cancel`) ends it at both ends; the receiver deletes the part.
+
+## 10. Notifications
+
+On the channel `notify`, ordered, type `notify` (PEERS.md §10.2). To everyone, or with `to` to
+one member. The host decides who may send on it: the app's own rooms let everyone, the hub only
+itself and the services it names.
+
+```json
+{"id": "farm/8812", "kind": "success", "title": "Render finished",
+ "body": "shot_012 · 240 frames", "sticky": false,
+ "actions": [{"label": "Open Folder", "open": "file:///P:/shots/012/render"}]}
+```
+
+| Field | |
+|---|---|
+| `title` | Required, at most 200 characters |
+| `kind` | `info` (when left out), `success`, `warning` or `error` |
+| `body` | At most 2,000 characters |
+| `id` | At most 128 characters. The same id again, from the same sender in the same room, replaces the toast that is up |
+| `sticky` | Stays until closed |
+| `actions` | At most three, each a `label` and exactly one of the keys below |
+
+| Action key | Value | A click |
+|---|---|---|
+| `open` | An `http`, `https` or `file` URL | Shows the URL and opens it if the user says yes |
+| `openStage` | An asset path | Opens the stage |
+| `select` | Prim paths | Selects them in the current stage |
+| `copy` | Text | Copies it |
+
+A receiver turns down a notification with any other action, or one that breaks a rule above,
+whole: it shows nothing of it.
+

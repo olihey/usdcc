@@ -1,0 +1,6 @@
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+pycparser==3.11 ; python_full_version < '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pycparser==3.12 ; python_full_version >= '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+pynacl==1.6.2
+websockets==16.1.1 ; python_full_version < '3.11'
+websockets==17.4 ; python_full_version >= '3.11'
