@@ -153,6 +153,8 @@ void call(const std::shared_ptr<PythonObject>& callback, MakeArguments arguments
 }
 
 // A connection Python holds: everything connected with `context` ends with it.
+// Callers take the pair apart into plain variables: MSVC for arm64 crashes (C1001) when
+// nested lambdas capture a structured binding of it.
 std::pair<int, QObject*> newConnection() {
     const int id = s_nextConnection++;
     auto context = std::make_unique<QObject>();
@@ -228,7 +230,9 @@ void bindPeers(py::module_& m) {
         "peers_connect",
         [](const std::string& event, py::object callback) {
             auto held = std::make_shared<PythonObject>(std::move(callback));
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             Peers* peers = controller().peers();
             if (event == "room_joined") {
                 const auto opened = [held](Room* room) { call(held, [&] { return std::make_tuple(handleOf(room)); }); };
@@ -285,7 +289,9 @@ void bindPeers(py::module_& m) {
         [](int handle, const std::string& event, py::object callback) {
             Room& room = roomOf(handle);
             auto held = std::make_shared<PythonObject>(std::move(callback));
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             if (event == "peer_joined") {
                 QObject::connect(&room, &Room::peerJoined, context, [held](const Peer& peer) { call(held, [&] { return std::make_tuple(peerDict(peer)); }); });
             } else if (event == "peer_left") {
@@ -328,7 +334,9 @@ void bindPeers(py::module_& m) {
         [](int handle, const std::string& channel, const std::string& delivery, py::object onMessage,
            py::object onRefused) {
             Channel& opened = channelOf(roomOf(handle), channel, delivery);
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             if (!onMessage.is_none()) {
                 auto held = std::make_shared<PythonObject>(std::move(onMessage));
                 QObject::connect(&opened, &Channel::received, context,
@@ -375,7 +383,9 @@ void bindPeers(py::module_& m) {
         [map](int handle, const std::string& name, py::object callback) {
             StateMap& state = map(handle, name);
             auto held = std::make_shared<PythonObject>(std::move(callback));
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             QObject::connect(&state, &StateMap::changed, context,
                              [held](const QString& key, const QJsonValue& value, const Peer& by) {
                                  call(held, [&] { return std::make_tuple(key.toStdString(), valueText(value), peerDict(by)); });
@@ -413,7 +423,9 @@ void bindPeers(py::module_& m) {
         [peerState](int handle, const std::string& name, py::object callback) {
             PeerState& state = peerState(handle, name);
             auto held = std::make_shared<PythonObject>(std::move(callback));
-            auto [id, context] = newConnection();
+            const std::pair<int, QObject*> connection = newConnection();
+            const int id = connection.first;
+            QObject* const context = connection.second;
             QObject::connect(&state, &PeerState::changed, context, [held](const Peer& peer, const QJsonValue& value) {
                 call(held, [&] { return std::make_tuple(peerDict(peer), valueText(value)); });
             });
