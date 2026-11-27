@@ -1,7 +1,8 @@
 #pragma once
 
 // The resolver context of every protocol (docs/REMOTE_ASSETS.md §4): an environment,
-// and through it the stack of endpoints behind each name. It holds credential ids,
+// and through it the stack of endpoints behind each name, with each server under its own
+// id beside them. It holds credential ids,
 // never secrets, as contexts are hashed, compared, printed and saved.
 
 #include "usdcc/assets/config.h"
@@ -34,14 +35,20 @@ std::shared_ptr<const Stack> findStack(const std::string& id);
 class Context {
 public:
     Context() = default;
-    // The stacks of `environment` in `config`. An environment the configuration
-    // doesn't have gives a context with no names.
+    // The stacks of `environment` in `config`, and each server by itself under its id
+    // (ownName()) where the environment gives that name no stack: a server needs no
+    // environment to be reached (docs/REMOTE_ASSETS.md §4.1). With no environment (an empty
+    // one), the servers alone. An environment the configuration doesn't have gives a
+    // context with no names.
     Context(const Config& config, std::string environment);
 
     const std::string& environment() const { return m_environment; }
     // Null when the environment has no such name for that scheme.
     std::shared_ptr<const Stack> stack(const std::string& scheme, const std::string& name) const;
     std::vector<std::string> names(const std::string& scheme) const;
+    // Why stack() has none for `name`: "the environment 'prod' has no server named 'lib'",
+    // or, with no environment, "there is no server named 'lib'".
+    std::string whyNoName(const std::string& name) const;
 
     bool operator==(const Context& other) const;
     bool operator<(const Context& other) const;

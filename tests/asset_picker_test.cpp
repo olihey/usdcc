@@ -287,7 +287,7 @@ USDCC_TEST(asset_picker_errors_and_refusals) {
     addAssetFavorite("pickertest://ghost/x/");
     AssetPickerDialog again(AssetPickerOptions{});
     QTreeWidgetItem* ghost = findPlace(again.placesView(), "Favourites", "x");
-    CHECK(ghost && ghost->toolTip(0).contains("has no server named 'ghost'"),
+    CHECK(ghost && ghost->toolTip(0).contains("no server named 'ghost'"),
           "a favourite on a name the environment lacks says so, unasked: %s", ghost ? ghost->toolTip(0).toStdString().c_str() : "");
 
     // A slow listing left behind doesn't land in the folder shown since.

@@ -55,10 +55,14 @@ usdcc::core::Signal<>& assetConfigChanged() {
 }
 
 std::string defaultAssetEnvironment() {
+    std::string chosen;
     {
         std::lock_guard<std::mutex> lock(preferredMutex());
-        if (!preferred().empty()) return preferred();
+        chosen = preferred();
     }
+    // One the configuration doesn't have any more (its environment was removed, the setting
+    // stayed) doesn't count: every stage would open with no server at all.
+    if (!chosen.empty() && hasAssetEnvironment(chosen)) return chosen;
     return usdcc::assets::defaultContext()->environment();
 }
 

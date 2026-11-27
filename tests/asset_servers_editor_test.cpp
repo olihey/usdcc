@@ -9,11 +9,15 @@
 #include "usdcc/assets/config.h"
 #include "usdcc/assets/config_editor.h"
 #include "usdcc/assets/context.h"
+#include "usdcc/assets/lookup.h"
 #include "usdcc/assets/transport.h"
 #include "usdcc/usd/asset_servers_editor.h"
 #include "usdcc/usd/asset_settings.h"
 #include "usdcc/usd/asset_servers.h"
+#include "usdcc/usd/asset_sources.h"
 #include "usdcc/usd/open_stage_options_dialog.h"
+
+#include <pxr/usd/ar/resolverContext.h>
 #include <QTabWidget>
 
 #include <QApplication>
@@ -41,6 +45,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace usdcc::usd;
 namespace assets = usdcc::assets;
@@ -185,6 +190,107 @@ USDCC_TEST(asset_servers_editor_edits_and_saves) {
     CHECK(waitFor([&dialog]() { return dialog.testResult().contains(QStringLiteral("unreachable")); }),
           "and that one didn't, naming its URL: %s", dialog.testResult().toUtf8().constData());
     CHECK(dialog.testResult().contains(QStringLiteral("https://test2.example")), "the URL as the table has it");
+
+    qunsetenv("USDCC_ASSETS_CONFIG");
+    assets::useDefaultConfigFile();
+}
+
+// A small setup (docs/REMOTE_ASSETS.md §4.1): servers and no environment. The Servers tab says
+// what a path names, and a saved server is at once one the picker lists.
+USDCC_TEST(asset_servers_editor_servers_need_no_environment) {
+    ScopedMemoryStore store;
+    assets::registerTransport("edittest", std::make_shared<EditTestTransport>());
+    QTemporaryDir folder;
+    const std::filesystem::path file = pathOf(folder.filePath(QStringLiteral("assets.json")));
+    writeFile(file, R"({
+        "endpoints": {
+            "nas": { "scheme": "edittest", "url": "https://prod.example" },
+            "Backup": { "scheme": "edittest", "url": "https://test.example" }
+        }
+    })");
+    qputenv("USDCC_ASSETS_CONFIG", QByteArray(folder.filePath(QStringLiteral("assets.json")).toUtf8()));
+    assets::useDefaultConfigFile();
+    {
+        AssetServersDialog dialog(nullptr, file);
+        auto* names = dialog.findChild<QLabel*>(QStringLiteral("assetServersOwnNames"));
+        auto* table = dialog.findChild<QTableWidget*>(QStringLiteral("assetServersTable"));
+        auto* save = dialog.findChild<QPushButton*>(QStringLiteral("assetServersSave"));
+        CHECK(dialog.problems().isEmpty(), "servers without an environment are nothing wrong: %s",
+              dialog.problems().join(QStringLiteral(" / ")).toUtf8().constData());
+        CHECK(names && !names->isHidden() && names->text().contains(QStringLiteral("edittest://nas/")),
+              "the Servers tab says a server is opened by its id: %s", names ? names->text().toUtf8().constData() : "");
+        CHECK(names && names->text().contains(QStringLiteral("Not Backup")) &&
+                  !names->text().contains(QStringLiteral("edittest://Backup/")),
+              "and which id can't be in a path");
+
+        // Renamed to one that can, it's a path too.
+        for (int row = 0; table && row < table->rowCount(); ++row) {
+            if (table->item(row, 0)->text() == QStringLiteral("Backup")) table->item(row, 0)->setText(QStringLiteral("backup"));
+        }
+        CHECK(waitFor([names]() { return names->text().contains(QStringLiteral("edittest://backup/")); }) &&
+                  !names->text().contains(QStringLiteral("Not ")),
+              "a renamed server follows: %s", names->text().toUtf8().constData());
+        CHECK(save && save->isEnabled() && dialog.save(), "it saves, with no environment");
+    }
+    const std::shared_ptr<const assets::Context> context = assets::defaultContext();
+    CHECK(context->environment().empty() && context->names("edittest") == std::vector<std::string>({"backup", "nas"}),
+          "stages then open with each server as a name: what the picker's Places show");
+    const assets::Result<std::vector<assets::ListedEntry>> listed = assets::listUri("edittest://nas/", *context);
+    CHECK(listed.ok() && listed.value.size() == 3, "and its root is listed: %s", listed.message.c_str());
+    // The picker's own source for the protocol: its roots are what Places and the Open dialog show.
+    const std::shared_ptr<AssetSource> source = AssetSourceRegistry::instance().forScheme("edittest");
+    const std::vector<AssetRoot> roots =
+        source ? source->roots("edittest", PXR_NS::ArResolverContext(*context)) : std::vector<AssetRoot>();
+    CHECK(roots.size() == 2 && roots[1].label == "nas" && roots[1].uri == "edittest://nas/",
+          "the picker has a root per server: %zu", roots.size());
+
+    // Settings > Assets > Environment still naming an environment that was removed: not used,
+    // or every stage would open with no server at all.
+    setPreferredAssetEnvironment("test");
+    CHECK(defaultAssetEnvironment().empty(), "a preferred environment that's gone doesn't count: '%s'",
+          defaultAssetEnvironment().c_str());
+    const PXR_NS::ArResolverContext openedWith = stageResolverContext(std::string());
+    const assets::Context* opened = openedWith.Get<assets::Context>();
+    CHECK(opened && opened->environment().empty() && opened->stack("edittest", "nas"),
+          "so a stage opens with the servers, as with none chosen");
+    setPreferredAssetEnvironment(std::string());
+
+    // With environments, as TEST over PROD under PROD's own id: the servers are still there by
+    // their ids, but for the name the environment gives a stack.
+    writeFile(file, R"({
+        "environment": "test",
+        "endpoints": {
+            "nas": { "scheme": "edittest", "url": "https://prod.example" },
+            "nas_test": { "scheme": "edittest", "url": "https://test.example" }
+        },
+        "environments": {
+            "prod": { "edittest": { "nas": ["nas"] } },
+            "test": { "edittest": { "nas": ["nas_test", "nas"] } }
+        }
+    })");
+    assets::useDefaultConfigFile();
+    {
+        AssetServersDialog dialog(nullptr, file);
+        auto* names = dialog.findChild<QLabel*>(QStringLiteral("assetServersOwnNames"));
+        const QStringList lines = names ? names->text().split(QLatin1Char('\n')) : QStringList();
+        CHECK(lines.size() == 2 && lines[0].contains(QStringLiteral("edittest://nas_test/")) &&
+                  !lines[0].contains(QStringLiteral("edittest://nas/")),
+              "a server no name hides is opened by its id: %s", names ? names->text().toUtf8().constData() : "");
+        CHECK(lines.size() == 2 && lines[1].contains(QStringLiteral("environment, test")) &&
+                  lines[1].contains(QStringLiteral("edittest://nas/")),
+              "and the id the default environment gives a stack is said to be that");
+        auto* chosen = dialog.findChild<QComboBox*>(QStringLiteral("assetServersDefaultEnvironment"));
+        if (chosen) chosen->setCurrentIndex(0);
+        CHECK(names && !names->text().contains(QLatin1Char('\n')) && names->text().contains(QStringLiteral("edittest://nas/")),
+              "with (none) chosen, every id is its server: %s", names ? names->text().toUtf8().constData() : "");
+    }
+    const std::shared_ptr<const assets::Context> stacked = assets::defaultContext();
+    const std::shared_ptr<const assets::Stack> over = stacked->stack("edittest", "nas");
+    const std::shared_ptr<const assets::Stack> alone = stacked->stack("edittest", "nas_test");
+    CHECK(stacked->names("edittest") == std::vector<std::string>({"nas", "nas_test"}),
+          "in an environment, the picker has both servers");
+    CHECK(over && over->endpoints.size() == 2 && alone && alone->endpoints.size() == 1,
+          "the name the environment gives is its stack, the other id the server alone");
 
     qunsetenv("USDCC_ASSETS_CONFIG");
     assets::useDefaultConfigFile();

@@ -125,6 +125,9 @@ private:
     void changeLogin(const QString& credential, const QString& scheme = {});
     QString selectedLogin() const;
     void refreshDefaultEnvironment();
+    // The Servers tab's line on what a path names (docs/REMOTE_ASSETS.md §4.1): each server
+    // by its id, and which ids the default environment gives a stack of its own.
+    void refreshOwnNames();
     void refreshProblems();
     void serverCellChanged(int row, int column);
     void webHostCellChanged(int row, int column);
@@ -161,6 +164,7 @@ private:
     QLabel* m_notice = nullptr;
     QTabWidget* m_tabs = nullptr;
     QTableWidget* m_servers = nullptr;
+    QLabel* m_ownNames = nullptr;
     QPushButton* m_addServer = nullptr;
     QPushButton* m_removeServer = nullptr;
     QListWidget* m_mirrors = nullptr;

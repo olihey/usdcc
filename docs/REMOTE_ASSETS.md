@@ -72,7 +72,8 @@ chars/hero/tex/albedo.png               relative, anchored against the layer tha
 ## 4. Endpoints, environments and stacks
 
 An **endpoint** is one real server location. An **environment** says, for each name, which
-endpoints make up its stack, top first.
+endpoints make up its stack, top first. Environments are optional: each endpoint is also reached by
+its id, with or without one (§4.1).
 
 ```json
 {
@@ -126,6 +127,66 @@ all giving the same context:
 
 Contexts are hashed, compared, printed and saved in sessions, so they hold credential ids and never
 secrets (§8). `_RefreshContext` reloads the file and drops what was remembered for that context.
+
+### 4.1 A server is a name by itself
+
+*Built 2026-11-27.* A small setup, one NAS say, needs no environment. **Each server is a name by
+itself: its id.** With no environment, and in every environment of its configuration.
+
+```json
+{
+  "endpoints": {
+    "nas": { "scheme": "webdav", "url": "https://nas.local:5006/assets", "credential": "nas" }
+  }
+}
+```
+
+That file is complete: `webdav://nas/chars/hero.usd` resolves, and `nas` is in the picker's Places.
+A server is added on the editor's Servers tab (§10.1), saved, and used.
+
+- **With no environment:** the configuration names no default (`"environment"`), and nothing else
+  chose one (§10). The context's environment is then empty and its names are the servers' ids. The
+  status bar's button and Open Stage with Options show nothing while no environment is configured.
+- **In an environment:** its names, and beside them each server by its id. With `nas1` and
+  `nas1_test`, and a `test` environment whose only name is `"nas1": ["nas1_test", "nas1"]`, the
+  picker has `webdav://nas1/` (TEST over PROD) and `webdav://nas1_test/` (that server alone).
+  *First built for no environment only; changed the same day:* a server defined but missing from
+  the picker read as a bug.
+- **A name the environment gives wins** over a server's id: `webdav://nas1/` above is the stack in
+  `test`, and the one server in `prod`. So environments can be added later without touching the
+  files written so far: every id keeps meaning its server until an environment stacks more on it.
+- **A one-server stack** under the server's id, with a stack id as any other (§5): relative
+  references, the cache, saving (unless the server is `readOnly`) and logins work as they do for a
+  name an environment gives.
+- **Only an id a path can spell** (§3: lowercase letters, digits, `-`, `_`, `.`). `NAS` isn't
+  reachable by itself; the editor says which aren't.
+- **Each configuration's servers in its own environments** (`ownName()`,
+  [sources.h](../src/cpp/assets/include/usdcc/assets/sources.h)). A source's environment
+  (`studio-a/prod`, [ASSET_SOURCES.md](ASSET_SOURCES.md)) has that source's servers by their ids
+  and none of yours, so it still resolves the same for everyone using it, and as it does for the
+  studio that uses the file directly. Yours, mixed ones too, have yours and none of a source's: a
+  source's server gets a name in a mixed environment. With no environment, yours.
+- **An environment that isn't configured** still has no names: a job naming one this machine lacks
+  fails rather than render other files.
+- **Settings > Assets > Environment naming one that's gone** isn't used
+  (`defaultAssetEnvironment()`): stages open in the configuration's own choice, and the Log says
+  so. *Found 2026-11-27:* with both environments removed in the editor and the setting still
+  `test`, the picker had no server at all, and said only that `test` has none named `nas1`.
+- **A name wins over an address and a bucket.** A server `nas.local` is the name, not the host
+  (§5.1); an S3 server's id is never taken for a bucket on AWS, in any environment
+  ([S3_RESOLVER.md](S3_RESOLVER.md) §3.2).
+- **The offer for an unknown name** ([ASSET_SOURCES.md](ASSET_SOURCES.md) §4) counts a server's id
+  as a name of its configuration's environments (`environmentsWithName()`).
+- **An older usdcc** reads the same file and finds only the environments' names in it.
+
+**In the code:** `Context`'s constructor ([context.cpp](../src/cpp/assets/src/context.cpp)), which
+everything asks for names: the resolvers, the picker, `usdcat`, Python. Tests:
+`assets_servers_are_names_by_themselves` ([assets_test.cpp](../tests/assets_test.cpp)) and
+`asset_servers_editor_servers_need_no_environment`
+([asset_servers_editor_test.cpp](../tests/asset_servers_editor_test.cpp)).
+
+*Not built:* a server alone under an id its environment gives a stack (PROD's `nas1` by itself
+while in `test`): open the stage in `prod`, or give the server another name there.
 
 ## 5. Resolving through a stack
 
@@ -491,6 +552,9 @@ dialog builds its pages from typed values, and has no tables or buttons.
 - **Login...** opens the login form on the row's credential id.
 - **An id that's in use** by an environment can't be removed without saying where; renaming one
   renames it in the stacks too.
+- **What a path names** is a line under the table (*added 2026-11-27*, §4.1): each server's own
+  path (`webdav://nas/`), the ids the default environment gives a stack of its own, and the ids
+  that can't be in a path. Not shown for a source.
 
 **Environments** (`"environments"`): the environments on the left, and the selected one's names
 on the right, each with its stack of servers in order, top first.

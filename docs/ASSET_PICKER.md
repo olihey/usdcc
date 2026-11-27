@@ -82,7 +82,8 @@ Who registers one:
 - **Places:** Favourites (§3.1), This PC (a `QFileSystemModel`), Recent folders, then each source
   with its roots. **[\*]** in the path bar makes the folder shown a favourite, or stops it being one.
 - **The path bar** is a scheme dropdown and the rest of the path (§3.2).
-- **A protocol's roots** in Places are the names its environment has. **Edit Servers...** in their
+- **A protocol's roots** in Places are the names its environment has, and each server by its id,
+  with an environment or without ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §4.1). **Edit Servers...** in their
   context menu opens the Asset Servers editor, where they're made
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §10.1).
 - **The list** loads a folder when it's opened, on a worker thread, with a busy row meanwhile and

@@ -23,9 +23,10 @@ bool hasAssetEnvironment(const std::string& environment);
 // After the Asset Servers editor wrote the configuration. On the UI thread.
 usdcc::core::Signal<>& assetConfigChanged();
 
-// The environment a stage opens in when none is asked for: Settings > Assets, else the
-// configuration's own choice (USDCC_ASSET_ENV, or its "environment"). Empty when there
-// is no configuration.
+// The environment a stage opens in when none is asked for: Settings > Assets' when the
+// configuration has it, else the configuration's own choice (USDCC_ASSET_ENV, or its
+// "environment"). Empty when there is none: each server is then a name by itself
+// (docs/REMOTE_ASSETS.md §4.1).
 std::string defaultAssetEnvironment();
 // Settings > Assets' choice; empty for the configuration's. Set by the app from its setting.
 void setPreferredAssetEnvironment(const std::string& environment);

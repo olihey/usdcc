@@ -106,7 +106,9 @@ from pxr import Ar, Usd
 assert a.environments() == ["down", "locked", "prod", "slow", "test"], a.environments()
 assert a.default_environment() == "prod"
 prod, test = a.context(), a.context("test")
-assert prod.environment == "prod" and test.names("fake") == ["studio"], (prod.environment, test.names("fake"))
+assert prod.environment == "prod", prod.environment
+# The name the environment gives, and each server by its id (docs/REMOTE_ASSETS.md §4.1).
+assert test.names("fake") == ["down", "locked", "prod", "slow", "studio", "test"], test.names("fake")
 assert prod == a.context("prod") and prod != test and hash(prod) == hash(a.context("prod"))
 assert "test" in repr(test), repr(test)
 )"),
