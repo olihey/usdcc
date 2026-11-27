@@ -5,7 +5,7 @@
 # network.
 #
 # SHARED, for the plugins that use it (the viewport broadcast first) and later the
-# Python module. Qt Core, Network, WebSockets and HttpServer, libsodium for the
+# Python module. Qt Core, Network and WebSockets, libsodium for the
 # encryption and mdns for finding rooms: no USD, no widgets, and no usdcc_core, so a
 # program can link it alone.
 add_library(usdcc_peers SHARED
@@ -44,7 +44,7 @@ add_library(usdcc_peers SHARED
 target_include_directories(usdcc_peers PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(usdcc_peers PRIVATE USDCC_PEERS_BUILD)
 target_link_libraries(usdcc_peers PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets
-                                   PRIVATE Qt6::HttpServer unofficial-sodium::sodium)
+                                   PRIVATE unofficial-sodium::sodium)
 # mdns: one header (src/mdns_discovery.cpp).
 find_path(USDCC_MDNS_INCLUDE_DIR mdns.h REQUIRED)
 target_include_directories(usdcc_peers PRIVATE "${USDCC_MDNS_INCLUDE_DIR}")

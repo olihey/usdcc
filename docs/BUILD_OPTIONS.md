@@ -188,7 +188,7 @@ configured). A build without it is CI's, as for §10.
 
 ### 12.1 What rests on usdcc_peers (*checked*)
 
-`usdcc_peers` (6,300 lines; Qt Network, WebSockets and HttpServer, libsodium, mdns) is linked
+`usdcc_peers` (6,300 lines; Qt Network and WebSockets, libsodium, mdns) is linked
 publicly by `usdcc_render`, `usdcc_ui`, `usdcc_app_core` and `usdcc_node_core`, so everything
 above them sees its headers.
 
@@ -213,7 +213,7 @@ Two ways were weighed:
    build", no network code linked. Small for the callers, but the UI would still offer rooms that
    can't open, and "not there" would be a stub that is. **Not taken.**
 2. **No `usdcc_peers` at all** (taken): `src/cpp/peers` isn't added and nothing links Qt
-   WebSockets, HttpServer, libsodium or mdns. The code that uses rooms is split from the code
+   WebSockets, libsodium or mdns. The code that uses rooms is split from the code
    that doesn't, and compiled only with the feature. This is §2's rule ("off means not there"),
    and it is what a studio auditing the build can check: no socket library in the deploy.
 
@@ -224,7 +224,7 @@ Two ways were weighed:
 | Step | Work | Done when |
 |---|---|---|
 | **4a. Split the render queue** | `RenderQueue` keeps the jobs and runs them; a `RenderQueueRooms` (new, in `render/`) does `addRoom()`/`removeRoom()`/`link()` and turns a peer's request into `cancel`/`retry`/`remove` with a requester that is a plain struct (id, name, admin), not `peers::Peer`. Render Settings' "render with" asks the render network through a small interface, empty without it | `render_queue_test` passes with no room; the room tests move to the new class; nothing in `RenderQueue`'s header names `usdcc::peers` |
-| **4b. The option** | `usdcc_feature(PEERS ...)` before the others; Viewport Broadcast `NEEDS PEERS`. Off: `src/cpp/peers` not added; `share/*`, `render_network`, the swarm panel, `RenderQueueRooms`, `peers_controller`, the Peers panel and debug dialog, `queue_web` not compiled; `#if USDCC_FEATURE_PEERS` around their uses in `main.cpp`, `startup`, the node's `serve`/`queue` and the Stages/Window menus; vcpkg's `libsodium` and `mdns` only with it (a manifest feature); `deploy.py` doesn't copy or require `usdcc_peers.dll`, `Qt6WebSockets.dll`, `Qt6HttpServer.dll` or libsodium; `usdcc.peers` not built | A build with `--without peers` compiles, starts, opens and renders a stage, and has none of those DLLs; About says "Peers: Left out of this build" and "Viewport Broadcast: Left out of this build" |
+| **4b. The option** | `usdcc_feature(PEERS ...)` before the others; Viewport Broadcast `NEEDS PEERS`. Off: `src/cpp/peers` not added; `share/*`, `render_network`, the swarm panel, `RenderQueueRooms`, `peers_controller`, the Peers panel and debug dialog, `queue_web` not compiled; `#if USDCC_FEATURE_PEERS` around their uses in `main.cpp`, `startup`, the node's `serve`/`queue` and the Stages/Window menus; vcpkg's `libsodium` and `mdns` only with it (a manifest feature); `deploy.py` doesn't copy or require `usdcc_peers.dll`, `Qt6WebSockets.dll` or libsodium; `usdcc.peers` not built | A build with `--without peers` compiles, starts, opens and renders a stage, and has none of those DLLs; About says "Peers: Left out of this build" and "Viewport Broadcast: Left out of this build" |
 | **4c. CI and tests** | `PEERS` joins `build.py`'s `OPTIONAL_FEATURES`, so CI's `--without all` (after a merge, §8) leaves it out too and its check lists it; the peer tests (`usdcc_peers_tests`, `shared_stages_test`, `render_network_test`, `peers_panel_test`, the node's `serve` tests) built only with the feature | CI green with it on (pull request) and off (after a merge) |
 
 ### 12.4 Settings, menus and Python with it off
@@ -240,7 +240,7 @@ Two ways were weighed:
 
 - The split (4a): the queue's own tests with no room; the rooms' tests as before.
 - With the feature off (CI only, as for §10): it builds; `usdcc_node --version` lists Peers left
-  out; a deploy has no `usdcc_peers.dll`, `Qt6WebSockets.dll`, `Qt6HttpServer.dll` or libsodium.
+  out; a deploy has no `usdcc_peers.dll`, `Qt6WebSockets.dll` or libsodium.
 - Optional, later: a check that a started usdcc without peers has no listening socket
   (`netstat` from the CI step).
 

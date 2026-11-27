@@ -133,6 +133,39 @@ PYSIDE_BUILD_ONLY = ["__pycache__", "include", "typesystems", "glue", "lib", "do
 # a plugin's library with plain LoadLibraryW, which doesn't look there.
 SHIPPED_NATIVE_PLUGINS = ["physics_jolt", "http", "webdav", "s3", "viewport_broadcast", "uv_view"]
 
+# Qt modules offered only under GPL-3.0 or a commercial licence, with no LGPL option
+# (Qt's documentation of each module). The standard release is BSD-3-Clause and ships
+# RTX Render, which loads NVIDIA's proprietary runtime into the same process, so none
+# of these may be in it (docs/RELEASE.md section 6); Qt HTTP Server was, from 26.11.1 to
+# 26.11.11. Only the GPL-3.0 configuration (--with-blender-mesh-tools) may have one.
+# Matched by library name, PySide6's bindings too: Qt6Charts covers Qt6ChartsQml, Qt6Quick3D its
+# physics and XR.
+GPL_ONLY_QT_MODULES = [
+    "HttpServer", "Charts", "DataVisualization", "Graphs", "VirtualKeyboard", "Quick3D", "QuickTimeline",
+    "Bodymovin", "Lottie", "Coap", "Mqtt", "OpcUa", "WaylandCompositor", "Protobuf", "Grpc", "ApplicationManager",
+    "InterfaceFramework", "QuickEffectMaker",
+]
+_GPL_ONLY_QT = re.compile(
+    r"^(?:lib)?Qt6?(?:" + "|".join(GPL_ONLY_QT_MODULES) + r")\w*"
+    r"(?:\.framework|(?:\.[\w-]+)*\.(?:dll|so|dylib|pyd)(?:\.\d+)*)$", re.IGNORECASE)
+
+
+def gpl_only_qt_libraries(root):
+    """The libraries of GPL-only Qt modules (GPL_ONLY_QT_MODULES) anywhere under `root`,
+    relative to it."""
+    root = Path(root)
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if _GPL_ONLY_QT.match(path.name))
+
+
+def check_no_gpl_only_qt(root, args):
+    """Fails a deploy of the standard configuration that has a GPL-only Qt module."""
+    if getattr(args, "with_blender_mesh_tools", False):
+        return
+    found = gpl_only_qt_libraries(root)
+    if found:
+        fail("The deploy has Qt modules that are GPL-3.0 only, which the standard (BSD-3-Clause) release "
+             "can't ship (docs/RELEASE.md section 6):\n  " + "\n  ".join(found[:40]))
+
 
 def _build_features():
     """build/features.json, which the configure writes (docs/BUILD_OPTIONS.md section 4):
@@ -756,8 +789,8 @@ def main(argv=None):
     required = [
         "bin/usdcc.exe", "bin/usdcc_node.exe", "bin/node-web/index.html", "bin/node-web/usdcc.css", "bin/usdcc_render.dll", "bin/usd_plug.dll", "bin/QtNodes.dll", "bin/platforms/qwindows.dll", "bin/usd/plugInfo.json",
         # What plugins on usdcc_peers load (docs/PEERS.md section 13).
-        "bin/usdcc_peers.dll", "bin/Qt6Network.dll", "bin/Qt6WebSockets.dll", "bin/Qt6HttpServer.dll",
-        "bin/Qt6Concurrent.dll", f"bin/libcrypto-3-{VS_ARCH.lower()}.dll", "bin/imageformats/qjpeg.dll", "bin/jpeg62.dll",
+        "bin/usdcc_peers.dll", "bin/Qt6Network.dll", "bin/Qt6WebSockets.dll",
+        f"bin/libcrypto-3-{VS_ARCH.lower()}.dll", "bin/imageformats/qjpeg.dll", "bin/jpeg62.dll",
         "bin/libsodium.dll", "bin/tls/qschannelbackend.dll",
         "plugin/usd/hdStorm.dll", "python/python.exe", "python/Lib/encodings/__init__.py",
         "python/Lib/site-packages/usdcc/__init__.py", "python/Lib/site-packages/pxr/__init__.py",
@@ -783,6 +816,7 @@ def main(argv=None):
     missing = [name for name in required if not (deploy_dir / name).exists()]
     if missing:
         fail(f"The deploy is incomplete; missing: {', '.join(missing)}")
+    check_no_gpl_only_qt(deploy_dir, args)
 
     # python.exe and uv together, as the app runs them: with bin on PATH for the DLLs.
     if has_uv:
@@ -1294,6 +1328,7 @@ def deploy_linux(args):
     missing = [name for name in required if not (deploy_dir / name).exists()]
     if missing:
         fail(f"The deploy is incomplete; missing: {', '.join(missing)}")
+    check_no_gpl_only_qt(deploy_dir, args)
 
     # Everything loads from the deploy or the system, in an environment without
     # LD_LIBRARY_PATH: nothing from the build, OpenUSD's install or the Python's.
@@ -1721,6 +1756,7 @@ def deploy_macos(args):
     missing = [name for name in required if not (contents / name).exists()]
     if missing:
         fail(f"The deploy is incomplete; missing: {', '.join(missing)}")
+    check_no_gpl_only_qt(contents, args)
     # Every link from the bundle or the system: nothing from the build, OpenUSD's install or the Python's.
     problems = _macos_problems(contents, files)
     if problems:

@@ -251,7 +251,7 @@ change notices; structured edit tools.
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | The server in C++, or the Python SDK in the interpreter? | C++ (§5.1). The stateless revision made it small, and the SDK's packages would sit in the plugins' environment |
-| 2 | Qt's `QHttpServer` (the vcpkg port `qthttpserver`, a new module to build), or HTTP by hand on `QTcpServer`? | `QHttpServer`, if it builds at the pinned baseline. By hand is about 200 lines, as only POST with a JSON body is needed |
+| 2 | Qt's `QHttpServer` (the vcpkg port `qthttpserver`, a new module to build), or HTTP by hand on `QTcpServer`? | By hand: Qt HttpServer is GPL-3.0 only, which the BSD-3-Clause release can't ship ([RELEASE.md](RELEASE.md) §6). About 200 lines, as only POST with a JSON body is needed; Peers' `PageServer` ([PEERS.md](PEERS.md) §6.1) does the same for GET |
 | 3 | Serve the older `initialize` opening too? | Yes, without sessions. First check with the Inspector what Claude Code and Claude Desktop send today; drop it if both are on 2026-07-28 |
 | 4 | A token on loopback, or none for ease? | A token. Other users and web pages can reach loopback |
 | 5 | The access level when first turned on | Read only. Full is chosen by the user, or by `--mcp=full` |

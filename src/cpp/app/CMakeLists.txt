@@ -170,7 +170,7 @@ if(WIN32)
     # doesn't link, so vcpkg's step above doesn't know of it. Beside usdcc.exe, not a
     # plugin's folder: plugins are loaded with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which
     # doesn't search there for what they link, nor PATH (docs/VIEWPORT_BROADCAST.md §8):
-    # - Qt Network, WebSockets, HttpServer and Concurrent (HttpServer's);
+    # - Qt Network and WebSockets;
     # - OpenSSL's libcrypto, which Qt Network as built here links at load time;
     # - Qt's JPEG plugin and libjpeg, without which QImageWriter writes no JPEG;
     # - Qt's TLS plugin, Schannel (Windows' own, so no second OpenSSL beside PySide6's):
@@ -187,8 +187,8 @@ if(WIN32)
         TARGET usdcc
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>" "$<TARGET_FILE:Qt6::HttpServer>"
-            "${_usdcc_qt_bin}/Qt6Concurrent.dll" "${_usdcc_qt_bin}/${_usdcc_libcrypto}" "${_usdcc_qt_bin}/jpeg62.dll"
+            "$<TARGET_FILE:Qt6::Network>" "$<TARGET_FILE:Qt6::WebSockets>"
+            "${_usdcc_qt_bin}/${_usdcc_libcrypto}" "${_usdcc_qt_bin}/jpeg62.dll"
             "$<TARGET_FILE_DIR:usdcc>/"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/imageformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -196,7 +196,7 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:usdcc>/tls"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_usdcc_qt_bin}/../Qt6/plugins/tls/qschannelbackend.dll" "$<TARGET_FILE_DIR:usdcc>/tls/"
-        COMMENT "Deploying Qt Network, WebSockets, HttpServer, the JPEG plugin and the TLS plugin"
+        COMMENT "Deploying Qt Network, WebSockets, the JPEG plugin and the TLS plugin"
         VERBATIM)
 endif()
 

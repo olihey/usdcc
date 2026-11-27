@@ -72,7 +72,7 @@ rows.
 
 | Part | Where | Holds |
 |---|---|---|
-| `usdcc_peers` (DLL; Qt Core, Network, WebSockets, HttpServer; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, messages, shared state, transfers, the page for guests |
+| `usdcc_peers` (DLL; Qt Core, Network, WebSockets; no USD, no widgets) | `src/cpp/peers/` | Identity, discovery, hosting and joining, the handshake, messages, shared state, transfers, the page for guests |
 | `usdcc.peers` (pybind11, like `usdcc.usd`) | Inside the app | The same for scripts and plugins (§8.2) |
 | `usdcc_peers` (pure Python: `websockets`, `PyNaCl`) | `src/python/usdcc_peers/`, installable with pip | The protocol for other programs, the hub (§9) and the relay (§5.4) |
 | UI | `usdcc_ui` | The Peers side panel (rooms, people, chat, notifications), toasts, Settings > Peers |
@@ -234,7 +234,13 @@ viewport ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md)).
   as a broadcast. A room for a shared stage takes none unless the host says so.
 - **The room serves the page** on its own port, beside the WebSocket, so a guest's link is a web
   link: `http://<address>:<port>/#s=<secret>`. The secret is the invitation, as in §5.3, and is
-  given in the guest's first message, not in the request.
+  given in the guest's first message, not in the request. `PageServer` (`page_server.cpp`) reads
+  each connection's request head on the room's `QTcpServer`: a `GET` is answered (the page on `/`,
+  files of `HostOptions::pageDirectory` by plain name) and the connection closed; an upgrade on
+  `/ws` from an allowed `Origin` is handed, unread, to a `QWebSocketServer` with
+  `handleConnection()`; anything else is 404, 403, 405 or 400. Only Qt Network and Qt WebSockets
+  (LGPL-3.0): not Qt HttpServer, which is GPL-3.0 only and was used until 26.11.11
+  ([RELEASE.md](RELEASE.md) §6).
 - **A name and nothing else.** A guest has no key pair, so it is known only while it is connected.
   The host gives it its id.
 - **Only the channels opened to guests.** `chat`, `presence`, and what the feature that invited
@@ -683,13 +689,13 @@ the inbox's limit as Receive up to (GB) (`Peers/inboxMaxGB`, 20).
 ## 13. Build and deploy
 
 - **vcpkg:** `qtwebsockets`, `mdns` and `libsodium` (*checked:* all three are ports in the pinned
-  vcpkg), and `qthttpserver` for the guests' page, from an overlay port that makes it depend on
-  `qtwebsockets`: upstream's doesn't, and is then built without its WebSocket upgrade
-  ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §4.1). Phase 1a needs only the two Qt ones. Qt
-  Network and its OpenSSL backend are already built: *checked,* `network` and `openssl` are
-  default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
-  All four are in `vcpkg.json` since phases 1a to 2.
-- **CMake:** `Network`, `WebSockets` and `HttpServer` join `find_package(Qt6 … Widgets OpenGL Svg Test)`
+  vcpkg). Qt Network and its OpenSSL backend are already built: *checked,* `network` and `openssl`
+  are default features of the `qtbase` in use. New licences: mdns (Unlicense) and libsodium (ISC).
+  All three are in `vcpkg.json` since phases 1a to 2. **No `qthttpserver`:** from phase 1a until
+  26.11.11 the guests' page was served by Qt HttpServer, from an overlay port in
+  `cmake/ports/qthttpserver`, but that module is GPL-3.0 only, which the BSD-3-Clause release
+  can't ship ([RELEASE.md](RELEASE.md) §6). The room now serves its page itself (§6.1).
+- **CMake:** `Network` and `WebSockets` join `find_package(Qt6 … Widgets OpenGL Svg Test)`
   (done in phase 1a, §14.1).
 - **Worktrees:** new ports need a private vcpkg install root until they are on master
   ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
@@ -722,8 +728,9 @@ joined by its address. The shared stage needs only phases 1a and 1b, and can sta
 wanted.
 
 The broadcast's own spike ([VIEWPORT_BROADCAST.md](VIEWPORT_BROADCAST.md) §11.1) answers the
-hosting half of phase 0. On one machine it showed that a room's page and WebSocket share one port
-through Qt HttpServer. What Windows Firewall does for the host is still to be tried, from a second
+hosting half of phase 0. On one machine it showed that a room's page and WebSocket share one port,
+through Qt HttpServer and through a `QTcpServer` that hands upgrades to Qt WebSockets, which is
+what the room does now (§6.1). What Windows Firewall does for the host is still to be tried, from a second
 machine. The mDNS half stays here and isn't
 needed before phase 2. Replaying a layer's edits is now [SHARED_STAGE.md](SHARED_STAGE.md)'s own
 spike.
@@ -731,7 +738,7 @@ spike.
 ### 14.1 Phase 1a as built
 
 `usdcc_peers.dll`: `Room` and `Channel` (`room.h`, `channel.h`), the frame (`frame.h`), and the
-types of §7.1 (`types.h`). Qt Core, Network, WebSockets and HttpServer; no USD, no widgets, no
+types of §7.1 (`types.h`). Qt Core, Network, WebSockets and, until 26.11.11, HttpServer; no USD, no widgets, no
 `usdcc_core`. Log category `usdcc.peers`; no secret is logged.
 
 **Its test** (`usdcc_peers_tests`, a program of its own, 13 tests, about 12 s): the five criteria of
@@ -789,7 +796,8 @@ system's buffers fill, and the host's queue for it grows: a real slow member, no
 which makes it depend on `qtwebsockets`; `Network`, `WebSockets` and `HttpServer` in
 `find_package(Qt6 …)`. Beside `usdcc.exe`: `usdcc_peers.dll`, `Qt6Network.dll`,
 `Qt6WebSockets.dll`, `Qt6HttpServer.dll`, `Qt6Concurrent.dll`, `libcrypto-3-x64.dll`, `jpeg62.dll`
-and `imageformats/qjpeg.dll`, which `tools/deploy.py` checks for.
+and `imageformats/qjpeg.dll`, which `tools/deploy.py` checks for. Qt HttpServer (and the
+`Qt6Concurrent.dll` only it needed) left after 26.11.11, for the licence (§13).
 
 **Not tried yet:** a member on another machine, and with it Windows Firewall.
 

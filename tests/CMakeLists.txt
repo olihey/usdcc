@@ -450,6 +450,12 @@ if(USDCC_PYTHON_EXECUTABLE)
     add_test(NAME usdcc_pack_tools COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pack_tools_test.py")
 endif()
 
+# No Qt module that is GPL-3.0 only in the standard release (docs/RELEASE.md §6): the
+# check tools/deploy.py runs on each deploy.
+if(USDCC_PYTHON_EXECUTABLE)
+    add_test(NAME usdcc_deploy_gpl_qt COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/deploy_gpl_qt_test.py")
+endif()
+
 # A debugger attached to the app (editor_debug_test.cpp): its own run, as debugpy stays
 # loaded, and the exit code is part of it.
 if(USDCC_BUILD_EDITOR_LINK AND USDCC_DEBUGPY_DIR)

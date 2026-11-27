@@ -19,10 +19,6 @@
       "$comment": "Rooms of usdcc_peers (docs/PEERS.md §13)"
     },
     {
-      "name": "qthttpserver",
-      "$comment": "The page a room serves to guests, on the WebSocket's port (docs/PEERS.md §6.1). From the overlay in cmake/ports, which builds it with qtwebsockets"
-    },
-    {
       "name": "libsodium",
       "$comment": "Peers' identities, handshake and encryption (docs/PEERS.md §6). ISC"
     },

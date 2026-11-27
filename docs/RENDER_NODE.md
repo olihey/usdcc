@@ -375,8 +375,8 @@ so the page reads as part of usdcc and not as a separate tool.
   alike.
 
 **The code.** Plain HTML, CSS and JavaScript in `src/cpp/node/web/`, no framework and no build
-step, like the broadcast's page. Served by the queue's room with Qt HttpServer, which
-`usdcc_peers` already uses for guests' pages (`HostOptions::pageDirectory`).
+step, like the broadcast's page. Served by the queue's room, as `usdcc_peers` serves guests'
+pages (`HostOptions::pageDirectory`, [PEERS.md](PEERS.md) §6.1).
 
 **As built** (`src/cpp/node/queue_web.h`, `src/cpp/node/web/index.html`):
 

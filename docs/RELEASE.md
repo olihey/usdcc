@@ -239,6 +239,18 @@ the GPL. The planned optional Blender configuration is covered separately below:
   because they stay separate DLLs the user can replace, as they already are.
 - **Dual-licensed, used under the permissive option:** freetype (FTL), zstd (BSD), Qt (LGPL).
   dbus (AFL or GPL) is installed by vcpkg but not shipped.
+- **No GPL-only Qt module.** Some Qt modules are offered only under a commercial licence or
+  GPL-3.0, with no LGPL option: Qt HTTP Server, Charts, Data Visualization, Graphs, Virtual
+  Keyboard, Quick 3D, Quick Timeline, Lottie, CoAP, MQTT, OPC UA, Wayland Compositor, Protobuf,
+  gRPC and others. The standard release can't ship one: it is BSD-3-Clause, and the RTX Render
+  plugin loads NVIDIA's proprietary runtime into the same process. `tools/deploy.py` fails a
+  standard deploy that has the library (or PySide6 binding) of one, on every platform
+  (`GPL_ONLY_QT_MODULES`, tested by `tests/deploy_gpl_qt_test.py`); only the GPL-3.0
+  configuration below may.
+  **26.11.1 to 26.11.11 shipped one:** `Qt6HttpServer` (with `Qt6Concurrent`, which only it
+  needed), linked by `usdcc_peers` for the page a room serves to guests. From the next release
+  the room serves that page with Qt Network and Qt WebSockets alone ([PEERS.md](PEERS.md) §6.1),
+  and the library is no longer built or deployed.
 
 What the release has to do, whatever usdcc's own licence:
 

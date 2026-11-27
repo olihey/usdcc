@@ -86,11 +86,12 @@ the app.
 
 | Part | Choice | Why |
 |---|---|---|
-| Page and stream | Qt HttpServer and Qt WebSockets, one port | Both in vcpkg (*checked:* ports `qthttpserver` and `qtwebsockets` 6.10.1 in the checkout beside this one). Qt Network is already built (*checked:* `Qt6Network.dll` is in `vcpkg_installed`); nothing links it yet. [PEERS.md](PEERS.md) and [MCP.md](MCP.md) plan the same modules |
+| Page and stream | Qt Network's `QTcpServer` and Qt WebSockets, one port | Both LGPL-3.0 and in vcpkg. Not Qt HttpServer, which is GPL-3.0 only (see below and [RELEASE.md](RELEASE.md) §6). [PEERS.md](PEERS.md) serves the page and the stream for the broadcast's room |
 | Messages | The frame of [PEERS.md](PEERS.md) §7.1: a JSON header, then raw bytes | A picture is the raw part. The browser reads it with `DataView` and `createImageBitmap` |
 | The page | One HTML file with its script, no framework and no build step, read from the plugin's folder | Editable without rebuilding |
 
-**Measured: both ways work** (Qt 6.11.1), with one catch:
+**Measured: both ways work** (Qt 6.11.1). Qt HttpServer was used first, and replaced by the
+fallback:
 
 - **Qt HttpServer as vcpkg ships it has no WebSocket upgrade.** Its WebSocket API
   (`newWebSocketConnection()`, `addWebSocketUpgradeVerifier()`) is compiled in only when Qt
@@ -104,7 +105,12 @@ the app.
   `readyRead` for a request already received (*checked* in its source), so peeking is enough. It
   needs one module fewer.
 
-Qt HttpServer is the choice: it parses HTTP properly, which serving more than one page will need.
+**The fallback is the choice** (`src/cpp/peers/src/page_server.cpp`, [PEERS.md](PEERS.md) §6.1).
+Qt HttpServer was, from phase 1 until 26.11.11, through `QAbstractHttpServer::newWebSocketConnection`
+and an upgrade verifier for `/ws`. It is available only under a commercial licence or GPL-3.0, with
+no LGPL option, and the standard release is BSD-3-Clause and loads NVIDIA's proprietary RTX runtime
+into the same process, so it was dropped ([RELEASE.md](RELEASE.md) §6). What a guest's page needs of
+HTTP is small: a GET for a file, answered and closed, and the upgrade.
 
 ### 4.2 Pictures
 
@@ -269,12 +275,13 @@ Small and general, so other plugins gain from them too:
    `ViewportViewPanel::setBorderColor()`. Nothing draws over the 3D view's native window, so the
    border is a 3-pixel margin of the frame around it, painted in the colour; the view, and with it
    the picture sent, is 6 pixels smaller each way while it shows.
-5. **Build:** `qtwebsockets` and `qthttpserver` in `vcpkg.json`, the latter from the overlay port
-   (§4.1); `Network`, `WebSockets` and `HttpServer` in `find_package(Qt6 …)`. New ports need a
+5. **Build:** `qtwebsockets` in `vcpkg.json`; `Network` and `WebSockets` in `find_package(Qt6 …)`.
+   (`qthttpserver` and its overlay port too until 26.11.11, §4.1.) New ports need a
    private vcpkg root in a worktree ([REMOTE_ASSETS.md](REMOTE_ASSETS.md) §12).
 6. **Deploy,** beside `usdcc.exe`, where the plugin, Peers and MCP all find them. *Measured:*
    each of these was missing at first and stopped the spike:
-   - `Qt6Network.dll`, `Qt6WebSockets.dll`, `Qt6HttpServer.dll`, `Qt6Concurrent.dll`. Not beside
+   - `Qt6Network.dll`, `Qt6WebSockets.dll` (and, until 26.11.11, `Qt6HttpServer.dll` and its
+     `Qt6Concurrent.dll`). Not beside
      the plugin: the app loads plugins with `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, which doesn't
      search the plugin's folder for what it links, nor `PATH`.
    - `libcrypto-3-x64.dll`. Qt Network as built here links OpenSSL at load time, even with no
@@ -341,7 +348,7 @@ Release build, GeForce RTX 4090, a 3072×1728 screen at 125 %.
 
 | Question | Answer |
 |---|---|
-| Qt HttpServer passes upgrades to Qt WebSockets? | Yes, once built with it: an overlay port (§4.1) |
+| Qt HttpServer passes upgrades to Qt WebSockets? | Yes, once built with it: an overlay port (§4.1). No longer used: GPL-3.0 only |
 | Read back, 2033×1498 | 3 ms when still; **13 ms while the camera moves**, waiting for the GPU (§4.4) |
 | Compress, 1920×1080 | 2.6 to 2.8 ms at quality 50 to 90 (1280×720: 1.2 ms; 960×540: 0.7 ms) |
 | Compress, 1920×1415 as sent | 5.6 to 7 ms on a worker |
