@@ -7,6 +7,11 @@
 // non-zero on any failure, which is what CTest looks at. Each test executable
 // has its own small main() that creates the Qt application object it needs —
 // test_main.cpp (usdcc_tests, no GUI) or ui_test_main.cpp (usdcc_ui_tests).
+//
+// A crash prints a report to stderr before the process dies: the test it was in and
+// the stack, with files and lines on Windows (DbgHelp and the PDBs), symbols elsewhere
+// (backtrace()). CI keeps no crash dumps, so that report is all a rare crash leaves.
+// usdcc_harness_crash_check (harness_crash_check.cpp) crashes on purpose to check it.
 
 #include <cstdio>
 #include <functional>

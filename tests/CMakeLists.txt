@@ -638,3 +638,16 @@ if(WIN32 AND _VCPKG_INSTALLED_DIR)
     set_tests_properties(usdcc_peers_tests PROPERTIES ENVIRONMENT_MODIFICATION
                          "PATH=path_list_prepend:${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
 endif()
+
+# The harness's crash report (test_harness.cpp): a program that crashes on purpose.
+# It passes when the report names the test, and the function it crashed in, which on
+# Windows needs the PDB and DbgHelp's walk, elsewhere backtrace()'s symbols.
+add_executable(usdcc_harness_crash_check test_harness.h test_harness.cpp harness_crash_check.cpp)
+target_include_directories(usdcc_harness_crash_check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT MSVC)
+    # Names in backtrace_symbols(), on Linux too.
+    target_link_options(usdcc_harness_crash_check PRIVATE $<$<PLATFORM_ID:Linux>:-rdynamic>)
+endif()
+add_test(NAME usdcc_harness_crash_check COMMAND usdcc_harness_crash_check)
+set_tests_properties(usdcc_harness_crash_check PROPERTIES
+    PASS_REGULAR_EXPRESSION "Crash in test \\[harness_reports_a_crash\\].*usdccHarnessReadThrough")
