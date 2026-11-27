@@ -152,6 +152,21 @@ class Rooms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((resumed, said), ([True], ["while you were away"]))
         self.assertEqual(len(self.host.peers()), 3)
 
+    async def test_close_sends_what_was_queued(self):
+        # close() right after send(): what was sent goes out, then the leave. A fixed wait
+        # used to drop both on a slow machine, and the room heard a lost connection.
+        anna = await self.join("Anna")
+        ben = await self.join("Ben")
+        said = []
+        ben.channel("chat").on_message(lambda m: said.append(m.body["n"]))
+        for n in range(200):
+            anna.channel("chat").send("say", {"n": n, "text": "x" * 20000})
+        await anna.close()
+        self.members.remove(anna)
+        self.assertTrue(await until(lambda: len(said) == 200), f"Ben heard {len(said)} of 200")
+        self.assertEqual(said, list(range(200)))
+        self.assertTrue(await until(lambda: len(self.host.peers()) == 2), "Anna is still waited for, not gone")
+
     async def test_host_closes(self):
         anna = await self.join("Anna")
         await self.host.close("Maintenance")

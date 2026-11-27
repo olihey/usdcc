@@ -18,6 +18,7 @@
 #include <QProcessEnvironment>
 #include <QSslCertificate>
 #include <QSslConfiguration>
+#include <QSslSocket>
 #include <QTemporaryDir>
 
 using namespace usdcc::peers;
@@ -321,7 +322,7 @@ struct PythonRelay {
     }
 };
 
-std::unique_ptr<Room> hostThroughRelay(const QString& relay, const QString& token) {
+std::unique_ptr<Room> hostThroughRelay(const QString& relay, const QString& token, QString* failure = nullptr) {
     HostOptions options;
     options.name = QStringLiteral("Far Away");
     options.profile.name = QStringLiteral("Hosting Hilda");
@@ -329,6 +330,9 @@ std::unique_ptr<Room> hostThroughRelay(const QString& relay, const QString& toke
     options.relayToken = token;
     auto host = hostRoom(options);
     if (host) {
+        if (failure) {
+            QObject::connect(host.get(), &Room::relayFailed, host.get(), [failure](const QString& r) { *failure = r; });
+        }
         waitUntil([&] { return host->isOnRelay(); }, 15000);
     }
     return host;
@@ -446,8 +450,10 @@ USDCC_TEST(peers_relay_wss) {
         CHECK(false, "the relay didn't start with TLS");
         return;
     }
-    auto host = hostThroughRelay(QStringLiteral("wss://127.0.0.1:%1").arg(relay.port), relay.token);
-    CHECK(host && host->isOnRelay(), "the host didn't get a room on the wss:// relay: %s", relay.log.constData());
+    QString failure;
+    auto host = hostThroughRelay(QStringLiteral("wss://127.0.0.1:%1").arg(relay.port), relay.token, &failure);
+    CHECK(host && host->isOnRelay(), "the host didn't get a room on the wss:// relay (TLS backend %s): %s\n%s",
+          qPrintable(QSslSocket::activeBackend()), qPrintable(failure), relay.log.constData());
     if (!host || !host->isOnRelay()) {
         return;
     }

@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QSslError>
 #include <QTimer>
 #include <QUrlQuery>
 #include <QWebSocket>
@@ -88,8 +89,22 @@ void RelayBridge::connectToRelay() {
     connect(m_socket, &QWebSocket::binaryMessageReceived, this, &RelayBridge::onRelayData);
     connect(m_socket, &QWebSocket::textMessageReceived, this, &RelayBridge::onRelayText);
     connect(m_socket, &QWebSocket::disconnected, this, &RelayBridge::onRelayLost);
+    m_socketError.clear();
+    connect(m_socket, &QWebSocket::sslErrors, this, [this](const QList<QSslError>& errors) {
+        // A relay whose certificate this machine doesn't trust: say why, instead of only
+        // "lost the relay", so whoever set it up can tell (PEERS.md §14.6).
+        QStringList texts;
+        for (const QSslError& error : errors) {
+            texts.append(error.errorString());
+        }
+        m_socketError = tr("The relay's certificate isn't trusted: %1").arg(texts.join(QStringLiteral("; ")));
+        qCWarning(lcPeers).noquote() << m_socketError;
+    });
     connect(m_socket, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
         if (m_socket && m_socket->state() != QAbstractSocket::ConnectedState) {
+            if (m_socketError.isEmpty()) {
+                m_socketError = tr("Couldn't reach the relay: %1").arg(m_socket->errorString());
+            }
             onRelayLost();
         }
     });
@@ -152,9 +167,9 @@ void RelayBridge::onRelayLost() {
     const int delay = std::min(30000, 500 << std::min(m_retries, 6));
     ++m_retries;
     qCInfo(lcPeers).noquote() << "Lost the relay; trying again in" << delay << "ms";
-    Q_EMIT failed(code == QWebSocketProtocol::CloseCodePolicyViolated && !reason.isEmpty()
-                      ? reason
-                      : tr("Lost the connection to the relay"),
+    Q_EMIT failed(code == QWebSocketProtocol::CloseCodePolicyViolated && !reason.isEmpty() ? reason
+                  : !m_socketError.isEmpty()                                         ? m_socketError
+                                                                                     : tr("Lost the connection to the relay"),
                   false);
     m_retry->start(delay);
 }
@@ -183,17 +198,17 @@ void RelayBridge::onRelayData(const QByteArray& data) {
         }
     } else if (kind == kClosed) {
         auto found = m_members.find(id);
-        if (found != m_members.end()) {
-            QWebSocket* socket = found->socket;
-            m_members.erase(found);
-            if (socket) {
-                socket->disconnect(this);
-                // As the member's own connection would end: the room keeps a peer that
-                // lost it for a while, waiting for it to come back (PEERS_PROTOCOL.md §6).
-                socket->abort();
-                socket->deleteLater();
-            }
+        if (found == m_members.end()) {
+            return;
         }
+        if (!found->open) {
+            // What it sent still waits for the connection: it goes in first.
+            found->ended = true;
+            return;
+        }
+        QWebSocket* socket = found->socket;
+        m_members.erase(found);
+        endMember(socket);
     }
 }
 
@@ -211,6 +226,11 @@ void RelayBridge::openMember(quint32 id) {
             found->socket->sendBinaryMessage(waiting);
         }
         found->waiting.clear();
+        if (found->ended) {
+            QWebSocket* socket = found->socket;
+            m_members.erase(found);
+            endMember(socket);
+        }
     });
     connect(socket, &QWebSocket::binaryMessageReceived, this, [this, id](const QByteArray& data) { fromRoom(id, data); });
     connect(socket, &QWebSocket::disconnected, this, [this, id, socket] {
@@ -224,6 +244,20 @@ void RelayBridge::openMember(quint32 id) {
         socket->deleteLater();
     });
     socket->open(QUrl(QStringLiteral("ws://127.0.0.1:%1/ws").arg(m_port)));
+}
+
+void RelayBridge::endMember(QWebSocket* socket) {
+    if (!socket) {
+        return;
+    }
+    socket->disconnect(this);
+    // As the member's own connection would end: the room keeps a peer that lost it for a
+    // while, waiting for it to come back (PEERS_PROTOCOL.md §6). close(), not abort():
+    // what the member sent last (a message, its leave) is still being written, and the
+    // close frame goes after it.
+    connect(socket, &QWebSocket::disconnected, socket, &QObject::deleteLater);
+    socket->close(QWebSocketProtocol::CloseCodeGoingAway);
+    QTimer::singleShot(5000, socket, [socket] { socket->abort(); });
 }
 
 void RelayBridge::fromRoom(quint32 id, const QByteArray& data) {
