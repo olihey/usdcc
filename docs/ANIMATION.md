@@ -264,7 +264,7 @@ sphere slides (a spline), another pulses (a time-sampled radius).
 | Session | `session_stages` | Per stage: `time`, and `playbackRange` when it has its own |
 | Python | `usdcc.usd.current_time()`, `set_current_time()`, `time_range()`, `playback_range()`, `set_playback_range()`; `usdcc.app.play()`, `stop()`, `is_playing()`; the `time_changed` event | |
 | Shortcuts | Settings > Shortcuts > Timeline | Play or stop: Ctrl+Space. Next and previous frame: `.` and `,`. Not plain Space, which ticks a row's check box in the Outliner |
-| Icons | `tools/gen_theme_icons.py` | skip-start, skip-end, step-back, step-forward, loop |
+| Icons | `tools/gen_theme_icons.py` | skip-start, skip-end, step-back, step-forward, loop; for the keys, key-previous, key-next, auto-key |
 
 Changed on 2026-11-16: the ruler first showed only the playback range, zoomed to it, over a slider
 on the whole stage range. Two scales one above the other read as one: the bar seemed to mark frames
@@ -297,7 +297,7 @@ press S: a key at 10, the ruler's diamonds and the Attribute Editor's row keys s
 | Attribute Editor | `AttributeBinding`, `PropertyRow`, `PropertySheet` | Animated rows are editable now, and an edit keys them. Every attribute row (the transform stack's too) has a key in front of its label, taking its width from the label so rows are no wider: ◇ grey (static), ◇ in the accent (animated), ◆ (a key at this frame). A click sets a key, or removes the one here; the menu has Set Key, Remove Key, Remove Animation, each one undo step |
 | Gizmos | `ToolContext::autoKey`; Move, Rotate, Scale | Read and write at `ToolContext::time` through `anim::setValue()`: a drag on an animated prim keys it at the frame shown, one undo step. The viewport fills `autoKey` from `anim::autoKey()` |
 | Undo | [undo_manager.cpp](../src/cpp/usd/src/undo_manager.cpp) | A run of sets of one time sample keeps only the first old value, as fields already did |
-| Timeline | [timeline_bar.cpp](../src/cpp/usd/src/timeline_bar.cpp), `TimeRuler::setKeys()` | The selection's keys as diamonds on the ruler (every animated attribute of the selected prims), again 100 ms after selection or stage changes. ‹◆ and ◆› go to the previous and next key; **Auto** turns auto-key on, red while it is. The menu's **Held Between Keys** sets the stage's interpolation (`UsdStage::SetInterpolationType()`, not saved) |
+| Timeline | [timeline_bar.cpp](../src/cpp/usd/src/timeline_bar.cpp), `TimeRuler::setKeys()` | The selection's keys as diamonds on the ruler (every animated attribute of the selected prims), again 100 ms after selection or stage changes. The two key buttons (a diamond with a chevron) go to the previous and next key; **Auto-key** (a diamond in a ring) turns auto-key on, red while it is. All three are icon squares like the transport's. The menu's **Held Between Keys** sets the stage's interpolation (`UsdStage::SetInterpolationType()`, not saved) |
 | Shortcuts | Settings > Shortcuts > Timeline | Set Key (S: every transform op of the selection, one undo step), Next Key (Alt+.), Previous Key (Alt+,) |
 | Reparent | `prim_actions::movePrims()` | With Keep World Position, an animated prim (or one under an animated parent) keeps its ops and gets `xformOp:transform:reparent` ahead of them, so it stays where it is at the frame shown |
 | Op renames | `xform_stack.cpp` | Copy a spline too, besides the default and samples |

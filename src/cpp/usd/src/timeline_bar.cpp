@@ -111,20 +111,12 @@ TimelineBar::TimelineBar(PlaybackController* playback, std::shared_ptr<UndoManag
     layout->addWidget(m_simulate);
 
     // Keys (docs/ANIMATION.md phase 2): the selection's previous and next, and auto-key.
-    const auto keyButton = [this](const QString& text, const QString& toolTip) {
-        auto* button = new QToolButton(this);
-        button->setText(text);
-        button->setToolTip(toolTip);
-        button->setAutoRaise(true);
-        button->setFocusPolicy(Qt::NoFocus);
-        usdcc::ui::scaled::fixedHeight(button, kButtonHeight);
-        return button;
-    };
-    auto* previousKey = keyButton(QString::fromUtf8("\xE2\x80\xB9\xE2\x97\x86"), tr("The selection's previous key"));
+    // Squares like the transport's, each with an icon.
+    auto* previousKey = transportButton("key-previous", tr("The selection's previous key"), this);
     previousKey->setObjectName(QStringLiteral("timelinePreviousKey"));
-    auto* nextKey = keyButton(QString::fromUtf8("\xE2\x97\x86\xE2\x80\xBA"), tr("The selection's next key"));
+    auto* nextKey = transportButton("key-next", tr("The selection's next key"), this);
     nextKey->setObjectName(QStringLiteral("timelineNextKey"));
-    m_autoKey = keyButton(tr("Auto"), QString());
+    m_autoKey = transportButton("auto-key", QString(), this);  // refreshAutoKey() sets its tooltip
     m_autoKey->setObjectName(QStringLiteral("timelineAutoKey"));
     m_autoKey->setCheckable(true);
     layout->addWidget(previousKey);
