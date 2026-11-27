@@ -126,8 +126,10 @@ class Member(RoomBase):
         self._ended = True
         websocket = self._websocket
         if websocket is not None and self.status == "open":
+            # What was sent before close() goes out first, then the leave: on a slow machine
+            # a fixed wait dropped both, and the room heard a lost connection instead.
             self._outbox.push(encode(control("leave", {"reason": reason})), seal=True)
-            await asyncio.sleep(0.05)
+            await self._outbox.drain(5.0)
         self._finish(reason)
         if websocket is not None:
             await websocket.close(1000, reason[:120])
@@ -225,6 +227,10 @@ class Member(RoomBase):
             writer = None
             try:
                 async for data in websocket:
+                    if self.closed:
+                        # Read on until the socket closes: frames left unread fill its queue,
+                        # it stops reading, and the closing handshake waits out its timeout.
+                        continue
                     text = isinstance(data, str)
                     raw = data.encode("utf-8") if text else data
                     if rx is None:
@@ -257,8 +263,6 @@ class Member(RoomBase):
                             self._on_host_frame(message)
                         continue
                     self._on_host_frame(message)
-                    if self.closed:
-                        return
             finally:
                 if writer:
                     writer.cancel()

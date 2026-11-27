@@ -39,6 +39,7 @@ class RelayBridge:
         self._socket = None
         self._members: dict[int, object] = {}
         self._tasks: dict[int, asyncio.Task] = {}
+        self._ending: set[asyncio.Task] = set()  # Members whose connection is closing
         self._batch: list[tuple[bytes, list[int]]] = []
         self._flushing = False
         self._task: asyncio.Task | None = None
@@ -122,10 +123,22 @@ class RelayBridge:
             member = self._members.pop(member_id, None)
             task = self._tasks.pop(member_id, None)
             if member is not None:
-                # As the member's own connection would end: the host keeps it for a while.
-                member.transport.abort()
-            if task:
+                ending = asyncio.create_task(self._end_member(member, task))
+                self._ending.add(ending)
+                ending.add_done_callback(self._ending.discard)
+            elif task:
                 task.cancel()
+
+    @staticmethod
+    async def _end_member(member, task) -> None:
+        # As the member's own connection would end: the host keeps it for a while. A close,
+        # not an abort: what the member sent last (a message, its leave) may still be in
+        # the transport's buffer, and the close frame goes after it.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(member.close(1001, ""), 5.0)
+        member.transport.abort()
+        if task:
+            task.cancel()
 
     async def _member(self, member_id: int) -> None:
         try:

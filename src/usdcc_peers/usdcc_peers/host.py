@@ -743,11 +743,7 @@ class Host(RoomBase):
 
 async def _close_after_flush(member: _Member) -> None:
     # What _drop queued (denied, removed, closed) goes out, then the connection closes.
-    for _ in range(40):
-        if member.outbox.queued_bytes == 0:
-            break
-        await asyncio.sleep(0.025)
-    await asyncio.sleep(0.05)
+    await member.outbox.drain(2.0)
     member.outbox.close()
     try:
         await member.websocket.close(member.close_code, member.close_reason)
