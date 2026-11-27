@@ -70,6 +70,16 @@ def set_runpath(path, entries):
         fail(f"patchelf couldn't change {path}: {result.stderr.strip()}")
 
 
+def remove_needed(path, name):
+    """Takes library `name` out of an ELF file's NEEDED entries."""
+    path = Path(path)
+    if not os.access(path, os.W_OK):
+        path.chmod(path.stat().st_mode | 0o200)
+    result = subprocess.run([_patchelf(), "--remove-needed", name, str(path)], capture_output=True, text=True)
+    if result.returncode != 0:
+        fail(f"patchelf couldn't change {path}: {result.stderr.strip()}")
+
+
 def origin_relative(path, folder):
     """`folder` as seen from ELF file `path`: $ORIGIN/<relative path>."""
     relative = os.path.relpath(folder, os.path.dirname(os.path.abspath(path)))

@@ -20,6 +20,8 @@ add_library(usdcc_scripting_app STATIC
     include/usdcc/scripting/app_module.h
     include/usdcc/scripting/debugger.h
     include/usdcc/scripting/editor_setup.h
+    include/usdcc/scripting/in_use_marker.h
+    include/usdcc/scripting/pack_store.h
     include/usdcc/scripting/package_environment.h
     include/usdcc/scripting/plugin_manager.h
     include/usdcc/scripting/python_settings.h
@@ -30,6 +32,8 @@ add_library(usdcc_scripting_app STATIC
     src/app_module.cpp
     src/debugger.cpp
     src/editor_setup.cpp
+    src/in_use_marker.cpp
+    src/pack_store.cpp
     src/package_environment.cpp
     src/plugin_manager.cpp
     src/python_settings.cpp
@@ -71,6 +75,7 @@ endif()
 
 add_library(usdcc_scripting_ui STATIC
     include/usdcc/scripting/code_editor.h
+    include/usdcc/scripting/pack_catalog.h
     include/usdcc/scripting/package_install_dialog.h
     include/usdcc/scripting/plugin_manager_side_panel.h
     include/usdcc/scripting/plugin_type_icon.h

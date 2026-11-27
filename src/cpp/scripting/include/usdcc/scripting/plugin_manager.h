@@ -85,6 +85,9 @@ struct PluginInfo {
     // (describeUsdPlugin() in the .cpp). Filled by scan(); a reload keeps it, as
     // USD can't take a plugin back.
     std::vector<PluginContribution> usd;
+    // A pack usdcc downloaded (pack_store.h, docs/USD_PLUGINS.md §10), not a plugin
+    // someone put in a folder.
+    bool pack = false;
 };
 
 // Finds and runs the plugins (docs/PLUGINS.md). Startup has two steps: scan()
@@ -107,11 +110,20 @@ public:
         // start means that plugin crashed (§3.6).
         std::filesystem::path crashMarker;
         bool enabled = true;  // false for --no-plugins: nothing is scanned
+        // This version's folder of downloaded packs (PackStore::folder()), one of
+        // `folders`: what is found there is a pack, and only a finished one (with
+        // its pack.json) counts. Empty for none.
+        std::filesystem::path packsFolder;
+        // Packs there that mustn't load, by their folder's name, as PackStore::prepare()
+        // found: refused with a reason, or marked for removal and not listed at all.
+        std::map<std::string, std::string> packsRefused;
+        std::set<std::string> packsRemoved;
     };
 
     // `extraFolders` (--plugin-path), USDCC_PLUGIN_PATH, the user's folder, the
     // folders added in Settings > Plugins (kPluginFoldersKey, defined by
-    // definePluginSettings() by then, or none), then the one shipped with the app. Python packages from USDCC_PYTHON_PATH
+    // definePluginSettings() by then, or none), the downloaded packs of this version
+    // (pack_store.h), then the one shipped with the app. Python packages from USDCC_PYTHON_PATH
     // and the Python settings (python_settings.h, defined by then, or they count
     // as empty). Needs the Qt application object.
     static Options defaultOptions(const std::vector<std::filesystem::path>& extraFolders, bool enabled);

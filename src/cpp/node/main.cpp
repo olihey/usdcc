@@ -17,6 +17,7 @@
 #include "usdcc/core/log.h"
 #include "usdcc/core/version.h"
 #include "usdcc/scripting/app_module.h"
+#include "usdcc/scripting/pack_store.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/qt_message_bridge.h"
@@ -172,8 +173,10 @@ int main(int argc, char** argv) {
     usdcc::app::installSettings();
 
     // The plugins' manifests and USD files before any stage, then the renderers.
-    usdcc::scripting::PluginManager plugins(usdcc::scripting::PluginManager::defaultOptions(
-        usdcc::app::pluginFolders(parser.values(QStringLiteral("plugin-path"))), !parser.isSet(QStringLiteral("no-plugins"))));
+    // With the packs the app downloaded (docs/USD_PLUGINS.md §10): a node renders with them too.
+    usdcc::scripting::PackStore packs(usdcc::scripting::PackStore::defaultOptions());
+    usdcc::scripting::PluginManager plugins(usdcc::app::pluginOptions(parser.values(QStringLiteral("plugin-path")),
+                                                                     !parser.isSet(QStringLiteral("no-plugins")), packs));
     plugins.scan();
     usdcc::app::configurePluginUsd(plugins);
     usdcc::app::registerRenderers();

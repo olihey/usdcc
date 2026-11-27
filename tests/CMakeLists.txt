@@ -89,6 +89,10 @@ add_dependencies(usdcc_tests usdcc_node)
 # docs/PHYSICS.md: the phase 0 spike drives Jolt directly; the physics tests use the
 # plugin's backend library (Jolt's DLL is copied beside them at the end of this file).
 # A feature left out of the build (docs/BUILD_OPTIONS.md) takes its tests with it.
+# The index of optional packs (docs/USD_PLUGINS.md §10), the app's too.
+if(USDCC_BUILD_PACKS)
+    target_sources(usdcc_tests PRIVATE pack_index_test.cpp ${CMAKE_SOURCE_DIR}/src/cpp/app/pack_index.cpp)
+endif()
 if(USDCC_BUILD_UV_VIEW)
     target_sources(usdcc_tests PRIVATE uv_layout_test.cpp)
     target_link_libraries(usdcc_tests PRIVATE usdcc_uv_view_core)
@@ -218,6 +222,7 @@ add_executable(usdcc_python_tests
     python_test_main.cpp
     assets_python_test.cpp
     primvars_python_test.cpp
+    pack_store_test.cpp
     package_environment_test.cpp
     plugin_manager_test.cpp
     plugin_native_test.cpp
@@ -238,6 +243,16 @@ add_executable(usdcc_python_tests
 )
 target_link_libraries(usdcc_python_tests PRIVATE usdcc_scripting usdcc_scripting_app usdcc_scripting_ui usdcc_send_to)
 target_compile_definitions(usdcc_python_tests PRIVATE USDCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data" USDCC_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# Installing an optional pack (docs/USD_PLUGINS.md §10): the app's installer, here because
+# it unpacks with usdcc's Python.
+if(USDCC_BUILD_PACKS)
+    target_sources(usdcc_python_tests PRIVATE pack_installer_test.cpp app_packs_test.cpp
+        ${CMAKE_SOURCE_DIR}/src/cpp/app/app_packs.cpp
+        ${CMAKE_SOURCE_DIR}/src/cpp/app/pack_installer.cpp ${CMAKE_SOURCE_DIR}/src/cpp/app/pack_installer.h
+        ${CMAKE_SOURCE_DIR}/src/cpp/app/pack_index.cpp)
+    target_include_directories(usdcc_python_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/cpp/app")
+    target_link_libraries(usdcc_python_tests PRIVATE Qt6::Network)
+endif()
 
 # A C++ plugin for plugin_native_test.cpp, with a DLL of its own beside it.
 set(_usdcc_test_plugins "${CMAKE_CURRENT_BINARY_DIR}/plugins")
@@ -427,6 +442,12 @@ if(TARGET blender_mesh_tools)
         COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_build_test.py")
     add_test(NAME usdcc_blender_mesh_package_tools
         COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/blender_mesh_package_test.py")
+endif()
+
+# The release side of the optional packs (docs/USD_PLUGINS.md §10): the folder usdcc installs,
+# its archive and the index, in Python as the tools are.
+if(USDCC_PYTHON_EXECUTABLE)
+    add_test(NAME usdcc_pack_tools COMMAND "${USDCC_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pack_tools_test.py")
 endif()
 
 # A debugger attached to the app (editor_debug_test.cpp): its own run, as debugpy stays

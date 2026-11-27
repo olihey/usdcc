@@ -24,6 +24,12 @@ if(USDCC_BUILD_UPDATES)
     target_sources(usdcc PRIVATE app_updates.cpp app_updates.h release_check.cpp release_check.h running_programs.h)
     target_link_libraries(usdcc PRIVATE Qt6::Network)
 endif()
+# Packs (docs/USD_PLUGINS.md section 10): downloaded with Qt Network too, from the releases.
+if(USDCC_BUILD_PACKS)
+    target_sources(usdcc PRIVATE app_packs.cpp app_packs.h pack_index.cpp pack_index.h pack_installer.cpp pack_installer.h
+                                 system_proxy.h)
+    target_link_libraries(usdcc PRIVATE Qt6::Network)
+endif()
 if(USDCC_BUILD_UPDATES AND USDCC_VELOPACK_FOUND)
     target_link_libraries(usdcc PRIVATE usdcc::velopack)
     if(WIN32)

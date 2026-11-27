@@ -11,11 +11,12 @@
 #include <string>
 #include <vector>
 
-class QFile;
 class QLockFile;
 class QProcess;
 
 namespace usdcc::scripting {
+
+class InUseMarker;
 
 // What one plugin, or the user (an empty id), wants installed.
 struct PackageRequest {
@@ -59,8 +60,8 @@ struct EnvironmentRecord {
 //
 // A running app must never see its folder change, and Windows won't stop that
 // happening: a loaded .pyd can be deleted. So every change makes a new folder and
-// switches the pointer last, and each running app holds .in-use open, which is what
-// actually stops a folder being removed.
+// switches the pointer last, and each running app holds .in-use open (in_use_marker.h),
+// which is what actually stops a folder being removed.
 class PackageEnvironment {
 public:
     PackageEnvironment(std::filesystem::path root, std::string pythonTag);
@@ -83,7 +84,7 @@ public:
 private:
     std::filesystem::path m_root;
     std::string m_tag;
-    std::unique_ptr<QFile> m_inUse;
+    std::unique_ptr<InUseMarker> m_inUse;
 };
 
 // Where packages come from (the Sources settings).
