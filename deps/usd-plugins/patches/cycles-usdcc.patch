@@ -1,5 +1,5 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 422aed75b..385f2757a 100644
+index 422aed75..c14d99ab 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
 @@ -283,7 +283,8 @@ if(WITH_CYCLES_DEVICE_ONEAPI)
@@ -12,8 +12,22 @@ index 422aed75b..385f2757a 100644
    add_definitions(-DWITH_EMBREE)
    if(WITH_CYCLES_DEVICE_ONEAPI AND EMBREE_SYCL_SUPPORT)
      # NOTE: The debug version of Embree is built without SYCL support on Windows
+@@ -362,11 +363,8 @@ if(WITH_CYCLES_PUGIXML OR OPENIMAGEIO_PUGIXML_FOUND)
+   endif()
+ endif()
+ 
+-if(CYCLES_STANDALONE_REPOSITORY)
+-  include_directories(../third_party/atomic)
+-else()
+-  include_directories(../atomic)
+-endif()
++# usdcc: util/atomic.h implements the CPU atomics itself; Blender's third_party/atomic
++# headers (GPL-2.0-or-later) are not on the include path, so nothing can include them.
+ 
+ # Warnings
+ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 diff --git a/src/cmake/external_libs.cmake b/src/cmake/external_libs.cmake
-index 684cbf5e8..4b7bd5500 100644
+index 684cbf5e..4b7bd550 100644
 --- a/src/cmake/external_libs.cmake
 +++ b/src/cmake/external_libs.cmake
 @@ -465,7 +465,8 @@ endif()
@@ -38,7 +52,7 @@ index 684cbf5e8..4b7bd5500 100644
    else()
      add_bundled_libraries(embree/lib)
 diff --git a/src/hydra/CMakeLists.txt b/src/hydra/CMakeLists.txt
-index f1af78c92..12854d2f9 100644
+index f1af78c9..12854d2f 100644
 --- a/src/hydra/CMakeLists.txt
 +++ b/src/hydra/CMakeLists.txt
 @@ -112,6 +112,8 @@ target_link_libraries(cycles_hydra
@@ -52,13 +66,14 @@ index f1af78c92..12854d2f9 100644
    )
 diff --git a/src/hydra/implicit_surfaces.cpp b/src/hydra/implicit_surfaces.cpp
 new file mode 100644
-index 000000000..beeb758ff
+index 00000000..bb8b4890
 --- /dev/null
 +++ b/src/hydra/implicit_surfaces.cpp
-@@ -0,0 +1,55 @@
-+/* SPDX-FileCopyrightText: 2022 Pixar
+@@ -0,0 +1,56 @@
++/* Copyright 2022 Pixar
 + *
-+ * SPDX-License-Identifier: Apache-2.0
++ * Licensed under the terms set forth in the LICENSE.txt file available at
++ * https://openusd.org/license.
 + *
 + * Adapted from OpenUSD's hdEmbree (pxr/imaging/plugin/hdEmbree/implicitSurfaceSceneIndexPlugin.cpp). */
 +
@@ -113,13 +128,14 @@ index 000000000..beeb758ff
 +PXR_NAMESPACE_CLOSE_SCOPE
 diff --git a/src/hydra/implicit_surfaces.h b/src/hydra/implicit_surfaces.h
 new file mode 100644
-index 000000000..0b0b41cb6
+index 00000000..b14b443d
 --- /dev/null
 +++ b/src/hydra/implicit_surfaces.h
-@@ -0,0 +1,26 @@
-+/* SPDX-FileCopyrightText: 2022 Pixar
+@@ -0,0 +1,27 @@
++/* Copyright 2022 Pixar
 + *
-+ * SPDX-License-Identifier: Apache-2.0
++ * Licensed under the terms set forth in the LICENSE.txt file available at
++ * https://openusd.org/license.
 + *
 + * Adapted from OpenUSD's hdEmbree (pxr/imaging/plugin/hdEmbree/implicitSurfaceSceneIndexPlugin.h). */
 +
@@ -144,10 +160,22 @@ index 000000000..0b0b41cb6
 +
 +PXR_NAMESPACE_CLOSE_SCOPE
 diff --git a/src/hydra/light.cpp b/src/hydra/light.cpp
-index 1457e7752..9fe8307df 100644
+index 1457e775..32f7f687 100644
 --- a/src/hydra/light.cpp
 +++ b/src/hydra/light.cpp
-@@ -92,8 +92,9 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
+@@ -1,7 +1,10 @@
+ /* SPDX-FileCopyrightText: 2022 NVIDIA Corporation
+  * SPDX-FileCopyrightText: 2022 Blender Foundation
+  *
+- * SPDX-License-Identifier: Apache-2.0 */
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Changed for usdcc (https://github.com/olihey/usdcc): a dome light's intensity is not
++ * converted to radiant flux. */
+ 
+ #include "hydra/light.h"
+ #include "hydra/session.h"
+@@ -92,8 +95,9 @@ void HdCyclesLight::Sync(HdSceneDelegate *sceneDelegate,
        /* Unclear why, but approximately matches Karma. */
        strength *= 4.0f;
      }
@@ -160,7 +188,7 @@ index 1457e7752..9fe8307df 100644
      }
  
 diff --git a/src/hydra/resources/plugInfo.json b/src/hydra/resources/plugInfo.json
-index 94fe778ea..52426bb01 100644
+index 94fe778e..52426bb0 100644
 --- a/src/hydra/resources/plugInfo.json
 +++ b/src/hydra/resources/plugInfo.json
 @@ -9,6 +9,14 @@
@@ -178,3 +206,190 @@ index 94fe778ea..52426bb01 100644
                      }
                  }
              },
+diff --git a/src/util/atomic.h b/src/util/atomic.h
+index 697df947..9d7af5e7 100644
+--- a/src/util/atomic.h
++++ b/src/util/atomic.h
+@@ -1,13 +1,179 @@
+ /* SPDX-FileCopyrightText: 2014-2022 Blender Foundation
+  *
+- * SPDX-License-Identifier: Apache-2.0 */
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Changed for usdcc (https://github.com/olihey/usdcc): the CPU atomics are implemented here
++ * on compiler built-ins, in place of Blender's third_party/atomic headers, which are
++ * GPL-2.0-or-later. */
+ 
+ #pragma once
+ 
+ #ifndef __KERNEL_GPU__
+ 
+-/* Using atomic ops header from Blender. */
+-#  include "atomic_ops.h"  // IWYU pragma: export
++#  include <cstddef>
++#  include <cstdint>
++#  include <cstring>
++#  if defined(_MSC_VER) && !defined(__clang__)
++#    include <atomic>
++#  endif
++
++/* The CPU atomics Cycles uses, sequentially consistent, with the names and signatures of
++ * Blender's atomic_ops.h. */
++
++#  if defined(_MSC_VER) && !defined(__clang__)
++#    define CCL_ATOMIC_INLINE static __forceinline
++template<typename T> inline T ccl_atomic_fetch_add(T *p, const T x)
++{
++  return std::atomic_ref<T>(*p).fetch_add(x);
++}
++template<typename T> inline T ccl_atomic_fetch_sub(T *p, const T x)
++{
++  return std::atomic_ref<T>(*p).fetch_sub(x);
++}
++template<typename T> inline T ccl_atomic_fetch_or(T *p, const T x)
++{
++  return std::atomic_ref<T>(*p).fetch_or(x);
++}
++template<typename T> inline T ccl_atomic_load(T *p)
++{
++  return std::atomic_ref<T>(*p).load();
++}
++/* Returns the value *p had; it was replaced if that is `expected`. */
++template<typename T> inline T ccl_atomic_cas(T *p, T expected, const T desired)
++{
++  std::atomic_ref<T>(*p).compare_exchange_strong(expected, desired);
++  return expected;
++}
++#  else
++#    define CCL_ATOMIC_INLINE static inline __attribute__((always_inline))
++template<typename T> inline T ccl_atomic_fetch_add(T *p, const T x)
++{
++  return __atomic_fetch_add(p, x, __ATOMIC_SEQ_CST);
++}
++template<typename T> inline T ccl_atomic_fetch_sub(T *p, const T x)
++{
++  return __atomic_fetch_sub(p, x, __ATOMIC_SEQ_CST);
++}
++template<typename T> inline T ccl_atomic_fetch_or(T *p, const T x)
++{
++  return __atomic_fetch_or(p, x, __ATOMIC_SEQ_CST);
++}
++template<typename T> inline T ccl_atomic_load(T *p)
++{
++  return __atomic_load_n(p, __ATOMIC_SEQ_CST);
++}
++/* Returns the value *p had; it was replaced if that is `expected`. */
++template<typename T> inline T ccl_atomic_cas(T *p, T expected, const T desired)
++{
++  __atomic_compare_exchange_n(p, &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
++  return expected;
++}
++#  endif
++
++/* 32-bit unsigned integers. The fetch_and_ ones return the value before, the _and_fetch ones
++ * the value after. */
++CCL_ATOMIC_INLINE uint32_t atomic_fetch_and_add_uint32(uint32_t *p, const uint32_t x)
++{
++  return ccl_atomic_fetch_add(p, x);
++}
++CCL_ATOMIC_INLINE uint32_t atomic_fetch_and_sub_uint32(uint32_t *p, const uint32_t x)
++{
++  return ccl_atomic_fetch_sub(p, x);
++}
++CCL_ATOMIC_INLINE uint32_t atomic_fetch_and_or_uint32(uint32_t *p, const uint32_t x)
++{
++  return ccl_atomic_fetch_or(p, x);
++}
++CCL_ATOMIC_INLINE uint32_t atomic_add_and_fetch_uint32(uint32_t *p, const uint32_t x)
++{
++  return ccl_atomic_fetch_add(p, x) + x;
++}
++CCL_ATOMIC_INLINE uint32_t atomic_sub_and_fetch_uint32(uint32_t *p, const uint32_t x)
++{
++  return ccl_atomic_fetch_sub(p, x) - x;
++}
++CCL_ATOMIC_INLINE uint32_t atomic_cas_uint32(uint32_t *v, const uint32_t old, const uint32_t _new)
++{
++  return ccl_atomic_cas(v, old, _new);
++}
++
++CCL_ATOMIC_INLINE unsigned int atomic_add_and_fetch_u(unsigned int *p, const unsigned int x)
++{
++  return ccl_atomic_fetch_add(p, x) + x;
++}
++CCL_ATOMIC_INLINE unsigned int atomic_sub_and_fetch_u(unsigned int *p, const unsigned int x)
++{
++  return ccl_atomic_fetch_sub(p, x) - x;
++}
++
++/* size_t. */
++CCL_ATOMIC_INLINE size_t atomic_add_and_fetch_z(size_t *p, const size_t x)
++{
++  return ccl_atomic_fetch_add(p, x) + x;
++}
++CCL_ATOMIC_INLINE size_t atomic_sub_and_fetch_z(size_t *p, const size_t x)
++{
++  return ccl_atomic_fetch_sub(p, x) - x;
++}
++CCL_ATOMIC_INLINE size_t atomic_fetch_and_add_z(size_t *p, const size_t x)
++{
++  return ccl_atomic_fetch_add(p, x);
++}
++CCL_ATOMIC_INLINE size_t atomic_fetch_and_sub_z(size_t *p, const size_t x)
++{
++  return ccl_atomic_fetch_sub(p, x);
++}
++/* Raises *p to x if it is less; returns the value before. */
++CCL_ATOMIC_INLINE size_t atomic_fetch_and_update_max_z(size_t *p, const size_t x)
++{
++  size_t prev = ccl_atomic_load(p);
++  while (prev < x) {
++    const size_t seen = ccl_atomic_cas(p, prev, x);
++    if (seen == prev) {
++      break;
++    }
++    prev = seen;
++  }
++  return prev;
++}
++
++/* Floats, by their bits. */
++CCL_ATOMIC_INLINE uint32_t ccl_atomic_float_bits(const float f)
++{
++  uint32_t u;
++  memcpy(&u, &f, sizeof(u));
++  return u;
++}
++CCL_ATOMIC_INLINE float ccl_atomic_bits_float(const uint32_t u)
++{
++  float f;
++  memcpy(&f, &u, sizeof(f));
++  return f;
++}
++/* Returns the value *v had; it was replaced if its bits are those of `old`. */
++CCL_ATOMIC_INLINE float atomic_cas_float(float *v, const float old, const float _new)
++{
++  static_assert(sizeof(float) == sizeof(uint32_t), "float is 32 bits");
++  return ccl_atomic_bits_float(ccl_atomic_cas(reinterpret_cast<uint32_t *>(v),
++                                              ccl_atomic_float_bits(old),
++                                              ccl_atomic_float_bits(_new)));
++}
++/* Adds x to *p; returns the sum. */
++CCL_ATOMIC_INLINE float atomic_add_and_fetch_fl(float *p, const float x)
++{
++  uint32_t *bits = reinterpret_cast<uint32_t *>(p);
++  uint32_t prev = ccl_atomic_load(bits);
++  for (;;) {
++    const float sum = ccl_atomic_bits_float(prev) + x;
++    const uint32_t seen = ccl_atomic_cas(bits, prev, ccl_atomic_float_bits(sum));
++    if (seen == prev) {
++      return sum;
++    }
++    prev = seen;
++  }
++}
++
++#  undef CCL_ATOMIC_INLINE
+ 
+ #  define atomic_add_and_fetch_float(p, x) atomic_add_and_fetch_fl((p), (x))
+ #  define atomic_compare_and_swap_float(p, old_val, new_val) \

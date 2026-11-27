@@ -400,7 +400,7 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished: its licences are read, but GPL atomics headers are compiled in, §5), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
 | `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
 
 How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
@@ -466,10 +466,52 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
     licence; the headers are build-time and the runtime is in the driver), HIP (AMD,
     mostly MIT), oneAPI (Intel's runtime licence).
 
-  Until step 6 of the build has collected that list and it has been read, Cycles' pin
-  says `"set": "optional"` with `"publish": false`, for the reason given for MoonRay
-  below. If the GPU kernels make the standard archive too big, they become a pack of
-  their own in the `optional` set, and the standard one stays CPU only.
+  If the GPU kernels make the standard archive too big, they become a pack of their own
+  in the `optional` set, and the standard one stays CPU only.
+
+  **The list read (2026-11-27)**, from the three CPU packs `deps-usd-plugins.yml` built
+  for the pin (run 45945194968, hash `231aea80`, `091c8c2e` on macOS) and the Cycles
+  source at `3eb35f8`. Cycles' pin keeps `"set": "optional"` with `"publish": false`
+  until item 1 is fixed:
+  1. **Blocker: GPL code compiled in.** `src/util/atomic.h` includes Blender's
+     `third_party/atomic/atomic_ops.h` for every CPU build, and those headers
+     (`atomic_ops.h`, `intern/atomic_ops_{ext,unix,msvc,utils}.h`) are jemalloc's
+     BSD-2-Clause code with Blender Foundation's 2016 changes under a GPL-2.0-or-later
+     licence block. Their inline functions end up in `hdCycles` on all three platforms,
+     so the pack isn't the Apache-2.0-only work the standard zip needs. Blender itself
+     still ships them this way (`intern/atomic`, v4.5). The fix is a patch that has
+     `util/atomic.h` implement the dozen or so operations Cycles uses (fetch-and-add,
+     compare-and-swap for 32/64-bit integers, size_t and float) on compiler builtins
+     (`__atomic_*` with GCC and Clang, `Interlocked*` with MSVC), written fresh and not
+     taken from those headers, and drops `third_party/atomic` from the include path, so
+     a build that still includes them fails.
+  2. **Our patch mislabels OpenUSD code.** `cycles-usdcc.patch` adds
+     `hydra/implicit_surfaces.{h,cpp}`, adapted from hdEmbree, under
+     `SPDX-License-Identifier: Apache-2.0`. OpenUSD's file is under OpenUSD's licence,
+     the Tomorrow Open Source Technology License 1.0. usdcc ships that licence anyway,
+     but the header should name it ("Licensed under the terms set forth in the
+     LICENSE.txt file available at https://openusd.org/license").
+  3. **A changed file without a notice.** The patch changes `hydra/light.cpp` (a dome
+     light's strength) and doesn't mark it as changed, which Apache-2.0 §4(b) asks for. A
+     one-line comment there is enough. The CMake files the patch changes aren't shipped.
+
+  Fine as it is:
+  - **What's linked at run time:** only OpenUSD's asset (its USD libraries, OpenImageIO,
+    OpenColorIO, OpenVDB, OpenSubdiv, Embree, TBB, MaterialX, Python), the system, and
+    the pack's three Open Image Denoise libraries (checked with `otool -L` and
+    `objdump -p`). Nothing from Blender's libraries is loaded besides those three.
+  - **Statically linked, with their licence texts in the pack:** pugixml (MIT), zstd
+    (BSD-3-Clause; it's dual-licensed with GPL-2.0, and we take the BSD option), zlib
+    on Linux and Windows (zlib; macOS uses the system's), pthreads4w on Windows
+    (Apache-2.0; its `NOTICE` ships), sse2neon on macOS (MIT), and epoxy's headers (MIT).
+  - **Open Image Denoise 2.5.0:** Apache-2.0. Its third-party list (oneTBB, PyTorch,
+    Catch2, CUTLASS) and oneTBB's (ITT Notify, hwloc and others) are all permissive,
+    and both lists ship.
+  - **Cycles' own source:** 817 files Apache-2.0, the rest BSD-3-Clause, MIT or Zlib,
+    with their texts in `cycles-notices/`. The only other GPL file,
+    `src/cmake/dependency_targets.cmake`, is build-only. `cuew`, `hipew` and
+    `libc_compat` are Apache-2.0. Cycles has no `NOTICE` file to carry.
+  - **No GPU device** is built, so none of the GPU licences apply yet.
 - **MoonRay is Apache-2.0**, so it can go in the standard zip, which stays BSD-3-Clause.
   Apache-2.0 asks for its `LICENSE` and `NOTICE` in the release, and for files our patches
   change to say so. What it brings, as far as is known before a build:

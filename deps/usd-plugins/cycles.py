@@ -19,6 +19,11 @@ Cycles checkout is at the pinned commit with patches/cycles-usdcc.patch applied.
    own libraries, so nothing of its own can be there, docs/USD_PLUGINS.md section
    10). Its GPU devices aren't taken.
 
+Blender's third_party/atomic headers are GPL-2.0-or-later. The patch has
+util/atomic.h implement the CPU atomics itself and takes the folder off the include
+path; build() also deletes it from the checkout, so no file of a later Cycles can
+include it unnoticed: the build fails instead (docs/USD_PLUGINS.md section 5).
+
 Blender's library folders have no licence files: LICENCES downloads each one's at
 the version Blender's lib/<platform>/deps.md names, checked by SHA-256. Returns
 them as {name: folder}.
@@ -193,6 +198,8 @@ def build(ctx):
     run, work, usd, source, prefix = ctx.run, ctx.work, ctx.usd, ctx.source, ctx.prefix
     libraries = _libraries(source, work)
     licences = _licences(work)
+    # GPL-2.0-or-later, and not used once the patch is in (the docstring says why).
+    remove_tree(source / "third_party" / "atomic")
 
     embree = next((file for pattern in ("embree4.lib", "libembree4.so", "libembree4.dylib")
                    for file in (usd / "lib").glob(pattern)), None) or fail(f"No Embree 4 in {usd / 'lib'}")
