@@ -8,6 +8,7 @@
 #include "app_updates.h"
 #endif
 #include "file_open_events.h"
+#include "peers_send.h"
 #include "startup.h"
 
 #include <algorithm>
@@ -1122,6 +1123,10 @@ int main(int argc, char** argv) {
     });
     // File > Exit, last: closing the window, which asks about unsaved layers.
     fileMenu->addSeparator();
+    // Send to… (docs/PEERS.md §10.3), filled once the Peers controller is there.
+    QMenu* sendToMenu = fileMenu->addMenu(QObject::tr("Send &To"));
+    sendToMenu->setObjectName(QStringLiteral("sendToMenu"));
+    fileMenu->addSeparator();
     QAction* exitAction = fileMenu->addAction(QObject::tr("E&xit"), &window, &QWidget::close);
     exitAction->setStatusTip(QObject::tr("Close usdcc"));
     exitAction->setMenuRole(QAction::QuitRole);
@@ -1379,6 +1384,9 @@ int main(int argc, char** argv) {
     };
     auto* peersController = new usdcc::ui::PeersController(
         std::make_unique<usdcc::peers::Peers>(std::move(peersOptions)), &window, std::move(peersHooks), &window);
+    usdcc::scripting::setPeersController(peersController);  // usdcc.peers (docs/PEERS.md §8.2)
+    usdcc::app::setUpSendTo({peersController, &window, &stageManager, undoManager.get(), &sessions, scriptEditor},
+                            sendToMenu);
     auto* peersPanel = new usdcc::ui::PeersSidePanel(peersController);
     window.addSidePanel(peersPanel, Qt::RightDockWidgetArea);
     peersPanel->hide();

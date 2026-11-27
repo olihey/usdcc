@@ -8,6 +8,13 @@ if(Python3_LIBRARY AND EXISTS "${Python3_LIBRARY}")
     target_link_libraries(usdcc_app_core PUBLIC "${Python3_LIBRARY}")
 endif()
 
+# Send to… (docs/PEERS.md §10.3): File > Send To and what each kind received does. A library of
+# its own so that usdcc_python_tests runs the app's own receivers.
+add_library(usdcc_send_to STATIC peers_send.cpp peers_send.h)
+target_include_directories(usdcc_send_to PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(usdcc_send_to PUBLIC usdcc_ui usdcc_usd_ui usdcc_render usdcc_peers usdcc_scripting_app
+                                           usdcc_scripting_ui)
+
 # usdcc — the application executable.
 add_executable(usdcc main.cpp file_open_events.h)
 # Updates (docs/UPDATES.md): GitHub's releases with Qt Network (its DLL and TLS plugin are
@@ -82,7 +89,7 @@ if(UNIX AND NOT APPLE)
 endif()
 # For Help > About usdcc.
 target_compile_definitions(usdcc PRIVATE USDCC_COMPILER="${USDCC_BUILT_FOR_COMPILER}")
-target_link_libraries(usdcc PRIVATE usdcc_app_core usdcc_ui usdcc_usd usdcc_tools usdcc_render usdcc_usd_ui usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
+target_link_libraries(usdcc PRIVATE usdcc_send_to usdcc_app_core usdcc_ui usdcc_usd usdcc_tools usdcc_render usdcc_usd_ui usdcc_scripting usdcc_scripting_app usdcc_scripting_ui)
 # usdcc_peers for the plugins that use it (docs/PEERS.md); the app itself doesn't link it yet.
 usdcc_deploy_core_library(usdcc usdcc_usd usdcc_tools usdcc_ui usdcc_render usdcc_usd_ui usdcc_peers)
 

@@ -86,6 +86,9 @@ void bindFinalRenderers(pybind11::module_& m);
 void removeScriptedFinalRenderers();
 // Primvar views from Python (scripted_primvar_view.cpp).
 void bindPrimvarViews(pybind11::module_& m);
+// usdcc.peers (peers_module.cpp).
+void bindPeers(pybind11::module_& m);
+void endPeersConnections();
 void removeScriptedPrimvarViews();
 #endif
 
@@ -108,6 +111,9 @@ AppContextScope::AppContextScope(const AppContext& context) : m_context(context)
 AppContextScope::~AppContextScope() {
     s_context = m_outer;
     s_eventConnections.clear();
+#if USDCC_HAS_PYTHON
+    endPeersConnections();
+#endif
     usdcc::usd::PrimMenuEntries::instance().clear();
     // Python's commands call into Python; the built-ins and C++ plugins' stay.
     for (const std::string& id : scriptedPrimvarCommands()) usdcc::usd::PrimvarCommands::instance().remove(id);
@@ -542,6 +548,7 @@ PYBIND11_EMBEDDED_MODULE(_usdcc_app, m) {
     bindRenderViewPanelHandle(m);
     bindFinalRenderers(m);
     bindPrimvarViews(m);
+    bindPeers(m);
     m.def(
         "open_view_panel",
         [](const std::string& id, long cacheId) -> py::object {
@@ -1395,6 +1402,7 @@ void rebuildScriptedPanels(const std::vector<std::string>& types) {
 }
 #else
 void rebuildScriptedPanels(const std::vector<std::string>&) {}
+void setPeersController(usdcc::ui::PeersController*) {}
 #endif  // USDCC_HAS_PYTHON
 
 }  // namespace usdcc::scripting

@@ -10,6 +10,7 @@
 #include "usdcc/peers/channel.h"
 #include "usdcc/peers/peers.h"
 #include "usdcc/peers/room.h"
+#include "usdcc/peers/transfer.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/peers_side_panel.h"
@@ -20,6 +21,7 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -880,4 +882,106 @@ USDCC_TEST(peers_rooms_joined_at_start) {
     left->close();
     QTest::qWait(6500);
     CHECK(ben->chatRooms().isEmpty(), "Ben joined again after leaving");
+}
+
+// Send to… (docs/PEERS.md §10.3): the receiver is offered an item, and nothing comes before its
+// yes; files nobody announced are turned down; to everyone, each gets their own.
+USDCC_TEST(peers_send_to) {
+    TestSettings settings;
+    PeersController::defineSettings();
+    QTemporaryDir folder;
+    auto anna = makeController("Anna", folder.path());
+    auto ben = makeController("Ben", folder.path());
+    auto carl = makeController("Carl", folder.path());
+    QString error;
+    Room* room = anna->host({"Review", Admission::Invited, {}, false}, &error);
+    CHECK(room, "couldn't host: %s", qPrintable(error));
+    if (!room) return;
+    Room* benRoom = ben->joinLinkOrAddress(room->link(), {}, &error);
+    Room* carlRoom = carl->joinLinkOrAddress(room->link(), {}, &error);
+    CHECK(QTest::qWaitFor([&] { return room->peers().size() == 3 && benRoom->peers().size() == 3; }, 5000),
+          "they didn't all join");
+
+    QList<PeersController::ReceivedItem> benOpened, carlOpened;
+    QStringList benOffered;
+    for (auto [controller, opened] : {std::pair{ben.get(), &benOpened}, std::pair{carl.get(), &carlOpened}}) {
+        controller->registerReceiver("test-file", "Open", [opened](const PeersController::ReceivedItem& item) {
+            opened->append(item);
+        });
+        controller->registerReceiver("camera", "Look Through", [opened](const PeersController::ReceivedItem& item) {
+            opened->append(item);
+        });
+    }
+    QObject::connect(ben.get(), &PeersController::itemOffered, ben.get(),
+                     [&](const PeersController::ReceivedItem& item) { benOffered.append(item.title); });
+    QStringList sent;
+    QObject::connect(anna.get(), &PeersController::itemSent, anna.get(),
+                     [&](const QString& title, const Peer& to, const QString& why) {
+                         sent.append(to.name + ": " + title + (why.isEmpty() ? QString() : " (" + why + ")"));
+                     });
+
+    // A file, to Ben alone: offered, and nothing arrives before Accept.
+    const QString outbox = PeersController::newOutboxFolder();
+    QFile file(outbox + "/shot.usda");
+    CHECK(file.open(QIODevice::WriteOnly) && file.write("#usda 1.0\n") > 0, "couldn't write the file");
+    file.close();
+    const PeersController::SendItem shot{"test-file", "shot.usda", {{"open", "shot.usda"}}, outbox, {"shot.usda"}};
+    CHECK(anna->send(room, benRoom->me().id, shot, &error), "couldn't send: %s", qPrintable(error));
+    CHECK(QTest::qWaitFor([&] { return ben->pendingItems().size() == 1; }, 5000), "Ben wasn't offered it");
+    QTest::qWait(300);
+    CHECK(benOpened.isEmpty() && carl->pendingItems().isEmpty() && benOffered == QStringList{"shot.usda"},
+          "something arrived before Accept, or Carl was offered it");
+    const PeersController::ReceivedItem offer = ben->pendingItems().value(0);
+    CHECK(offer.from.name == "Anna" && offer.bytes == 10 && offer.fileCount == 1, "the offer: %s, %lld bytes",
+          qPrintable(offer.from.name), qlonglong(offer.bytes));
+    ben->acceptItem(offer.id);
+    CHECK(QTest::qWaitFor([&] { return benOpened.size() == 1; }, 5000), "it didn't arrive after Accept");
+    if (!benOpened.isEmpty()) {
+        QFile arrived(QDir(benOpened.first().directory).filePath("shot.usda"));
+        CHECK(arrived.open(QIODevice::ReadOnly) && arrived.readAll() == "#usda 1.0\n", "the file isn't what was sent");
+    }
+    CHECK(QTest::qWaitFor([&] { return sent == QStringList{"Ben: shot.usda"}; }, 5000), "the sender heard %s",
+          qPrintable(sent.join(" | ")));
+
+    // To everyone, declined by Ben, taken by Carl.
+    sent.clear();
+    QFile second(outbox + "/other.usda");
+    CHECK(second.open(QIODevice::WriteOnly) && second.write("#usda 1.0\n# other\n") > 0, "couldn't write");
+    second.close();
+    CHECK(anna->send(room, {}, {"test-file", "other.usda", {{"open", "other.usda"}}, outbox, {"other.usda"}}, &error),
+          "couldn't send to everyone: %s", qPrintable(error));
+    CHECK(QTest::qWaitFor([&] { return ben->pendingItems().size() == 1 && carl->pendingItems().size() == 1; }, 5000),
+          "not everyone was offered it");
+    ben->declineItem(ben->pendingItems().value(0).id);
+    carl->acceptItem(carl->pendingItems().value(0).id);
+    CHECK(QTest::qWaitFor([&] { return carlOpened.size() == 1 && sent.size() == 2; }, 5000), "the sender heard %s",
+          qPrintable(sent.join(" | ")));
+    CHECK(sent.contains("Carl: other.usda") && sent.contains("Ben: other.usda (Declined)") && benOpened.size() == 1,
+          "the sender heard %s", qPrintable(sent.join(" | ")));
+
+    // Values only (a camera): opened on Accept, with nothing to transfer.
+    CHECK(anna->send(room, carlRoom->me().id, {"camera", "a viewport camera", {{"yaw", 30}}, {}, {}}, &error),
+          "couldn't send a camera");
+    CHECK(QTest::qWaitFor([&] { return carl->pendingItems().size() == 1; }, 5000), "Carl wasn't offered the camera");
+    carl->acceptItem(carl->pendingItems().value(0).id);
+    CHECK(carlOpened.size() == 2 && carlOpened.last().data.value("yaw").toInt() == 30, "the camera didn't open");
+
+    // A kind Ben can't open is turned down: not even offered.
+    CHECK(anna->send(room, benRoom->me().id, {"unknown-kind", "a mystery", {}, {}, {}}, &error), "couldn't send");
+    QTest::qWait(300);
+    CHECK(ben->pendingItems().isEmpty(), "Ben was offered a kind nobody here opens");
+
+    // Files no item announced: the inbox turns them down.
+    QString reason;
+    QString manifestError;
+    const std::optional<TransferManifest> manifest = TransferManifest::fromFiles(outbox, {"shot.usda"}, &manifestError);
+    Transfer* sneaky = manifest ? Transfer::send(room, "send-files", benRoom->me().id, *manifest, {}, nullptr, &error)
+                                : nullptr;
+    CHECK(sneaky, "couldn't offer: %s", qPrintable(error));
+    if (sneaky) {
+        QObject::connect(sneaky, &Transfer::failed, sneaky, [&](const QString& r) { reason = r; });
+        CHECK(QTest::qWaitFor([&] { return !reason.isEmpty(); }, 5000) && reason == "Declined",
+              "unannounced files: \"%s\"", qPrintable(reason));
+        delete sneaky;
+    }
 }

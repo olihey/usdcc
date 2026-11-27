@@ -15,6 +15,7 @@ class ToolSet;
 
 namespace usdcc::ui {
 class MainWindow;
+class PeersController;
 class ViewPanelRegistry;
 class WorkspaceController;
 }  // namespace usdcc::ui
@@ -68,6 +69,11 @@ struct AppContext {
 // objects. A scope made inside another one (the tests' window) is in effect
 // until it ends, and then the outer one is again. Event connections and prim
 // menu entries made from Python end with a scope, while Python is still there.
+// The app's rooms for usdcc.peers (docs/PEERS.md §8.2); null: none, and usdcc.peers raises.
+// Set apart from AppContext because the app makes it after the context. Rooms' callbacks
+// end with the scope too.
+void setPeersController(usdcc::ui::PeersController* controller);
+
 class AppContextScope {
 public:
     explicit AppContextScope(const AppContext& context);

@@ -128,6 +128,7 @@ if(USDCC_PYTHON_FOUND)
         include/usdcc/scripting/scripted_render_view_panel.h
         include/usdcc/scripting/scripted_tool.h
         include/usdcc/scripting/scripted_view_panel.h
+        src/peers_module.cpp
         src/python_object.h
         src/scripted_final_renderer.cpp
         src/scripted_primvar_view.cpp

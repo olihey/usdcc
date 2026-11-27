@@ -43,6 +43,9 @@ const QString kChat = QStringLiteral("chat");
 const QString kPresence = QStringLiteral("presence");
 const QString kTyping = QStringLiteral("typing");
 const QString kNotify = QStringLiteral("notify");
+const QString kSend = QStringLiteral("send");             // Send to…'s items, Direct
+const QString kSendFiles = QStringLiteral("send-files");  // ... and their files
+constexpr int kItemDataBytes = 256 * 1024;                // An item's own values, in its message
 constexpr int kNotificationsKept = 50;       // Per room, in its chat (PEERS.md §10.2)
 constexpr int kNotificationTitle = 200;
 constexpr int kNotificationBody = 2000;
@@ -275,6 +278,16 @@ void PeersController::defineSettings() {
                      .description = "What the relay asks of a host, if it asks anything.",
                      .type = SettingType::String,
                      .defaultValue = std::string()});
+    settings.define({.key = inboxMaxKey,
+                     .category = "Peers",
+                     .group = "Rooms",
+                     .label = "Receive up to (GB)",
+                     .description = "The most one thing sent to you (Send to…) may be. Larger ones are turned down "
+                                    "before anything is sent.",
+                     .type = SettingType::Int,
+                     .defaultValue = 20,
+                     .minimum = 1,
+                     .maximum = 1024});
     settings.define({.key = notificationToastsKey,
                      .category = "Peers",
                      .group = "Notifications",
@@ -354,7 +367,19 @@ PeersController::PeersController(std::unique_ptr<Peers> peers, MainWindow* windo
         m_private.remove(room);
         m_typists.removeIf([room](const Typist& typist) { return typist.room == room; });
         m_imageInboxes.remove(room);
+        m_sendInboxes.remove(room);
         m_links.remove(room);
+        // What it offered goes with it: its files can't come any more.
+        for (auto it = m_items.begin(); it != m_items.end();) {
+            if (it->room == room || !it->room) {
+                if (const int toast = m_itemToasts.take(it.key()); toast && m_window) {
+                    m_window->toasts()->dismiss(toast);
+                }
+                it = m_items.erase(it);
+            } else {
+                ++it;
+            }
+        }
         updateStatus();
         Q_EMIT roomsChanged();
     });
@@ -570,6 +595,10 @@ void PeersController::adopt(Room* room) {
     // them, as they may chat; a hub lets only itself and named services.
     connect(room->channel(kNotify), &Channel::received, this,
             [this, room](const Message& message) { onNotify(room, message); });
+    // Send to… (PEERS.md §10.3).
+    connect(room->channel(kSend, Delivery::Direct), &Channel::received, this,
+            [this, room](const Message& message) { onItem(room, message); });
+    openSendInbox(room);
     connect(room, &Room::opened, this, [this, room] {
         updatePresence();
         addLine(room, {{}, tr("You joined %1").arg(room->name()), QDateTime::currentDateTime()});
@@ -1829,6 +1858,290 @@ void PeersController::setJoinsAtStart(Room* room, bool on) {
         links.removeAll(link);
     }
     core::Settings::instance().setValue(startRoomsKey, links.join(u' ').toStdString());
+}
+
+// ---------------------------------------------------------------------------------
+// Send to… (PEERS.md §10.3)
+
+namespace {
+
+QString sizeText(qint64 bytes) {
+    if (bytes < 1024 * 1024) {
+        return PeersController::tr("%1 KB").arg(std::max<qint64>(1, (bytes + 1023) / 1024));
+    }
+    if (bytes < qint64(1024) * 1024 * 1024) {
+        return PeersController::tr("%1 MB").arg(double(bytes) / (1024.0 * 1024.0), 0, 'f', 1);
+    }
+    return PeersController::tr("%1 GB").arg(double(bytes) / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+}
+
+QString outboxRoot() {
+    return usdcc::ui::userDataFolder() + QStringLiteral("/peers/outbox");
+}
+
+}  // namespace
+
+QString PeersController::newOutboxFolder() {
+    // What is left from before (a crash, a transfer that never ended) goes after a day.
+    const QDateTime cutoff = QDateTime::currentDateTime().addDays(-1);
+    for (const QFileInfo& old : QDir(outboxRoot()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (old.lastModified() < cutoff) {
+            QDir(old.absoluteFilePath()).removeRecursively();
+        }
+    }
+    const QString folder = outboxRoot() + u'/' + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QDir().mkpath(folder);
+    return folder;
+}
+
+void PeersController::registerReceiver(const QString& kind, const QString& action,
+                                       std::function<void(const ReceivedItem&)> open) {
+    m_receivers.insert(kind, {action, std::move(open)});
+}
+
+void PeersController::openSendInbox(Room* room) {
+    TransferInbox::Options options;
+    // Each room's in its own folder: by its host's key, which a hub keeps from run to run.
+    const QString host = room->isHost() ? room->me().fingerprint : room->hostPeer().fingerprint;
+    options.directory = usdcc::ui::userDataFolder() + QStringLiteral("/peers/inbox/") +
+                        (host.isEmpty() ? QStringLiteral("room") : host);
+    options.maxTransferBytes =
+        qint64(core::Settings::instance().get<int>(inboxMaxKey, 20)) * 1024 * 1024 * 1024;
+    // Only files an item announced, from whoever announced it, once the user said yes.
+    options.ask = [this, room](const Peer& from, const TransferManifest& manifest, std::function<void(bool)> answer) {
+        const QString hash = manifest.hash();
+        for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
+            if (it->room == room && it->from.id == from.id && it->bundleHash == hash &&
+                manifest.totalBytes() <= it->bytes) {
+                if (m_itemAnswers.contains(it.key())) {
+                    answer(m_itemAnswers.take(it.key()));
+                } else {
+                    m_itemQuestions.insert(it.key(), std::move(answer));
+                }
+                return;
+            }
+        }
+        answer(false);  // Nothing announced it: nothing comes unasked
+    };
+    auto* inbox = new TransferInbox(room, kSendFiles, options, room);
+    m_sendInboxes.insert(room, inbox);
+    connect(inbox, &TransferInbox::received, this, [this, room](Transfer* transfer) {
+        for (auto it = m_items.begin(); it != m_items.end(); ++it) {
+            if (it->room == room && it->from.id == transfer->peer() && it->bundleHash == transfer->bundleHash()) {
+                it->directory = transfer->directory();
+                openItem(it.key());
+                return;
+            }
+        }
+    });
+    connect(inbox, &TransferInbox::refused, this, [](const Peer& from, const QString&, const QString& reason) {
+        USDCC_LOG_INFO("usdcc.peers", "Turned down files from {}: {}", from.name.toStdString(), reason.toStdString());
+    });
+}
+
+bool PeersController::send(Room* room, const PeerId& to, const SendItem& item, QString* error) {
+    const auto fail = [error](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    if (!room || room->state() != Room::State::Open) {
+        return fail(tr("The room isn't open"));
+    }
+    if (QJsonDocument(item.data).toJson(QJsonDocument::Compact).size() > kItemDataBytes) {
+        return fail(tr("Too much to send in a message; send it as a file"));
+    }
+    QList<Peer> targets;
+    for (const Peer& peer : room->peers()) {
+        if (peer.id != room->me().id && peer.kind != Peer::Kind::Guest && (to.isEmpty() || peer.id == to)) {
+            targets.append(peer);
+        }
+    }
+    if (targets.isEmpty()) {
+        return fail(to.isEmpty() ? tr("Nobody else is in the room") : tr("They aren't in the room any more"));
+    }
+    std::optional<TransferManifest> manifest;
+    if (!item.root.isEmpty()) {
+        QString why;
+        manifest = TransferManifest::fromFiles(item.root, item.files, &why);
+        if (!manifest) {
+            return fail(why);
+        }
+    }
+    for (const Peer& target : targets) {
+        QJsonObject body{{"id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+                         {"kind", item.kind},
+                         {"title", item.title},
+                         {"data", item.data}};
+        if (manifest) {
+            body.insert("bundle", QJsonObject{{"hash", manifest->hash()},
+                                              {"bytes", manifest->totalBytes()},
+                                              {"files", int(manifest->files.size())}});
+        }
+        room->channel(kSend, Delivery::Direct)->send(QStringLiteral("item"), body, {}, target.id);
+        if (!manifest) {
+            continue;
+        }
+        QString why;
+        Transfer* transfer = Transfer::send(room, kSendFiles, target.id, *manifest, {}, this, &why);
+        if (!transfer) {
+            Q_EMIT itemSent(item.title, target, why);
+            continue;
+        }
+        const QString title = item.title;
+        connect(transfer, &Transfer::finished, this, [this, title, target] { Q_EMIT itemSent(title, target, {}); });
+        connect(transfer, &Transfer::failed, this, [this, title, target](const QString& reason) {
+            Q_EMIT itemSent(title, target, reason);
+            if (m_window) {
+                core::ToastRequest toast;
+                toast.kind = core::ToastKind::Warning;
+                toast.title = tr("%1 didn't get %2").arg(target.name, title).toStdString();
+                toast.body = reason.toStdString();
+                m_window->toasts()->show(toast);
+            }
+        });
+    }
+    return true;
+}
+
+void PeersController::onItem(Room* room, const Message& message) {
+    if (message.type != u"item") {
+        return;
+    }
+    const Peer from = room->peer(message.from);
+    if (!from.isValid() || from.kind == Peer::Kind::Guest) {
+        return;
+    }
+    ReceivedItem item;
+    item.id = message.body.value("id").toString().left(64);
+    item.room = room;
+    item.from = from;
+    item.kind = message.body.value("kind").toString().left(64);
+    item.title = message.body.value("title").toString().simplified().left(200);
+    item.data = message.body.value("data").toObject();
+    const QJsonObject bundle = message.body.value("bundle").toObject();
+    item.bundleHash = bundle.value("hash").toString();
+    item.bytes = bundle.value("bytes").toInteger();
+    item.fileCount = bundle.value("files").toInt();
+    if (item.id.isEmpty() || m_items.contains(item.id)) {
+        return;
+    }
+    const auto receiver = m_receivers.constFind(item.kind);
+    if (receiver == m_receivers.constEnd()) {
+        USDCC_LOG_WARNING("usdcc.peers", "{} sent something this usdcc can't open ({}); turned down",
+                          from.name.toStdString(), item.kind.toStdString());
+        return;
+    }
+    if (isMuted(from)) {
+        return;
+    }
+    m_items.insert(item.id, item);
+    addLine(room, {{}, tr("%1 sent you %2").arg(from.name, item.title), QDateTime::currentDateTime()});
+    Q_EMIT itemOffered(item);
+    if (!m_window) {
+        return;
+    }
+    core::ToastRequest toast = core::ToastRequest::sticky();
+    toast.title = tr("%1 sent you %2").arg(from.name, item.title).toStdString();
+    toast.body = (item.bundleHash.isEmpty() ? room->name()
+                                            : tr("%1 · %2").arg(sizeText(item.bytes), room->name()))
+                     .toStdString();
+    const QString id = item.id;
+    m_itemToasts.insert(id, m_window->toasts()->show(toast, {{receiver->action, [this, id] { acceptItem(id); }},
+                                                             {tr("Decline"), [this, id] { declineItem(id); }}}));
+}
+
+void PeersController::acceptItem(const QString& id) {
+    const auto found = m_items.find(id);
+    if (found == m_items.end()) {
+        return;
+    }
+    if (const int toast = m_itemToasts.take(id); toast && m_window) {
+        m_window->toasts()->dismiss(toast);
+    }
+    if (found->bundleHash.isEmpty() || !found->directory.isEmpty()) {
+        openItem(id);
+        return;
+    }
+    // Its files come now: the inbox's question is answered, or will be when the offer comes.
+    if (auto question = m_itemQuestions.take(id)) {
+        question(true);
+    } else {
+        m_itemAnswers.insert(id, true);
+    }
+}
+
+void PeersController::declineItem(const QString& id) {
+    if (const int toast = m_itemToasts.take(id); toast && m_window) {
+        m_window->toasts()->dismiss(toast);
+    }
+    if (auto question = m_itemQuestions.take(id)) {
+        question(false);
+    } else if (m_items.contains(id) && !m_items.value(id).bundleHash.isEmpty()) {
+        m_itemAnswers.insert(id, false);
+    }
+    m_items.remove(id);
+}
+
+void PeersController::openItem(const QString& id) {
+    const auto found = m_items.find(id);
+    if (found == m_items.end()) {
+        return;
+    }
+    const ReceivedItem item = *found;
+    if (!item.bundleHash.isEmpty() && item.directory.isEmpty()) {
+        return;  // Not here yet: opened when it arrives
+    }
+    m_items.erase(found);
+    m_itemAnswers.remove(id);
+    const auto receiver = m_receivers.constFind(item.kind);
+    if (receiver != m_receivers.constEnd() && receiver->open) {
+        receiver->open(item);
+    }
+    Q_EMIT itemOpened(item);
+}
+
+void PeersController::fillSendMenu(QMenu* menu, std::function<std::optional<SendItem>(QString*)> make) {
+    const QList<Room*> rooms = chatRooms();
+    if (rooms.isEmpty()) {
+        menu->addAction(tr("No rooms: host or join one in the Peers panel"))->setEnabled(false);
+        return;
+    }
+    const auto sendTo = [this, make](QPointer<Room> room, const PeerId& to) {
+        QString error;
+        std::optional<SendItem> item = room ? make(&error) : std::nullopt;
+        if (item && !send(room, to, *item, &error)) {
+            item.reset();
+        }
+        if (m_window) {
+            core::ToastRequest toast;
+            toast.kind = item ? core::ToastKind::Info : core::ToastKind::Warning;
+            toast.title = (item ? tr("Sending %1").arg(item->title) : tr("Couldn't send")).toStdString();
+            toast.body = (item ? tr("They are asked whether to take it.") : error).toStdString();
+            if (!item && error.isEmpty()) {
+                return;  // `make` said why itself
+            }
+            m_window->toasts()->show(toast);
+        }
+    };
+    for (Room* room : rooms) {
+        QMenu* sub = rooms.size() == 1 ? menu : menu->addMenu(room->name());
+        const QPointer<Room> guard = room;
+        sub->addAction(tr("Everyone in %1").arg(room->name()), this, [sendTo, guard] { sendTo(guard, {}); });
+        bool separated = false;
+        for (const Peer& peer : room->peers()) {
+            if (peer.id == room->me().id || peer.kind == Peer::Kind::Guest) {
+                continue;
+            }
+            if (!separated) {
+                sub->addSeparator();
+                separated = true;
+            }
+            const PeerId id = peer.id;
+            sub->addAction(peer.name, this, [sendTo, guard, id] { sendTo(guard, id); });
+        }
+    }
 }
 
 }  // namespace usdcc::ui
