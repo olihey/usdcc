@@ -85,6 +85,11 @@ struct USDCC_PEERS_API HostOptions {
     QByteArray page;                          // The guests' page at `/`; empty: a plain one built in
     QString pageDirectory;                    // Or a folder: `/` is its index.html, `/<file>` its files
     QStringList allowedOrigins;               // Pages besides the room's own that may connect (a tunnel's)
+    // Through a relay (PEERS.md §5.4): its base URL (wss://relay.example), for members on
+    // other networks. The room then listens on 127.0.0.1 only, and its link names the
+    // relay (link() is empty until the relay gave a room id: relayReady()).
+    QUrl relay;
+    QString relayToken;                       // What the relay asks of a host, if anything
     Limits limits;
 };
 
@@ -102,11 +107,15 @@ struct USDCC_PEERS_API JoinOptions {
     int reconnectForMs = 60000;               // Keeps trying this long after losing the host; 0: never
 };
 
-// usdcc://join/<address>:<port>#k=<fingerprint>&s=<secret> (PEERS.md §5.3).
+// usdcc://join/<address>:<port>#k=<fingerprint>&s=<secret> (PEERS.md §5.3), or
+// usdcc://join?relay=<wss://relay/r/<room>>#k=…&s=… for a room on a relay (§5.4).
 struct USDCC_PEERS_API JoinLink {
-    QString address;  // "host:port"
+    QString address;  // "host:port"; empty for a room on a relay
     QString fingerprint;
     QString secret;
+    QString relay;    // The room's URL on the relay; empty for one joined directly
+    // What Room::join() takes: the address, or the relay's URL.
+    QString target() const { return relay.isEmpty() ? address : relay; }
 };
 USDCC_PEERS_API QString makeJoinLink(const JoinLink& link);
 USDCC_PEERS_API std::optional<JoinLink> parseJoinLink(const QString& text);
@@ -146,7 +155,8 @@ public:
 
     // Starts listening. nullptr, with why in `error`, when it can't (the port is taken).
     static Room* host(const HostOptions& options, QObject* parent = nullptr, QString* error = nullptr);
-    // Connects to `address` ("host:port"). The room opens (opened()) when the host
+    // Connects to `address` ("host:port", or a ws:// or wss:// URL: a room on a relay).
+    // The room opens (opened()) when the host
     // welcomes it, or closes (closed()) if refused or unreachable.
     static Room* join(const QString& address, const JoinOptions& options, QObject* parent = nullptr);
 
@@ -189,6 +199,9 @@ public:
     // address: 127.0.0.1 for a room on the loopback, else this machine's first network
     // address. Likewise the guests' web link, http://<address>:<port>/#s=<guest secret>.
     QString link(const QString& address = {}) const;
+    // Hosted through a relay (HostOptions::relay), and whether the relay has it now.
+    bool isRelayed() const;
+    bool isOnRelay() const;
     QUrl guestLink(const QString& address = {}) const;
     void remove(const PeerId& id, const QString& reason = {});
     // Gives the room another name, for everyone in it and where it is announced. False
@@ -210,6 +223,10 @@ Q_SIGNALS:
     // The host gave the room another name (rename()), here too on the host.
     void renamed(const QString& name);
     void closed(const QString& reason);
+    // Host only, through a relay: it has the room (again) and link() names it; or it can't
+    // be reached, and the room tries again.
+    void relayReady();
+    void relayFailed(const QString& reason);
     // Host only: someone asks to join (Admission::Ask).
     void joinRequested(usdcc::peers::JoinRequest* request);
 

@@ -93,7 +93,45 @@ curl -H "Authorization: Bearer $(cat hub.token)" \
 | `POST /state` | `{room?, map, key, value}`; without `value` the key is removed | Sets a key of a shared map, as the hub |
 | `GET /rooms` | | The rooms and who is in each |
 
+## The relay
+
+For people on different networks, behind routers, who can't reach each other (PEERS.md §5.4):
+both sides connect out to the relay, which passes on what they say without being able to read
+it. It needs only `websockets`.
+
+```
+python -m usdcc_peers.relay --port 8443 --token-file relay.token
+```
+
+Installing the package also gives it as `usdcc-relay`. Put it behind an HTTPS reverse proxy for
+`wss://`, or give it `--certfile` and `--keyfile`. The certificate file holds the full chain, the
+relay's certificate then its CA's: Windows doesn't trust a relay that sends its certificate alone. The token is what a host needs to open a room
+on it; members need only the room's link. It logs connections and byte counts, never what it
+forwards, and limits members per room (`--max-members`), one message (`--max-frame-mb`) and a
+room's traffic (`--max-mb-per-second`).
+
+- **In usdcc:** Settings > Peers > Relay (`wss://relay.example`) and Relay token, then Host Room
+  > **Through the relay**. The invite link then names the relay:
+  `usdcc://join?relay=wss://relay.example/r/<room>#k=…&s=…`.
+- **A hub behind a router:** `python -m usdcc_peers.hub … --relay wss://relay.example
+  --relay-token-file relay.token`; `links.json` then has a `relayLink` for each room, which stays
+  the same from one run to the next.
+- **From Python:** `usdcc_peers.relay_bridge.RelayBridge(host, "wss://relay.example", token=…)`
+  puts a `Host` on a relay; `bridge.link()` is its link.
+
+### In a container
+
+`Dockerfile` here builds an image with the package, which runs the relay by default:
+
+```
+docker build -t usdcc-peers src/usdcc_peers
+docker run -d -p 8443:8443 -v /srv/relay:/data usdcc-peers usdcc-relay --port 8443 --token-file /data/relay.token
+docker run -d -p 47800:47800 -p 8080:8080 -v /srv/hub:/data usdcc-peers \
+    usdcc-hub --port 47800 --http 8080 --token-file /data/hub.token --data /data --link-address hub.studio.example
+```
+
 ## Load
 
 `tools/peers_load.py` puts many members on a hub and measures how long a message to everyone
-takes to reach them all (PEERS.md §15).
+takes to reach them all; `tools/peers_relay_load.py` puts many rooms on a relay and measures how
+long it takes to pass a message on (PEERS.md §15, §14.5, §14.6).

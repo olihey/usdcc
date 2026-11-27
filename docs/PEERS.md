@@ -15,8 +15,8 @@ the Python module (keys, encryption, reconnecting, shared state, several rooms, 
 phase 2 (rooms found on this machine and network, the Peers panel with chat, §14.3). Since built:
 phase 5's transfers without UI or Python (§14.4), phase 6, the shared stage
 ([SHARED_STAGE.md](SHARED_STAGE.md)), and **phase 3** (2026-11-26, §14.5): the `usdcc_peers`
-Python package, the hub, rooms joined at start, and notifications. Not built: phase 4 and the
-rest of phase 5. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
+Python package, the hub, rooms joined at start, and notifications; and **phase 4** (§14.6): the
+relay, rooms hosted through it, its links, and `wss://`. Not built: the rest of phase 5. The protocol is written down in [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md).
 `usdcc.peers` for Python is set aside (decided 2026-11-17), and with it 1b's last criterion. Two
 machines haven't been tried; everything so far ran on one.
 
@@ -163,6 +163,14 @@ gives it as the command `usdcc-relay`, and a Dockerfile comes with it.
   off.
 - No accounts and no database. A studio runs one on a machine everyone reaches; Settings > Peers
   holds its URL.
+
+*As built* (§14.6): `usdcc_peers.relay` (`usdcc-relay`), with the Dockerfile beside the package.
+Its side of the protocol is [PEERS_PROTOCOL.md](PEERS_PROTOCOL.md) §11. A host on it is a room in
+usdcc whose port is on the loopback only, with a bridge (`relay_bridge.cpp`, and
+`usdcc_peers.relay_bridge` for a Python host or the hub's `--relay`) that gives each member coming
+through the relay a connection of its own to that port. The relay doesn't serve the guests' page:
+a viewport broadcast still needs a reachable address. Settings > Peers holds the relay's URL and
+its token, and Host Room then offers **Through the relay**.
 
 ### 5.5 Room types
 
@@ -674,7 +682,7 @@ limit. ([SETTINGS.md](SETTINGS.md))
 | **1b. The rest of the framework** | Identity, the handshake and encryption with the room key, reconnecting, shared state, several rooms, `usdcc.peers`. The protocol written down | Two peers join by address and nothing readable is on the wire; a reconnect catches up; a wrong key is refused; a map ends equal after both sides set the same key; a late joiner has the map. A test plugin shares a map from Python |
 | **2. Discovery and chat** | The files of §5.1, mDNS, the Peers panel, chat, toasts, settings | Two usdcc on two machines find each other with no address typed, and chat |
 | **3. Other programs and notifications** | The `usdcc_peers` Python package, the hub, rooms joined at start, the `notify` channel and its list. **Built** 2026-11-26 (§14.5) | Two usdcc join a hub at start; a script's `notify` and a `curl` to the hub both show as toasts on both; a member that isn't allowed to send is refused; the hub meets its load target (§15) |
-| **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://` | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
+| **4. Links and the relay** | Invite links, `usdcc_peers.relay` and its Dockerfile, `wss://`. **Built** 2026-11-26 (§14.6) | Two instances on different networks chat through a relay whose log shows only sizes; the relay meets its load targets (§15) |
 | **5. Transfers** | Transfers, the inbox, **Send to…**. The generic part is built (§14.4) | A session sent from one instance loads on the other; a plugin sends a file from Python |
 | **6. A shared stage** | [SHARED_STAGE.md](SHARED_STAGE.md) | Phases 0 and A to C built (2026-11-22); see there |
 | **Later** | Moving the room to another host, `usdcc://` registered with the OS | |
@@ -974,11 +982,69 @@ processes, on one Apple M-series Mac, on the loopback):
 |---|---|---|---|
 | 500 (8 workers) | 8 s | 51 ms | 54 MB |
 | 1,000 (10 workers) | 27 s | 69 ms | 70 MB |
+| 2,000 (10 workers) | 99 s | 100 ms | 104 MB |
 
 Joining grows faster than the room: each welcome lists everyone, and each join is announced to
 everyone, so 1,000 joining at once (a studio logging in at nine) take 27 s in all; the hub's
 listen backlog is 1,024 for that. Everyone leaving at once costs the same, as each departure
 changes the room key for those still there (§6). Both are the protocol's, the C++ host's too.
+
+### 14.6 Phase 4 as built: links and the relay
+
+Built 2026-11-26.
+
+- **The relay**, `python -m usdcc_peers.relay` (or `usdcc-relay`): needs only `websockets`. A host
+  opens `/host` (with the token, if the relay has one) and gets a room id; members open
+  `/r/<id>`. It forwards bytes it can't read, logs connections and byte counts, and limits members
+  per room, a message's size and a room's bytes a second. `--certfile` (the full chain: the
+  relay's certificate, then its CA's) and `--keyfile` give it TLS of its own. Windows checks a
+  certificate only against what the server sends and its own store, so a relay that sends its
+  certificate alone isn't trusted there. Otherwise it sits behind an HTTPS proxy for `wss://`.
+- **The Dockerfile** (`src/usdcc_peers/Dockerfile`) runs the relay by default, or the hub.
+- **Links:** `usdcc://join?relay=<room's URL on the relay>#k=…&s=…`, made and read by
+  `makeJoinLink()` and `parseJoinLink()` (and `usdcc_peers.make_link()`), whose `JoinLink` has a
+  `relay` beside `address`. `Room::join()` takes a `ws://` or `wss://` URL as well as an address.
+- **Hosting through it:** `HostOptions::relay` and `relayToken`. The room listens on 127.0.0.1;
+  `RelayBridge` gets its id on the relay and opens a loopback connection for each member. What the
+  room sealed once for everyone goes to the relay once with its members' list, and the relay
+  copies it. `Room::link()` names the relay once it has the room (`relayReady()`); if the relay is
+  lost, the bridge asks for the same id again, so the link still works, and the members come back
+  through it and catch up. `relayFailed()` says why it isn't there, a wrong token included.
+- **In the app:** Settings > Peers > Relay and Relay token; Host Room's **Through the relay**,
+  which makes the room invited-only and copies its link once the relay has it.
+- **The hub** can be reached through a relay too: `--relay`, `--relay-token-file`; `links.json`
+  then has each room's `relayLink`, and the hub asks for the same ids each time it starts.
+- **Not built:** guests through a relay (§6.1); one relay over several processes (§7.5): a studio
+  that outgrows one runs two, each with its own URL; registering `usdcc://` with the OS (later).
+
+**Its tests:**
+
+| What | Where |
+|---|---|
+| A Python host through the relay with three members, and one copy sent for all; a wrong token; a room that isn't there; the relay restarting, the room getting its id back and a member catching up; `wss://` with a test CA, and refused without it; the hub through the relay, keeping its id | `tests/peers_python/test_usdcc_peers.py` (`RelayTests`) |
+| A C++ host through the Python relay, two C++ members and a Python one; a wrong token; the link made and read; nothing said in the relay's log; the relay restarting on its port, the room on it again with the same URL, and the members back | `peers_relay_with_cpp_and_python` (`tests/peers_python_test.cpp`) |
+| `wss://` from C++, with the test CA trusted by the test process | `peers_relay_wss` |
+
+`test_data/peers` has the test certificate and its CA (whose key was thrown away).
+
+**By hand:** the image built with `docker build`, the relay run from it, and a host with two
+members on the Mac chatting through it; its log held only connections and byte counts. Two
+machines on two networks haven't been tried.
+
+**Load** (`tools/peers_relay_load.py --raw`: fake hosts and members that speak only the relay's
+frames, in 12 worker processes, the relay in its own; one Mac, the loopback; each of a room's four
+members sends 20 messages of 100 bytes a second, which its host sends back to all four as one
+copy):
+
+| Rooms of five | The relay's CPU | Forwarded: median, 99th percentile |
+|---|---|---|
+| 100 | 32% of a core | 14 ms, 20 ms |
+| 100, while one more room moves 600 MB at 30 MB/s | 36% | 14 ms, 20 ms |
+| 200 | 66% | 31 ms, 66 ms |
+
+So one relay process meets §15's target (99 of 100 within 50 ms) for 100 rooms, and 200 need two
+relays. Without `--raw`, with usdcc_peers hosts and members doing the crypto in the workers, the
+workers are what is slow, not the relay (14% of a core for 40 rooms).
 
 ## 15. Testing
 

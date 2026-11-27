@@ -187,8 +187,9 @@ with TTL 0 on close. A member asks from a port of its own every 3 s while it loo
 sent straight back, and forgets a room that hasn't answered for 10 s. It joins at the address the
 answer came from. A room that needs an invitation isn't announced.
 
-**Links:** `usdcc://join/<address>:<port>#k=<fingerprint>&s=<secret>`. The part after `#` is
-URL-encoded and never leaves the two programs.
+**Links:** `usdcc://join/<address>:<port>#k=<fingerprint>&s=<secret>`, or for a room on a relay
+`usdcc://join?relay=<the room's URL on the relay, URL-encoded>#k=…&s=…` (§11). The part after `#` is
+URL-encoded and never leaves the two programs: the relay never sees it.
 
 ## 9. Transfers
 
@@ -279,4 +280,36 @@ itself and the services it names.
 
 A receiver turns down a notification with any other action, or one that breaks a rule above,
 whole: it shows nothing of it.
+
+## 11. The relay
+
+For a host and members that can't reach each other (PEERS.md §5.4). Both connect out to the
+relay, which forwards bytes it can't read: everything a peer says is sealed (§2) before it
+leaves. A member connects to the room's URL on the relay instead of the host's `/ws`, and from
+there everything is as above.
+
+- **A host** opens `GET <relay>/host` as a WebSocket, with `Authorization: Bearer <token>` if
+  the relay has one (else 401), and `?room=<id>` to ask for the id it had (it gets it if no
+  other host has it). The relay's first message is text: `{"room": "<id>"}`. The room's URL is
+  `<relay>/r/<id>`.
+- **A member** opens `GET <relay>/r/<id>`: 404 for a room that isn't there, 503 for a full one.
+  What it sends goes to the host; what the host sends for it comes back, binary.
+- **On the host's connection**, every binary message is a relay frame (integers big-endian):
+
+  | First byte | Then | Way |
+  |---|---|---|
+  | 1, data | u32 member, the bytes | Relay → host: from a member. Host → relay: to one member |
+  | 2, to several | u16 count, count × u32 member, the bytes | Host → relay: the same bytes to each |
+  | 3, opened | u32 member | Relay → host: a member connected |
+  | 4, closed | u32 member, u16 close code, the reason (UTF-8) | Relay → host: a member's connection ended. Host → relay: end it |
+
+  A member's number is the relay's, for that connection only. The host takes each one as a
+  connection of its own: a new `hello`, its own keys. A host sends a room envelope (`2`, §2) that
+  goes to several members once, as data to several.
+- **When the host's connection ends**, the relay closes its members' (1001) and forgets the
+  room. A member that reconnects meanwhile gets 404, and tries again as §6 says.
+- **Limits** (the relay's options): members per room (50), one message (8 MB), a room's bytes a
+  second, its host and members together (32 MB); over that the connection that sent it is closed
+  (1008).
+- It logs connections and byte counts, never what it forwards.
 

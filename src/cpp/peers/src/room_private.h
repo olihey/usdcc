@@ -71,6 +71,7 @@ struct Room::Impl {
 
     // --- The host ---
     HostOptions options;
+    class RelayBridge* relay = nullptr;  // Through a relay (HostOptions::relay)
     PageServer* http = nullptr;
     QTcpServer* tcp = nullptr;
     QString secret;

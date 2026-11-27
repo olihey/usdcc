@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "page_server.h"
+#include "relay_bridge.h"
 #include "room_private.h"
 
 #include <QJsonArray>
@@ -154,16 +155,38 @@ QString makeJoinLink(const JoinLink& link) {
     QUrlQuery fragment;
     fragment.addQueryItem(QStringLiteral("k"), link.fingerprint);
     fragment.addQueryItem(QStringLiteral("s"), link.secret);
+    if (!link.relay.isEmpty()) {
+        return QStringLiteral("usdcc://join?relay=") +
+               QString::fromLatin1(QUrl::toPercentEncoding(link.relay, ":/")) + u'#' +
+               fragment.toString(QUrl::FullyEncoded);
+    }
     return QStringLiteral("usdcc://join/") + link.address + u'#' + fragment.toString(QUrl::FullyEncoded);
 }
 
 std::optional<JoinLink> parseJoinLink(const QString& text) {
     const QString trimmed = text.trimmed();
+    const qsizetype hash = trimmed.indexOf(u'#');
+    // A room on a relay: usdcc://join?relay=wss://relay.example/r/<room>#k=…&s=…
+    const QString relayPrefix = QStringLiteral("usdcc://join?");
+    if (trimmed.startsWith(relayPrefix, Qt::CaseInsensitive)) {
+        JoinLink link;
+        const QUrlQuery query(trimmed.mid(relayPrefix.size(), hash < 0 ? -1 : hash - relayPrefix.size()));
+        link.relay = query.queryItemValue(QStringLiteral("relay"), QUrl::FullyDecoded);
+        if (hash >= 0) {
+            const QUrlQuery fragment(trimmed.mid(hash + 1));
+            link.fingerprint = fragment.queryItemValue(QStringLiteral("k"), QUrl::FullyDecoded);
+            link.secret = fragment.queryItemValue(QStringLiteral("s"), QUrl::FullyDecoded);
+        }
+        const QUrl url(link.relay);
+        if (!url.isValid() || (url.scheme() != u"ws" && url.scheme() != u"wss") || url.host().isEmpty()) {
+            return std::nullopt;
+        }
+        return link;
+    }
     const QString prefix = QStringLiteral("usdcc://join/");
     if (!trimmed.startsWith(prefix, Qt::CaseInsensitive)) {
         return std::nullopt;
     }
-    const qsizetype hash = trimmed.indexOf(u'#');
     JoinLink link;
     link.address = trimmed.mid(prefix.size(), hash < 0 ? -1 : hash - prefix.size());
     if (link.address.endsWith(u'/')) {
@@ -260,9 +283,20 @@ Room* Room::host(const HostOptions& options, QObject* parent, QString* error) {
     for (const QString& fingerprint : options.trustedFingerprints) {
         d.admitted.insert(fingerprint);
     }
+    if (options.relay.isValid()) {
+        // Members come through the relay, to this port on the loopback (relay_bridge.h).
+        d.options.address = QHostAddress(QHostAddress::LocalHost);
+    }
     if (!d.listen(error)) {
         delete room;
         return nullptr;
+    }
+    if (options.relay.isValid()) {
+        d.relay = new RelayBridge(options.relay, options.relayToken, d.tcp->serverPort(), room);
+        QObject::connect(d.relay, &RelayBridge::ready, room, [room] { Q_EMIT room->relayReady(); });
+        QObject::connect(d.relay, &RelayBridge::failed, room,
+                         [room](const QString& reason, bool) { Q_EMIT room->relayFailed(reason); });
+        d.relay->start();
     }
     d.state = State::Open;
     d.pingTimer = new QTimer(room);
@@ -515,9 +549,27 @@ QString linkHost(const QHostAddress& listening, const QString& address) {
 
 }  // namespace
 
+bool Room::isRelayed() const {
+    return d->relay != nullptr;
+}
+
+bool Room::isOnRelay() const {
+    return d->relay && d->relay->isReady();
+}
+
 QString Room::link(const QString& address) const {
     if (!d->isHost) {
         return {};
+    }
+    if (d->relay) {
+        if (!d->relay->isReady()) {
+            return {};
+        }
+        JoinLink link;
+        link.relay = d->relay->roomUrl();
+        link.fingerprint = d->me.fingerprint;
+        link.secret = d->secret;
+        return makeJoinLink(link);
     }
     return makeJoinLink({linkHost(d->options.address, address) + u':' + QString::number(port()), d->me.fingerprint,
                          d->secret});
@@ -1440,7 +1492,11 @@ void Room::Impl::connectToHost() {
     challenged = false;
     tx = Sealer();
     rx = Sealer();
-    socket->open(QUrl(QStringLiteral("ws://") + hostAddress + QStringLiteral("/ws")));
+    // A room on a relay is joined at its URL there; any other at its address's /ws.
+    socket->open(hostAddress.startsWith(QStringLiteral("ws://"), Qt::CaseInsensitive) ||
+                         hostAddress.startsWith(QStringLiteral("wss://"), Qt::CaseInsensitive)
+                     ? QUrl(hostAddress)
+                     : QUrl(QStringLiteral("ws://") + hostAddress + QStringLiteral("/ws")));
 }
 
 void Room::Impl::onHostData(const QByteArray& data, bool text) {

@@ -160,7 +160,7 @@ Room* Peers::joinLink(const QString& link, QString* error, RoomType type) {
     options.secret = parsed->secret;
     options.expectedFingerprint = parsed->fingerprint;
     options.type = type;
-    return join(parsed->address, options);
+    return join(parsed->target(), options);
 }
 
 Room* Peers::adopt(Room* room) {

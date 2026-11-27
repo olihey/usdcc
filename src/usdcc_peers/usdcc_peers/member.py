@@ -53,7 +53,7 @@ class Member(RoomBase):
     def __init__(self, *, identity: crypto.Identity | None = None, name: str = "", color: str = "", app: str = "",
                  instance: str = "", type: str = "chat", secret: str = "", password: str = "",
                  expected_fingerprint: str = "", reconnect_for: float = 60.0, ping_interval: float = 10.0,
-                 silence_timeout: float = 30.0, max_size: int = 16 * 1024 * 1024):
+                 silence_timeout: float = 30.0, max_size: int = 16 * 1024 * 1024, ssl=None):
         super().__init__()
         self.identity = identity or crypto.Identity.generate()
         self.profile_name = clean_name(name, "Peer")
@@ -68,6 +68,8 @@ class Member(RoomBase):
         self.ping_interval = ping_interval
         self.silence_timeout = silence_timeout
         self.max_size = max_size
+        self.ssl = ssl  # For wss://: an ssl.SSLContext, e.g. to trust a studio's own CA; None: the system's
+        self.open_timeout = 10.0  # One connection's opening handshake; join() sets it from its timeout
         self.url = ""
         self.status = "connecting"  # connecting, open, reconnecting, closed
         self.host_key = b""
@@ -94,6 +96,7 @@ class Member(RoomBase):
             options.setdefault("expected_fingerprint", link.fingerprint)
         member = cls(**options)
         member.url = _url(link, where)
+        member.open_timeout = max(10.0, timeout)
         await member.start(timeout)
         return member
 
@@ -123,8 +126,10 @@ class Member(RoomBase):
         self._ended = True
         websocket = self._websocket
         if websocket is not None and self.status == "open":
+            # What was sent before close() goes out first, then the leave: on a slow machine
+            # a fixed wait dropped both, and the room heard a lost connection instead.
             self._outbox.push(encode(control("leave", {"reason": reason})), seal=True)
-            await asyncio.sleep(0.05)
+            await self._outbox.drain(5.0)
         self._finish(reason)
         if websocket is not None:
             await websocket.close(1000, reason[:120])
@@ -212,8 +217,9 @@ class Member(RoomBase):
             retries += 1
 
     async def _connect_once(self) -> None:
-        async with connect(self.url, max_size=self.max_size, ping_interval=self.ping_interval,
-                           ping_timeout=self.silence_timeout, open_timeout=10, compression=None) as websocket:
+        tls = {"ssl": self.ssl} if self.ssl is not None and self.url.startswith("wss://") else {}
+        async with connect(self.url, max_size=self.max_size, **tls, ping_interval=self.ping_interval,
+                           ping_timeout=self.silence_timeout, open_timeout=self.open_timeout, compression=None) as websocket:
             self._websocket = websocket
             public, secret = crypto.kx_key_pair()
             await websocket.send(encode(control("hello", {"protocol": PROTOCOL, "eph": crypto.b64(public)})))
@@ -221,6 +227,10 @@ class Member(RoomBase):
             writer = None
             try:
                 async for data in websocket:
+                    if self.closed:
+                        # Read on until the socket closes: frames left unread fill its queue,
+                        # it stops reading, and the closing handshake waits out its timeout.
+                        continue
                     text = isinstance(data, str)
                     raw = data.encode("utf-8") if text else data
                     if rx is None:
@@ -253,8 +263,6 @@ class Member(RoomBase):
                             self._on_host_frame(message)
                         continue
                     self._on_host_frame(message)
-                    if self.closed:
-                        return
             finally:
                 if writer:
                     writer.cancel()
