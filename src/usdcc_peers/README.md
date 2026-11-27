@@ -104,7 +104,8 @@ python -m usdcc_peers.relay --port 8443 --token-file relay.token
 ```
 
 Installing the package also gives it as `usdcc-relay`. Put it behind an HTTPS reverse proxy for
-`wss://`, or give it `--certfile` and `--keyfile`. The token is what a host needs to open a room
+`wss://`, or give it `--certfile` and `--keyfile`. The certificate file holds the full chain, the
+relay's certificate then its CA's: Windows doesn't trust a relay that sends its certificate alone. The token is what a host needs to open a room
 on it; members need only the room's link. It logs connections and byte counts, never what it
 forwards, and limits members per room (`--max-members`), one message (`--max-frame-mb`) and a
 room's traffic (`--max-mb-per-second`).
