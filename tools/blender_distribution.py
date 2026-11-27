@@ -14,11 +14,15 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tarfile
 import tomllib
 from pathlib import Path
 
 from _common import REPO, WINDOWS, cache_value
+
+sys.path.insert(0, str(REPO / "tools/ci"))
+import usd_plugin_asset  # noqa: E402
 
 REVIEW = REPO / "docs/BLENDER_DISTRIBUTION_REVIEW.md"
 PORT_LICENSES = {
@@ -41,6 +45,23 @@ PORT_LICENSES = {
     "openssl": "Apache-2.0",
     "expat": "MIT",
     "liblzma": "public-domain AND LGPL-2.1-or-later",
+}
+LOCK = REPO / "deps/blender-distribution.json"
+# The USD plugin packs this configuration may ship (tools/deploy.py's
+# GPL_CONFIGURATION_PACKS), with the component their binaries count as and the
+# licence of each binary, by its path in the deploy, lower case. Which build of
+# each is reviewed, and the sources that build is made from, are in the locks'
+# "usd_plugin_packs" (docs/USD_PLUGINS.md section 5).
+GPL_PACKS = {
+    "gatling": {
+        "component": "Gatling",
+        "binaries": {
+            "plugin/usd/hdgatling.dll": "GPL-3.0-or-later",
+            "plugin/usd/hdgatling/resources/libmdl_sdk.dll": "BSD-3-Clause",
+            "plugin/usd/hdgatling.so": "GPL-3.0-or-later",
+            "plugin/usd/hdgatling/resources/libmdl_sdk.so": "BSD-3-Clause",
+        },
+    },
 }
 
 
@@ -110,6 +131,45 @@ def pe_imports(path):
     return sorted(imports)
 
 
+def gpl_pack_inputs(usd):
+    """The files of the GPL_PACKS unzipped over the OpenUSD install `usd`, as
+    (component, path): the pack's manifest names them, so they aren't taken for
+    OpenUSD's own."""
+    inputs = []
+    for pack, about in GPL_PACKS.items():
+        manifest = usd / usd_plugin_asset.PINS.name / f"{pack}.json"
+        if manifest.is_file():
+            for file in json.loads(manifest.read_text(encoding="utf-8"))["files"]:
+                if (usd / file).is_file():
+                    inputs.append((about["component"], usd / file))
+    return inputs
+
+
+def check_gpl_packs(package, reviewed_packs, resources):
+    """Each USD plugin pack in the deploy is one this configuration's review names,
+    in the exact build it reviewed, and that build is the one the pin, patches and
+    build scripts in this source snapshot name. `resources` are the lock's
+    supplemental sources: every source the pack's build is made from has to be
+    among them. Returns {pack: asset}."""
+    names = {row["name"] for row in resources}
+    shipped = {}
+    for path in sorted((package / usd_plugin_asset.PINS.name).glob("*.json")):
+        pack, record = path.stem, json.loads(path.read_text(encoding="utf-8"))
+        require(pack in GPL_PACKS and pack in reviewed_packs,
+                f"USD plugin pack {pack} isn't reviewed for this configuration")
+        reviewed = reviewed_packs[pack]
+        require(record["asset"] == reviewed["asset"],
+                f"{pack}: {record['asset']} isn't the reviewed build {reviewed['asset']}")
+        require(usd_plugin_asset.describe(pack)["name"] == record["asset"],
+                f"{pack}: its pin, patches or build scripts changed since the reviewed build")
+        missing = sorted(set(reviewed["sources"]) - names)
+        require(not missing, f"{pack}: sources missing from the supplemental lock: {missing}")
+        for file in record["files"]:
+            require((package / file).is_file(), f"{pack}: a file of its list isn't deployed: {file}")
+        shipped[pack] = record["asset"]
+    return shipped
+
+
 def inventory(package):
     rows = []
     for path in sorted(package.rglob("*")):
@@ -161,6 +221,10 @@ def origins(rows, build):
     ]
     wanted = {Path(row["path"]).name.lower() for row in rows}
     matches = {}
+    # Before OpenUSD's folders, which the packs were unzipped into.
+    for component, path in gpl_pack_inputs(usd):
+        if path.name.lower() in wanted:
+            matches.setdefault((path.name.lower(), sha256(path)), (component, str(path)))
     for component, root in roots:
         if not root.is_dir():
             continue
@@ -226,8 +290,6 @@ def check_binary_closure(rows, package, build):
                 for word in (
                     "rtx_render",
                     "vray",
-                    "gatling",
-                    "mdl_sdk",
                     "_debug.dll",
                     "tbbbind",
                     "tbb_preview",
@@ -235,6 +297,11 @@ def check_binary_closure(rows, package, build):
             ),
             f"Excluded runtime: {name}",
         )
+        packs = {about["component"]: about for about in GPL_PACKS.values()}
+        if row["component"] in packs:
+            licence = packs[row["component"]]["binaries"].get(name)
+            require(licence is not None, f"Unreviewed {row['component']} runtime: {name}")
+            row["license_choice"] = licence
         if row["component"] == "OpenUSD":
             basename = Path(name).name
             runtime = re.fullmatch(
@@ -337,7 +404,7 @@ def source_matches(info, rows):
             (REPO / relative).is_file() and sha256(REPO / relative) == row["sha256"],
             f"Source changed after collection: {relative}",
         )
-    lock = json.loads((REPO / "deps/blender-distribution.json").read_text())
+    lock = json.loads(LOCK.read_text())
     require(
         info["supplemental_resources"] == lock["resources"],
         "Supplemental source lock differs",
@@ -589,6 +656,8 @@ def finalize(package, build, usd_source, source_bundle):
         and not backend["features"]["tbb"],
         "Unreviewed Blender feature closure",
     )
+    lock = json.loads(LOCK.read_text())
+    packs = check_gpl_packs(package, lock.get("usd_plugin_packs", {}), lock["resources"])
     install_notices(package, usd_source, info, build)
     sources = package / "source"
     sources.mkdir(exist_ok=True)
@@ -606,7 +675,10 @@ def finalize(package, build, usd_source, source_bundle):
         "No additional EULA restricts copying, modification, replacement or reverse engineering for debugging changes.\n"
         "Qt/PySide/ADS remain replaceable dynamic libraries; see source/BUILD-SOURCE.md.\n"
         "Ruff and uv are separately licensed command-line tools aggregated with this package.\n"
-        "Blender is used descriptively; no Blender Foundation or Pixar endorsement is claimed.\n"
+        + "".join(f"USD plugin pack {pack} ({asset}): licences in licenses/OpenUSD-plugins/{pack}/,\n"
+                  "its complete source in source/.\n"
+                  for pack, asset in packs.items())
+        + "Blender is used descriptively; no Blender Foundation or Pixar endorsement is claimed.\n"
         "See distribution-readiness.json for the exact reviewed scope and file hashes.\n",
         encoding="utf-8",
     )
@@ -627,7 +699,8 @@ def finalize(package, build, usd_source, source_bundle):
         "platform": "windows-x64",
         "legal_distribution_review": "complete: docs/BLENDER_DISTRIBUTION_REVIEW.md",
         "corresponding_source_review": "complete: source accompanies the exact inventoried binaries",
-        "proprietary_renderer_integrations": "excluded (RTX, V-Ray, Gatling/MDL SDK)",
+        "proprietary_renderer_integrations": "excluded (RTX, V-Ray)",
+        "usd_plugin_packs": packs,
         "source_bundle": {
             "file": "source/" + source_bundle.name,
             "sha256": info["archive_sha256"],

@@ -7586,6 +7586,230 @@
       "file": "zvariant_utils-3.3.1.crate",
       "sha256": "6d464f5733ffa07a3164d656f18533caace9d0638596721355d73256a410d691",
       "license": "see crate Cargo.toml and bundled notices"
+    },
+    {
+      "name": "gatling",
+      "version": "945f47d69d8fdb90e4f9ada1b5be6da4c3220292",
+      "url": "https://github.com/pablode/gatling/archive/945f47d69d8fdb90e4f9ada1b5be6da4c3220292.tar.gz",
+      "sha256": "d950d87da8cd5c081c5f304cd097e88fdf53a60a0382d1193b76d8fa8fcdfb97",
+      "license": "GPL-3.0-or-later",
+      "file": "gatling-945f47d69d8f.tar.gz"
+    },
+    {
+      "name": "gatling-Imath",
+      "version": "90c47b495b3ecf863a8a5de562c6e47d49cfb27b",
+      "url": "https://github.com/AcademySoftwareFoundation/Imath/archive/90c47b495b3ecf863a8a5de562c6e47d49cfb27b.tar.gz",
+      "sha256": "390f40ec0d19f6c5057993913d9bbf9833e606cf33d35bc9ea0888b213e53ee6",
+      "license": "BSD-3-Clause",
+      "file": "gatling-Imath-90c47b495b3e.tar.gz"
+    },
+    {
+      "name": "gatling-OffsetAllocator",
+      "version": "3610a7377088b1e8c8f1525f458c96038a4e6fc0",
+      "url": "https://github.com/sebbbi/OffsetAllocator/archive/3610a7377088b1e8c8f1525f458c96038a4e6fc0.tar.gz",
+      "sha256": "a815f9520a4be62e5f95f0a3b0590d0c3ad3cbf8f5a2dc024ea5922ec849d6dc",
+      "license": "MIT",
+      "file": "gatling-OffsetAllocator-3610a7377088.tar.gz"
+    },
+    {
+      "name": "gatling-SPIRV-Cross",
+      "version": "8d64e224f242433d5930217d33e5a544797229a5",
+      "url": "https://github.com/pablode/SPIRV-Cross/archive/8d64e224f242433d5930217d33e5a544797229a5.tar.gz",
+      "sha256": "9ce1ec4f02bea7e4553ad46a37a3dcb6cd7bca6843ad6a62dbcf2ebd5ec2fabf",
+      "license": "Apache-2.0",
+      "file": "gatling-SPIRV-Cross-8d64e224f242.tar.gz"
+    },
+    {
+      "name": "gatling-SPIRV-Headers",
+      "version": "1c6bb2743599e6eb6f37b2969acc0aef812e32e3",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/1c6bb2743599e6eb6f37b2969acc0aef812e32e3.tar.gz",
+      "sha256": "1a248f4199f4a30b2e7304ed4d62f731765bab12d9fa4c5abb189a5e2d57f1f5",
+      "license": "MIT",
+      "file": "gatling-SPIRV-Headers-1c6bb2743599.tar.gz"
+    },
+    {
+      "name": "gatling-SPIRV-Reflect",
+      "version": "2f7460f0be0f73c9ffde719bc3e924b4250f4d98",
+      "url": "https://github.com/KhronosGroup/SPIRV-Reflect/archive/2f7460f0be0f73c9ffde719bc3e924b4250f4d98.tar.gz",
+      "sha256": "1c261175e4251101dd125682bae1dfb9a87cf4cdb1beb03b7e18c3063291f8aa",
+      "license": "Apache-2.0",
+      "file": "gatling-SPIRV-Reflect-2f7460f0be0f.tar.gz"
+    },
+    {
+      "name": "gatling-SPIRV-Reflect-googletest",
+      "version": "e2239ee6043f73722e7aa812a459f54a28552929",
+      "url": "https://github.com/google/googletest/archive/e2239ee6043f73722e7aa812a459f54a28552929.tar.gz",
+      "sha256": "2765fbfaa978e90d1c8477bc2f2b9705be65b1b562bb215dbfaa76567d508fe1",
+      "license": "BSD-3-Clause",
+      "file": "gatling-SPIRV-Reflect-googletest-e2239ee6043f.tar.gz"
+    },
+    {
+      "name": "gatling-SPIRV-Tools",
+      "version": "f0cc85efdbbe3a46eae90e0f915dc1509836d0fc",
+      "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/f0cc85efdbbe3a46eae90e0f915dc1509836d0fc.tar.gz",
+      "sha256": "cb2f7a474feb5a530384594ce17904c1c192800bbd0e563548c784f7b72f8695",
+      "license": "Apache-2.0",
+      "file": "gatling-SPIRV-Tools-f0cc85efdbbe.tar.gz"
+    },
+    {
+      "name": "gatling-Vulkan-Headers",
+      "version": "eaa319dade959cb61ed2229c8ea42e307cc8f8b3",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/eaa319dade959cb61ed2229c8ea42e307cc8f8b3.tar.gz",
+      "sha256": "700dcd2aeb3a7f7986998eae69a6a712bfaabf2524879328fe086c7132941411",
+      "license": "Apache-2.0 OR MIT",
+      "file": "gatling-Vulkan-Headers-eaa319dade95.tar.gz"
+    },
+    {
+      "name": "gatling-VulkanMemoryAllocator",
+      "version": "1d8f600fd424278486eade7ed3e877c99f0846b1",
+      "url": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/1d8f600fd424278486eade7ed3e877c99f0846b1.tar.gz",
+      "sha256": "04b278f5a185ef75a7ea988e0e76ddd0b2f2186bf56dd90625159972a47dcb3b",
+      "license": "MIT",
+      "file": "gatling-VulkanMemoryAllocator-1d8f600fd424.tar.gz"
+    },
+    {
+      "name": "gatling-c-blosc2",
+      "version": "f1278b90056a99c35592e964f549f1f2ba13f05c",
+      "url": "https://github.com/Blosc/c-blosc2/archive/f1278b90056a99c35592e964f549f1f2ba13f05c.tar.gz",
+      "sha256": "e2fa7fa80da2de1dc9af9be81b1176ce656c53560e27d6de0e17525a4a04a2dd",
+      "license": "BSD-3-Clause",
+      "file": "gatling-c-blosc2-f1278b90056a.tar.gz"
+    },
+    {
+      "name": "gatling-doctest",
+      "version": "ae7a13539fb71f270b87eb2e874fbac80bc8dda2",
+      "url": "https://github.com/doctest/doctest/archive/ae7a13539fb71f270b87eb2e874fbac80bc8dda2.tar.gz",
+      "sha256": "3882bb436ee458653e0562bf799af21a085bd6c64325a837b77d7edd867144dc",
+      "license": "MIT",
+      "file": "gatling-doctest-ae7a13539fb7.tar.gz"
+    },
+    {
+      "name": "gatling-efsw",
+      "version": "527ddca9a95d6d3a01975849e7e09cdec7752921",
+      "url": "https://github.com/SpartanJ/efsw/archive/527ddca9a95d6d3a01975849e7e09cdec7752921.tar.gz",
+      "sha256": "8b0e26063c4a91b110ad9e97887429651b847fb6e9ef5815f14d86363e0c7721",
+      "license": "MIT",
+      "file": "gatling-efsw-527ddca9a95d.tar.gz"
+    },
+    {
+      "name": "gatling-glm",
+      "version": "efec5db081e3aad807d0731e172ac597f6a39447",
+      "url": "https://github.com/g-truc/glm/archive/efec5db081e3aad807d0731e172ac597f6a39447.tar.gz",
+      "sha256": "15cd88d9a099c0e944efa775032979509394574e11ff98f437500cb3f103845a",
+      "license": "MIT",
+      "file": "gatling-glm-efec5db081e3.tar.gz"
+    },
+    {
+      "name": "gatling-glslang",
+      "version": "a91631b260cba3f22858d6c6827511e636c2458a",
+      "url": "https://github.com/KhronosGroup/glslang/archive/a91631b260cba3f22858d6c6827511e636c2458a.tar.gz",
+      "sha256": "8bba14a39f7a666587b15e66098e816e900974d9450b401db3d25d5a4ce5c145",
+      "license": "BSD-3-Clause AND BSD-2-Clause AND MIT AND Apache-2.0 AND GPL-3.0-or-later WITH Bison-exception-2.2",
+      "file": "gatling-glslang-a91631b260cb.tar.gz"
+    },
+    {
+      "name": "gatling-libjpeg-turbo",
+      "version": "4b7f7a5ae9ce13c1872b7b71e06f89c0abebc45e",
+      "url": "https://github.com/pablode/libjpeg-turbo/archive/4b7f7a5ae9ce13c1872b7b71e06f89c0abebc45e.tar.gz",
+      "sha256": "9d853c487b890b8c5d8f062c1b17757b71ae7d551efde920a1930791c60a8fec",
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "file": "gatling-libjpeg-turbo-4b7f7a5ae9ce.tar.gz"
+    },
+    {
+      "name": "gatling-libspng",
+      "version": "fb768002d4288590083a476af628e51c3f1d47cd",
+      "url": "https://github.com/randy408/libspng/archive/fb768002d4288590083a476af628e51c3f1d47cd.tar.gz",
+      "sha256": "d656813290d70a750b69e768323ff3b3875adf8c2e8c2fdb4e57ca1467abf86a",
+      "license": "BSD-2-Clause",
+      "file": "gatling-libspng-fb768002d428.tar.gz"
+    },
+    {
+      "name": "gatling-libtiff",
+      "version": "106593b350ae18c6698a93c51d516176fca47753",
+      "url": "https://gitlab.com/libtiff/libtiff/-/archive/106593b350ae18c6698a93c51d516176fca47753/libtiff-106593b350ae18c6698a93c51d516176fca47753.tar.gz",
+      "sha256": "fa038cdba5503abaa806101b6d375e0ab06aa29ccd34097cd2924ba8c3b17457",
+      "license": "libtiff",
+      "file": "gatling-libtiff-106593b350ae.tar.gz"
+    },
+    {
+      "name": "gatling-meshoptimizer",
+      "version": "4affad044571506a5724c9a6f15424f43e86f731",
+      "url": "https://github.com/zeux/meshoptimizer/archive/4affad044571506a5724c9a6f15424f43e86f731.tar.gz",
+      "sha256": "53f2b39fb46fa60580b5685ee3bdaa9d82540902183a6e84a40e1b78b009780a",
+      "license": "MIT",
+      "file": "gatling-meshoptimizer-4affad044571.tar.gz"
+    },
+    {
+      "name": "gatling-metal-cpp",
+      "version": "73bd5168fab265b25ff3f009b28bc9968e903ad9",
+      "url": "https://github.com/pablode/metal-cpp/archive/73bd5168fab265b25ff3f009b28bc9968e903ad9.tar.gz",
+      "sha256": "6f763cee085d53d15a78770f64a5d9b448a02b933bb92cec97bd5d3e8f932935",
+      "license": "Apache-2.0",
+      "file": "gatling-metal-cpp-73bd5168fab2.tar.gz"
+    },
+    {
+      "name": "gatling-openexr",
+      "version": "a1a00ffeecf627bbbc010d40700720bee48b2af7",
+      "url": "https://github.com/AcademySoftwareFoundation/openexr/archive/a1a00ffeecf627bbbc010d40700720bee48b2af7.tar.gz",
+      "sha256": "f64c2c829772334487700baa1df7087a47f87355fe4115893bc66f7d0caefe65",
+      "license": "BSD-3-Clause",
+      "file": "gatling-openexr-a1a00ffeecf6.tar.gz"
+    },
+    {
+      "name": "gatling-openexr-libdeflate",
+      "version": "v1.18",
+      "url": "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.18.tar.gz",
+      "sha256": "225d982bcaf553221c76726358d2ea139bb34913180b20823c782cede060affd",
+      "license": "MIT",
+      "file": "gatling-openexr-libdeflate-v1.18.tar.gz"
+    },
+    {
+      "name": "gatling-quill",
+      "version": "dc6d8b445e83f4a385b22f9bb6c418463a8face1",
+      "url": "https://github.com/odygrd/quill/archive/dc6d8b445e83f4a385b22f9bb6c418463a8face1.tar.gz",
+      "sha256": "6c847abf5e2d16e708af77f855c29e9b778a42c35e9a136b4968ee3a855ea307",
+      "license": "MIT",
+      "file": "gatling-quill-dc6d8b445e83.tar.gz"
+    },
+    {
+      "name": "gatling-stb",
+      "version": "5736b15f7ea0ffb08dd38af21067c314d6a3aae9",
+      "url": "https://github.com/nothings/stb/archive/5736b15f7ea0ffb08dd38af21067c314d6a3aae9.tar.gz",
+      "sha256": "d00921d49b06af62aa6bfb97c1b136bec661dd11dd4eecbcb0da1f6da7cedb4c",
+      "license": "MIT OR Unlicense",
+      "file": "gatling-stb-5736b15f7ea0.tar.gz"
+    },
+    {
+      "name": "gatling-volk",
+      "version": "f2a16e3e19c2349b873343b2dc38a1d4c25af23a",
+      "url": "https://github.com/zeux/volk/archive/f2a16e3e19c2349b873343b2dc38a1d4c25af23a.tar.gz",
+      "sha256": "cbb855a09388668d0d9c2a1572e05813427f455b71cbfcc2f3e30a386a8d14f0",
+      "license": "MIT",
+      "file": "gatling-volk-f2a16e3e19c2.tar.gz"
+    },
+    {
+      "name": "gatling-xxHash",
+      "version": "50f42268c6c96a3390e5832689906922f357a9b7",
+      "url": "https://github.com/Cyan4973/xxHash/archive/50f42268c6c96a3390e5832689906922f357a9b7.tar.gz",
+      "sha256": "aa12d99beed6820ca6dc499a767bdcacbc6d0f7344550f544708ba500b79285e",
+      "license": "BSD-2-Clause",
+      "file": "gatling-xxHash-50f42268c6c9.tar.gz"
+    },
+    {
+      "name": "gatling-zlib-ng",
+      "version": "b56a2fd0b126cfe5f13e68ab9090cd4f6a773286",
+      "url": "https://github.com/zlib-ng/zlib-ng/archive/b56a2fd0b126cfe5f13e68ab9090cd4f6a773286.tar.gz",
+      "sha256": "0902aed65d049275070fd12f7eabb753b5ca974120fec1e280fde861eca0c358",
+      "license": "Zlib",
+      "file": "gatling-zlib-ng-b56a2fd0b126.tar.gz"
+    },
+    {
+      "name": "MDL-SDK",
+      "version": "2026.0.2",
+      "url": "https://github.com/NVIDIA/MDL-SDK/archive/refs/tags/2026.0.2.tar.gz",
+      "sha256": "7920a55a39e5f52a3280c6dd48a4032702d2ef8f09b165a94c61fd1c59a3a501",
+      "license": "BSD-3-Clause",
+      "file": "MDL-SDK-2026.0.2.tar.gz"
     }
   ],
   "reviewed_inputs": {
@@ -7638,6 +7862,41 @@
     "tool_versions": {
       "ruff": "0.17.1",
       "uv": "0.13.5"
+    }
+  },
+  "usd_plugin_packs": {
+    "gatling": {
+      "asset": "usdplugin-gatling-945f47d69-546ef27c-win64-py313",
+      "sources": [
+        "gatling",
+        "gatling-Imath",
+        "gatling-OffsetAllocator",
+        "gatling-SPIRV-Cross",
+        "gatling-SPIRV-Headers",
+        "gatling-SPIRV-Reflect",
+        "gatling-SPIRV-Reflect-googletest",
+        "gatling-SPIRV-Tools",
+        "gatling-Vulkan-Headers",
+        "gatling-VulkanMemoryAllocator",
+        "gatling-c-blosc2",
+        "gatling-doctest",
+        "gatling-efsw",
+        "gatling-glm",
+        "gatling-glslang",
+        "gatling-libjpeg-turbo",
+        "gatling-libspng",
+        "gatling-libtiff",
+        "gatling-meshoptimizer",
+        "gatling-metal-cpp",
+        "gatling-openexr",
+        "gatling-openexr-libdeflate",
+        "gatling-quill",
+        "gatling-stb",
+        "gatling-volk",
+        "gatling-xxHash",
+        "gatling-zlib-ng",
+        "MDL-SDK"
+      ]
     }
   }
 }

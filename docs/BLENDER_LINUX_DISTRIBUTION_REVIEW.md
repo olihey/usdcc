@@ -25,8 +25,15 @@ activation/signature check, or restriction on debugging modifications.
 Qt, ADS, the native backend and other shared libraries remain replaceable.
 The app has no installation keys or locked-device mechanism.
 Ruff/uv remain independently licensed unmodified CLI tools aggregated with it.
-RTX, V-Ray, Gatling/MDL SDK, TBB debug/preview/optional binding runtimes and other
-unreviewed native additions are excluded. Blender's name is descriptive attribution,
+RTX, V-Ray, TBB debug/preview/optional binding runtimes and other unreviewed native
+additions are excluded. The Gatling render delegate may be included, in exactly the
+build `usdplugin-gatling-945f47d69-546ef27c-linux-x64-py313`
+(`deps/blender-linux-distribution.json`, `usd_plugin_packs`), as the
+[Windows review](BLENDER_DISTRIBUTION_REVIEW.md)'s "Gatling pack" section describes:
+`hdGatling.so` (GPL-3.0-or-later) and `libmdl_sdk.so` (BSD-3-Clause), audited by the
+pack's own file list, with its sources among the supplemental resources this
+configuration takes from the Windows lock. Added 2026-11-27, not yet run end to end:
+the configuration needs a renewed review for the current OpenUSD pin first. Blender's name is descriptive attribution,
 without a Foundation or Pixar endorsement claim.
 
 ## Actual Linux variants

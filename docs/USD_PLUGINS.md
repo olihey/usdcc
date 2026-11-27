@@ -400,10 +400,10 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
-| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
+| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `cycles` (published since 2026-11-27; Windows x64: a download usdcc installs itself, §10; Linux x64: `usdcc-<version>-linux-x64-cycles.tar.xz`; macOS: `usdcc-<version>-macos-arm64-cycles.dmg`), `gatling` (unpublished) |
 
-How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
+How an optional pack ships (Linux, and macOS in the last point; on Windows only as a download usdcc installs itself, §10, the first being Cycles):
 
 - `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
   says `"publish": true`.
@@ -423,15 +423,69 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
   bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
 | `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never published | `arnold`, `usdfbx`, `usdsbsar` |
 
-- **Gatling is GPL-3.0.** Loaded into usdcc's process it makes the whole a combined work,
-  the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
-  stays out of the standard zip, which remains BSD-3-Clause. Whether usdcc may publish even
-  a separate pack needs the same review as the Blender configuration, with OpenUSD's TOST
-  licence in it. Until then it is built and checked in CI and used locally: its pin says
-  `"publish": false`, so `deps-usd-plugins.yml` keeps the zip with the workflow run for
-  two weeks and attaches nothing to the release. The pack already carries what a GPL
-  binary has to: the licence texts of Gatling, its 24 submodules and the MDL SDK
-  (BSD-3-Clause), and `SOURCES.txt` naming the commit and the SDK it was built from.
+- **Gatling is GPL-3.0-or-later.** Loaded into usdcc's process it makes the whole a combined
+  work, the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
+  stays out of the standard zip, which remains BSD-3-Clause. Its pin says `"publish": false`,
+  so `deps-usd-plugins.yml` keeps the zip with the workflow run for two weeks and attaches
+  nothing to the release.
+
+  **Reviewed 2026-11-27**, from the packs CI built for the pin (run 45945194968, hash
+  `546ef27c`, Windows x64 and Linux x64), the same way as the
+  [Blender configuration](BLENDER_DISTRIBUTION_REVIEW.md). Not legal advice.
+  1. **The pack's own contents are fine.** Gatling is GPL-3.0-or-later. Everything else in
+     the pack is permissive and compatible with GPL-3.0, with its licence text included:
+     - its 26 submodules (MIT, BSD, Apache-2.0, zlib, libtiff, and the MIT-or-Apache Vulkan
+       headers; glslang's Bison-generated files are GPL-3.0 with the Bison exception);
+     - NVIDIA's MDL SDK 2026.0.2 (`libmdl_sdk`, BSD-3-Clause; its third-party list is
+       permissive or Apache-2.0 with LLVM exceptions, and its only GPL text is dxc's
+       build-only `config.guess`);
+     - the `Omni*.mdl` and `nvidia/*.mdl` materials (NVIDIA, BSD-3-Clause), and the
+       MaterialX files (Apache-2.0).
+  2. **OpenUSD's TOST licence is compatible.** Compared word by word with Apache-2.0,
+     TOST-1.0 differs only in §6: it grants less trademark use (and covers the Licensor's
+     affiliates). GPL-3.0 §7(e) allows "declining to grant rights under trademark law", so
+     TOST works with GPL-3.0 just as Apache-2.0 does. The Blender review reached the same
+     conclusion. The rest of usdcc's process (Qt and PySide6 under LGPL-3.0, ADS under
+     LGPL-2.1-or-later, Python, TBB, Embree, MaterialX, OpenSSL 3 and others) is covered
+     by that review's table too.
+  3. **What rules out a separate pack for the standard release:**
+     - *Proprietary integrations.* The standard deploy ships the RTX Render plugin, which
+       loads NVIDIA's proprietary ovrtx into the process, and the V-Ray plugin (Chaos'
+       App SDK, in a helper process). Arnold (`local`, the user's own `libai` loaded
+       in-process), FBX and Substance would join them where installed. The Blender
+       review leaves all of these out of a GPL configuration, and Gatling has to do the
+       same.
+     - *Corresponding source.* Under that review's reading, a separate download is no
+       licence boundary. So whoever receives Gatling has to get the full source of the
+       combination: usdcc, the OpenUSD fork and its dependencies, Gatling with its
+       submodules and our two patches, and the MDL SDK at `2026.0.2`. The pack's
+       licence texts and `SOURCES.txt` aren't enough on their own. The standard release
+       provides none of this, but the Blender configuration's `source/` folder and
+       source receipt already do (`tools/blender_distribution.py`).
+     - *The MDL SDK binary.* The pack ships NVIDIA's prebuilt `libmdl_sdk` from the
+       release archive. Its source is public at that tag, but whether NVIDIA's binary
+       matches it exactly can't be checked. Building `libmdl_sdk` from source in the
+       pack's job would settle that.
+  4. **The way to publish it:** as part of the GPL-3.0 configuration, on Windows x64 and
+     Linux x64, not as an optional pack for the standard release. That configuration
+     already excludes RTX and V-Ray, ships its full source, and has a review for each
+     platform. The in-app pack download (§10) must never offer Gatling to a standard
+     install.
+  5. **Added to that configuration (2026-11-27)**, in its tools and reviews
+     ([BLENDER_DISTRIBUTION_REVIEW.md](BLENDER_DISTRIBUTION_REVIEW.md), "Gatling pack"):
+     - `tools/deploy.py --with-blender-mesh-tools` ships the packs in
+       `GPL_CONFIGURATION_PACKS` (Gatling) that the OpenUSD install has;
+     - both audits accept exactly the reviewed builds (`546ef27c`, Windows x64 and Linux
+       x64), and only when the pin, patches and build scripts still name that build;
+     - the source lock has Gatling, its submodules, googletest, libdeflate and the MDL SDK
+       source, by SHA-256.
+
+     Unit-tested only (`tests/blender_mesh_package_test.py`). It hasn't run end to end,
+     because the configuration as a whole still has to be reviewed again for the current
+     OpenUSD pin, and its audits refuse it until then. The pin keeps
+     `"publish": false`: the configuration takes the CI artifact, unzipped over the
+     OpenUSD install.
+
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
@@ -466,10 +520,61 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
     licence; the headers are build-time and the runtime is in the driver), HIP (AMD,
     mostly MIT), oneAPI (Intel's runtime licence).
 
-  Until step 6 of the build has collected that list and it has been read, Cycles' pin
-  says `"set": "optional"` with `"publish": false`, for the reason given for MoonRay
-  below. If the GPU kernels make the standard archive too big, they become a pack of
-  their own in the `optional` set, and the standard one stays CPU only.
+  If the GPU kernels make the standard archive too big, they become a pack of their own
+  in the `optional` set, and the standard one stays CPU only.
+
+  **The list read (2026-11-27)**, from the three CPU packs `deps-usd-plugins.yml` built
+  for the pin (run 45945194968, hash `231aea80`, `091c8c2e` on macOS) and the Cycles
+  source at `3eb35f8`. Three problems, all fixed in `cycles-usdcc.patch` and the hook
+  (2026-11-27). The packs built with the fix pass their check, rendering included, on
+  Windows x64, Linux x64 and macOS arm64 (run 46039453918). **Published (2026-11-27)**,
+  in the `optional` set (decided then: a download of its own, not in the usdcc zip):
+  its pin says `"publish": true`, so `deps-usd-plugins.yml` attaches the packs to the
+  OpenUSD asset's release once the pin is on `master`, and `release.yml` then requires
+  them, as it does MoonRay's. `release.yml`'s Windows job now fetches the optional set
+  too (`--optional`), which no Windows pack needed before. Problems found:
+  1. **GPL code compiled in (the blocker).** `src/util/atomic.h` included Blender's
+     `third_party/atomic/atomic_ops.h` for every CPU build, and those headers
+     (`atomic_ops.h`, `intern/atomic_ops_{ext,unix,msvc,utils}.h`) are jemalloc's
+     BSD-2-Clause code with Blender Foundation's 2016 changes under a GPL-2.0-or-later
+     licence block. Their inline functions ended up in `hdCycles` on all three platforms,
+     so the pack wasn't the Apache-2.0-only work the standard zip needs. Blender itself
+     still ships them this way (`intern/atomic`, v4.5).
+     **Fix:** the patch has `util/atomic.h` implement the CPU atomics Cycles calls, with
+     the same names and signatures and sequentially consistent ordering, written fresh:
+     fetch-and-add, -sub and -or, add-and-fetch, compare-and-swap for `uint32_t`,
+     `unsigned int` and `size_t`, a max update, and float compare-and-swap and add by
+     the float's bits. They use `__atomic_*` built-ins with GCC and Clang, and
+     `std::atomic_ref` with MSVC (Cycles is C++20). The patch also takes
+     `third_party/atomic` off the include path, and the hook deletes the folder before
+     configuring, so a later Cycles that includes it again fails to build. The GPU
+     branches of `util/atomic.h` are unchanged. A threaded test of every operation
+     (8 threads, exact totals) passes with Apple clang, under ThreadSanitizer too.
+  2. **Our patch mislabelled OpenUSD code.** `hydra/implicit_surfaces.{h,cpp}`, adapted
+     from hdEmbree, said `SPDX-License-Identifier: Apache-2.0`. OpenUSD's file is under
+     OpenUSD's own licence, the Tomorrow Open Source Technology License 1.0, which usdcc
+     ships anyway. **Fix:** the headers now name that licence, as OpenUSD's own files do.
+  3. **A changed file without a notice.** The patch changes `hydra/light.cpp` (a dome
+     light's strength), which Apache-2.0 §4(b) asks to be marked. **Fix:** its header says
+     so. The CMake files the patch changes aren't shipped.
+
+  Fine as it is:
+  - **What's linked at run time:** only OpenUSD's asset (its USD libraries, OpenImageIO,
+    OpenColorIO, OpenVDB, OpenSubdiv, Embree, TBB, MaterialX, Python), the system, and
+    the pack's three Open Image Denoise libraries (checked with `otool -L` and
+    `objdump -p`). Nothing from Blender's libraries is loaded besides those three.
+  - **Statically linked, with their licence texts in the pack:** pugixml (MIT), zstd
+    (BSD-3-Clause; it's dual-licensed with GPL-2.0, and we take the BSD option), zlib
+    on Linux and Windows (zlib; macOS uses the system's), pthreads4w on Windows
+    (Apache-2.0; its `NOTICE` ships), sse2neon on macOS (MIT), and epoxy's headers (MIT).
+  - **Open Image Denoise 2.5.0:** Apache-2.0. Its third-party list (oneTBB, PyTorch,
+    Catch2, CUTLASS) and oneTBB's (ITT Notify, hwloc and others) are all permissive,
+    and both lists ship.
+  - **Cycles' own source:** 817 files Apache-2.0, the rest BSD-3-Clause, MIT or Zlib,
+    with their texts in `cycles-notices/`. The only other GPL file,
+    `src/cmake/dependency_targets.cmake`, is build-only. `cuew`, `hipew` and
+    `libc_compat` are Apache-2.0. Cycles has no `NOTICE` file to carry.
+  - **No GPU device** is built, so none of the GPU licences apply yet.
 - **MoonRay is Apache-2.0**, so it can go in the standard zip, which stays BSD-3-Clause.
   Apache-2.0 asks for its `LICENSE` and `NOTICE` in the release, and for files our patches
   change to say so. What it brings, as far as is known before a build:
@@ -810,7 +915,7 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 | # | Question | Assumption until decided |
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
-| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | No, until it has had the Blender configuration's review. Then `"publish": true` in `deps/usd-plugins/gatling.json` is all it takes |
+| 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | **Reviewed (2026-11-27, §5):** not for the standard release, which ships the RTX and V-Ray integrations and not the combination's source. Yes as part of the GPL-3.0 configuration (Blender's), whose tools and source lock now include it; that configuration's renewed review for the current OpenUSD pin is still to do |
 | 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word before publishing. The FBX SDK's licence is still to read |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
@@ -845,8 +950,9 @@ the second disk image on macOS. Not through a plugin registry:
 tests of §10.6; nothing is released with it. On Linux and macOS none of it has run yet: its
 parts were tried by hand before (§10.6). The release workflow's new steps haven't run either;
 a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stay
-until a release has shown that this works, and no Windows optional pack is published yet
-(Cycles and Gatling say `"publish": false`), so Windows users see an empty list until one is.
+until a release has shown that this works. Cycles is the first Windows optional pack
+(published 2026-11-27, §5), so the first release after it is also the first to run these
+Windows steps with a real pack.
 
 ### 10.1 Decisions
 

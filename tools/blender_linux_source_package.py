@@ -49,13 +49,14 @@ def compiler_inputs(build, archive, commit):
 
 
 def tool_sources():
-    rows = json.loads((REPO / "deps/blender-distribution.json").read_text())[
-        "resources"
-    ]
+    """The supplemental sources the Linux configuration takes from the Windows lock:
+    Ruff's and uv's, and those the USD plugin packs it may ship are built from."""
+    lock = json.loads((REPO / "deps/blender-distribution.json").read_text())
+    packs = {name for pack in lock.get("usd_plugin_packs", {}).values() for name in pack["sources"]}
     return [
         row
-        for row in rows
-        if row["name"] in ("ruff", "uv") or row["name"].startswith("crate-")
+        for row in lock["resources"]
+        if row["name"] in ("ruff", "uv") or row["name"].startswith("crate-") or row["name"] in packs
     ]
 
 

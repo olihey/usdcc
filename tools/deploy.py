@@ -230,6 +230,12 @@ OPENUSD_PLUGINS = ("hdStorm", "hdEmbree", "hioAvif", "hioImageIO", "hioOiio", "h
 
 # Where the USD plugin packs' own files are, in an OpenUSD install and in a deploy.
 USD_PACKS_DIR = "usd-plugins"
+# The packs the GPL-3.0 configuration (--with-blender-mesh-tools) ships, when the
+# OpenUSD install has them: reviewed for it, by the exact build, in
+# docs/BLENDER_DISTRIBUTION_REVIEW.md and BLENDER_LINUX_DISTRIBUTION_REVIEW.md
+# (docs/USD_PLUGINS.md section 5). The standard set isn't among them: that review
+# doesn't cover it.
+GPL_CONFIGURATION_PACKS = ("gatling",)
 
 
 def _openusd_plugins(source, destination, copier):
@@ -252,6 +258,14 @@ def _usd_packs(usd_install):
     if not folder.is_dir():
         return {}
     return {file.stem: json.loads(file.read_text(encoding="utf-8")) for file in sorted(folder.glob("*.json"))}
+
+
+def _shipped_packs(usd_packs, gpl_configuration):
+    """The packs a deploy ships in it: the standard set, or for the GPL-3.0
+    configuration the packs reviewed for it."""
+    if gpl_configuration:
+        return {pack: manifest for pack, manifest in usd_packs.items() if pack in GPL_CONFIGURATION_PACKS}
+    return {pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
 
 
 def _pack_dlls(packs):
@@ -517,10 +531,9 @@ def main(argv=None):
 
     # The USD plugin packs in the install (docs/USD_PLUGINS.md). The standard set is
     # shipped, file by file from each pack's list; the others' files stay behind.
-    # The Blender configuration's review covers OpenUSD's own plugins only.
+    # The Blender configuration ships only the packs its review covers (Gatling).
     usd_packs = _usd_packs(usd_install)
-    shipped_packs = {} if args.with_blender_mesh_tools else {
-        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
+    shipped_packs = _shipped_packs(usd_packs, args.with_blender_mesh_tools)
     pack_dlls = _pack_dlls(usd_packs)
 
     print(f"  OpenUSD libraries ({usd_install})", flush=True)
@@ -1071,9 +1084,9 @@ def deploy_linux(args):
 
     # The USD plugin packs in the install, as on Windows: the standard set is
     # shipped, file by file from each pack's list, and the others' files stay behind.
+    # The Blender configuration ships only the packs its review covers (Gatling).
     usd_packs = _usd_packs(usd_install)
-    shipped_packs = {} if args.with_blender_mesh_tools else {
-        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
+    shipped_packs = _shipped_packs(usd_packs, args.with_blender_mesh_tools)
 
     print(f"  OpenUSD libraries and plugins ({usd_install})", flush=True)
     mesh_exclusions = ["*_debug.so*", "libtbbbind*.so*", "libtbb_preview*.so*"] if args.with_blender_mesh_tools else []

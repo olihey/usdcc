@@ -112,6 +112,10 @@ source materials/build recipes are supplied; a complete offline compilation of
 every third-party library has not been claimed. Unmodified general build-tool
 bootstraps may still need their normal executable packages.
 
+The Gatling pack, when the package ships it, is rebuilt from `sources/supplemental/` as
+the Windows instructions describe ([BLENDER_SOURCE_BUILD.md](BLENDER_SOURCE_BUILD.md)),
+with `libmdl_sdk.so` in place of the DLL.
+
 ## Replace shared libraries and install modifications
 
 Qt, ADS and other public shared libraries are in `lib/`, with Qt's plugin tree in

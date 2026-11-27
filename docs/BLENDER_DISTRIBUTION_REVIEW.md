@@ -28,8 +28,8 @@ installation or device authorization mechanism requiring installation keys.
 Qt, PySide6/Shiboken6 and ADS remain separate replaceable dynamic libraries.
 Their source, modifications, build recipes and license texts accompany the package.
 See `BLENDER_SOURCE_BUILD.md` for replacement and rebuilding instructions. No
-proprietary renderer integration is approved: RTX, V-Ray and the stale Gatling/MDL
-SDK are excluded. Blender's name is descriptive; no endorsement is asserted.
+proprietary renderer integration is approved: RTX and V-Ray are excluded. The Gatling
+render delegate (GPL-3.0-or-later) may be included as the USD plugin pack reviewed below. Blender's name is descriptive; no endorsement is asserted.
 
 ## Reviewed components and license choices
 
@@ -57,6 +57,37 @@ SDK are excluded. Blender's name is descriptive; no endorsement is asserted.
 | Ruff / uv | 0.17.1 / 0.13.5, pinned source plus every registry dependency in both Cargo.lock files (938 unique crate versions) | Separate unmodified CLI tools, aggregated rather than linked; MIT / MIT-or-Apache plus crate terms. All crate sources and available upstream license/notice files supplied; crate license inventory retained. Dual choices may use MIT; MPL-only dependencies retain MPL terms/source. No git-sourced Cargo dependency is omitted. |
 | Preview assets and icons | usdcc-generated shapes/HDRIs, USD WG Standard Shader Ball, Tabler icons | Original BSD, separately aggregated CC BY 4.0 assets with contributor/source attribution and intact LICENCE/README, MIT icons; bundled fonts retain OFL/Apache notices |
 | Windows APIs and Microsoft release CRT | Enumerated imports and shipped runtime hashes | GPLv3 System Libraries exclusion from corresponding source; runtime binaries remain under Microsoft's redistribution terms, not GPL. Debug CRT is not distributable and is excluded. |
+
+### Gatling pack (added 2026-11-27, pending a renewed run)
+
+The configuration may ship one USD plugin pack, Gatling, in exactly the build
+`usdplugin-gatling-945f47d69-546ef27c-win64-py313` (`deps/blender-distribution.json`,
+`usd_plugin_packs`). Its licences were read in [USD_PLUGINS.md](USD_PLUGINS.md) §5:
+Gatling is GPL-3.0-or-later; its 24 submodules, the nested googletest and the libdeflate
+OpenEXR fetches are permissive (glslang's Bison output carries the Bison exception);
+NVIDIA's MDL SDK 2026.0.2 and its MDL files are BSD-3-Clause, with a permissive
+third-party list.
+
+- **Deploy:** `tools/deploy.py --with-blender-mesh-tools` ships the packs in
+  `GPL_CONFIGURATION_PACKS` the OpenUSD install has, file by file from the pack's list,
+  and nothing of the standard set. Gatling isn't published, so the pack is the
+  `deps-usd-plugins.yml` artifact of that name, unzipped over the OpenUSD install.
+- **Audit:** `--finalize` takes the pack's binaries (`hdGatling.dll`, and
+  `libmdl_sdk.dll` under `hdGatling/resources`) as component `Gatling` by the pack's own
+  file list, records each one's licence, and rejects any other file of it. It rejects a
+  pack the lock doesn't name, another build of it, and a build the pin, patches and build
+  scripts in the source snapshot no longer name (`tools/ci/usd_plugin_asset.py`).
+- **Source:** the lock's supplemental resources carry Gatling at `945f47d`, each submodule
+  at the commit Gatling pins, googletest, libdeflate v1.18 and the MDL SDK's source at tag
+  `2026.0.2`, by SHA-256. The patches and build scripts are in the usdcc snapshot. The
+  audit refuses a pack whose sources aren't all in the lock.
+- **Not yet settled:** the pack's `libmdl_sdk` is NVIDIA's prebuilt binary from the
+  `2026.0.2` release; its source is the tag's, but that the binary was built from exactly
+  it can't be checked here. Building it from source would settle that.
+
+This addition hasn't been run end to end: the configuration as a whole needs a renewed
+review for the current OpenUSD pin first (`deps/usd.json` moved to Python 3.13, oneTBB,
+OpenVDB, Alembic and Draco on 2026-11-23), and `--finalize` refuses it until then.
 
 OpenUSD is **not** plain Apache-2.0. Comparison of the actual pinned TOST section 6
 with Apache-2.0 shows a narrower trademark grant, including affiliates. Our
