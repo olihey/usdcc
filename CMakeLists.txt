@@ -319,6 +319,10 @@ usdcc_feature(BLENDER_MESH_TOOLS LABEL "Blender mesh tools" DEFAULT ON
 # Settings > Updates, and doesn't link Velopack (the launcher and installer still do).
 usdcc_feature(UPDATES LABEL "Updates" DEFAULT ON
     DOC "Checking for, downloading and installing new releases (docs/UPDATES.md)")
+# In the app too: off, usdcc downloads no packs, and has no Packs in View > Plugins and no
+# --install-packs. A pack that is in its folder all the same is still loaded.
+usdcc_feature(PACKS LABEL "Packs" DEFAULT ON
+    DOC "Optional packs downloaded in the app, such as renderers (docs/USD_PLUGINS.md)")
 # In the app too: off, usdcc makes no pipe, and has no Settings > Python > Editors.
 usdcc_feature(EDITOR_LINK LABEL "Editor link" DEFAULT ON
     DOC "Editors, such as VS Code, running scripts in usdcc through a local pipe (docs/VSCODE.md)")
@@ -409,3 +413,6 @@ set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT usdcc)
 # Last, once every target exists: keep each build's PDBs and binaries.
 include(UsdccSymbols)
 usdcc_archive_symbols()
+# And run AUTOMOC again when Python or an option changes which headers a target has.
+include(UsdccAutogenState)
+usdcc_autogen_state()

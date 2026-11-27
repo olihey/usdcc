@@ -31,12 +31,19 @@ What a pin can say beyond the repository and commit (docs/USD_PLUGINS.md section
                       null for a platform that doesn't need it
   sdks                {name: {description, files}}: an SDK that can't be downloaded
                       (it needs a login, as the Arnold SDK does), passed as
-                      --sdk <name>=<folder>, which must have the files listed
-  cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders
+                      --sdk <name>=<folder>, which must have the files listed;
+                      `files` a list, or {platform: list} where they differ
+  cmake               arguments; {usd}, {pack}, {<download name>} and {<sdk name>} are folders;
+                      an entry {platform: [arguments]} is for that platform alone
   targets             what to build (default: everything)
   install_prefix      where in the pack the install goes (default: its root)
   install_components  the install components to take (default: all of it)
   licenses            {name: [files]}: more licence files, {<download name>} and {<sdk name>} allowed
+  preloaded           {platform: [library names]}, Linux: libraries the app loads by full path
+                      and globally before the pack's plugins (Arnold's core), taken out of
+                      the plugins' NEEDED. Such a library without a SONAME, as libai.so,
+                      doesn't satisfy a NEEDED of its name, so the plugins couldn't load;
+                      without the entry their symbols come from the loaded one
 
 --install copies the pack over the OpenUSD install afterwards. Check a pack with
 tools/ci/check_usd_plugin.py.
@@ -299,7 +306,8 @@ def _sdks(spec, pack, given):
         if name not in folders:
             fail(f"The {pack} pack needs the {sdk['description']}, which can't be downloaded: "
                  f"pass --sdk {name}=<its folder>")
-        for file in sdk.get("files", []):
+        files = sdk.get("files", [])
+        for file in files.get(ASSET_PLATFORM, []) if isinstance(files, dict) else files:  # by platform, or the same on all
             if not (folders[name] / file).is_file():
                 fail(f"{folders[name]} isn't the {sdk['description']}: it has no {file}")
     return folders
@@ -392,7 +400,9 @@ def _cmake_build(spec, pack, source, build, prefix, places, jobs):
         # pxrConfig.cmake looks for the pin's Python (its libraries, not the
         # interpreter): the one this runs on, not whichever CMake finds first.
         f"-DPython3_ROOT_DIR={Path(sys.base_prefix).as_posix()}",
-        *[argument.format(**places) for argument in spec["cmake"]],
+        # An entry may be {platform: [arguments]}, for what only one platform takes.
+        *[argument.format(**places) for entry in spec["cmake"]
+          for argument in (entry.get(ASSET_PLATFORM, []) if isinstance(entry, dict) else [entry])],
     ]
     print(f"Configuring {pack}:", " ".join(str(part) for part in command), flush=True)
     run(command)
@@ -412,6 +422,15 @@ def _finish(spec, pack, args, usd, work, pack_dir, source, build, submodules, pl
         print(f"rpaths relative to @loader_path: {', '.join(_relative_rpaths(pack_dir, usd)) or 'none to change'}", flush=True)
     if LINUX and not spec.get("hook"):  # a hook sets its binaries' own
         print(f"RUNPATHs relative to $ORIGIN: {', '.join(_relative_runpaths(pack_dir, usd)) or 'none to change'}", flush=True)
+    if LINUX and spec.get("preloaded", {}).get(ASSET_PLATFORM):
+        from _elf import elf_files, needed, remove_needed
+        names = spec["preloaded"][ASSET_PLATFORM]
+        changed = []
+        for file in elf_files(pack_dir):
+            for name in set(needed(file)) & set(names):
+                remove_needed(file, name)
+                changed.append(f"{file.relative_to(pack_dir).as_posix()} ({name})")
+        print(f"Preloaded, not NEEDED: {', '.join(changed) or 'nothing named them'}", flush=True)
 
     # The licences: the plugin's own and what CMake fetched into it, its
     # submodules', and the files the pin names (an SDK's, shipped beside it).

@@ -97,7 +97,9 @@ it can be installed after its notification was closed:
 Updates > Check for updates when usdcc starts** is on (the default). It only says something
 when there is an update; a failure goes to the log.
 
-**Download and Install** downloads in the background, with the progress in the status bar.
+**Download and Install** first fetches the optional packs the user chose for the new version, and asks
+about one it doesn't have, with **Update Anyway** and **Later** ([USD_PLUGINS.md](USD_PLUGINS.md) §10.5).
+Then it downloads in the background, with the progress in the status bar.
 Then "usdcc 26.12.1 is ready" with **Restart Now**. Without a restart, the launcher installs
 it the next time usdcc starts (§3).
 
@@ -116,6 +118,7 @@ no settings.
 |---|---|---|
 | Check for updates when usdcc starts | on | |
 | Include prereleases | off | Also offer betas (`26.12.1-beta.1`) |
+| Keep installed packs up to date | on | The optional packs chosen in View > Plugins > Packs are fetched again for a new version ([USD_PLUGINS.md](USD_PLUGINS.md) §10.5) |
 
 usdcc logs each step under `usdcc.updates`, and what Velopack's library reports in the app
 goes there too. Velopack's updater (`Update.exe`, which also rebuilds the full package
@@ -243,7 +246,7 @@ them are under MIT, Apache-2.0, BSD, ISC, Zlib, Unicode and MPL-2.0 licences (wh
 | Windows installer | Yes | Yes |
 | Windows 7z | Yes | No |
 | macOS disk image | Yes | Yes |
-| macOS disk image with an optional pack (MoonRay) | Yes | No: an update would take its pack away |
+| macOS disk image with an optional pack (MoonRay) | Yes | No: an update would take its pack away. The plain image installs the pack itself and keeps it over updates ([USD_PLUGINS.md](USD_PLUGINS.md) §10), which is to replace this one |
 | Linux tar.xz | Yes | No |
 | Linux AppImage | Yes | Yes |
 

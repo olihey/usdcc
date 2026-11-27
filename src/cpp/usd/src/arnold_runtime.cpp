@@ -20,6 +20,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 namespace usdcc::usd {
@@ -86,10 +88,6 @@ std::string usdRootFolder() {
 ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& usdRoot) {
     ArnoldStatus status;
     if (arnoldFolder.empty()) return status;
-#if !defined(ARCH_OS_WINDOWS)
-    status.message = "Settings > Renderers names an Arnold folder, but Arnold in usdcc is Windows-only for now";
-    return status;
-#else
     const std::filesystem::path root = std::filesystem::u8path(usdRoot.empty() ? usdRootFolder() : usdRoot);
     const std::filesystem::path plugins = root / "plugin" / "arnold";
     if (!std::filesystem::is_regular_file(plugins / "plugInfo.json")) {
@@ -106,12 +104,20 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
         return status;
     }
 
-    const std::filesystem::path core = std::filesystem::u8path(arnoldFolder) / "bin" / "ai.dll";
+#if defined(ARCH_OS_WINDOWS)
+    const char* const coreName = "bin/ai.dll";
+#elif defined(ARCH_OS_DARWIN)
+    const char* const coreName = "bin/libai.dylib";
+#else
+    const char* const coreName = "bin/libai.so";
+#endif
+    const std::filesystem::path core = std::filesystem::u8path(arnoldFolder) / std::filesystem::u8path(coreName);
     if (!std::filesystem::is_regular_file(core)) {
-        status.message = "The Arnold folder in Settings > Renderers, " + arnoldFolder +
-                         ", has no bin/ai.dll: name an Arnold SDK or install. Arnold stays off";
+        status.message = "The Arnold folder in Settings > Renderers, " + arnoldFolder + ", has no " + coreName +
+                         ": name an Arnold SDK or install. Arnold stays off";
         return status;
     }
+#if defined(ARCH_OS_WINDOWS)
     // Its own DLLs (licensing, denoisers) from its own folder, and no message box
     // if one is missing: a failure is logged instead.
     DWORD previousMode = 0;
@@ -124,12 +130,29 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
                          "). Arnold stays off";
         return status;
     }
+    const auto symbol = [module](const char* name) { return reinterpret_cast<void*>(GetProcAddress(module, name)); };
+    const auto unload = [module]() { FreeLibrary(module); };
+#else
+    // By its full path, and global: the plugins ask for libai (@rpath/libai.dylib,
+    // libai.so), the install name or soname of the one already loaded, so they get
+    // this one. Its own libraries (licensing) come from its folder through its
+    // @loader_path or $ORIGIN rpath.
+    void* module = dlopen(utf8(core).c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (!module) {
+        const char* error = dlerror();
+        status.message = "Arnold's core, " + utf8(core) + ", didn't load (" + (error ? error : "unknown error") +
+                         "). Arnold stays off";
+        return status;
+    }
+    const auto symbol = [module](const char* name) { return dlsym(module, name); };
+    const auto unload = [module]() { dlclose(module); };
+#endif
     using GetVersion = const char* (*)(char*, char*, char*, char*);
-    const auto getVersion = reinterpret_cast<GetVersion>(GetProcAddress(module, "AiGetVersion"));
+    const auto getVersion = reinterpret_cast<GetVersion>(symbol("AiGetVersion"));
     const char* version = getVersion ? getVersion(nullptr, nullptr, nullptr, nullptr) : nullptr;
     status.arnoldVersion = version ? version : "";
     if (!arnoldVersionFits(status.arnoldVersion, status.packVersion)) {
-        FreeLibrary(module);
+        unload();
         const std::vector<int> built = versionParts(status.packVersion);
         status.message = "The Arnold in " + arnoldFolder + " is " +
                          (status.arnoldVersion.empty() ? std::string("of an unknown version") : status.arnoldVersion) +
@@ -145,7 +168,7 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
     // plugins without the core.
     const PXR_NS::PlugPluginPtrVector registered = PXR_NS::PlugRegistry::GetInstance().RegisterPlugins(status.pluginFolder);
     if (registered.empty()) {
-        FreeLibrary(module);
+        unload();
         status.message = "OpenUSD registered no plugins from " + status.pluginFolder + ". Arnold stays off";
         status.arnoldVersion.clear();
         return status;
@@ -156,7 +179,6 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
     status.message = "Arnold " + status.arnoldVersion + " from " + utf8(core) + ", with " +
                      std::to_string(registered.size()) + " plugins from " + status.pluginFolder + " (Settings > Renderers)";
     return status;
-#endif
 }
 
 }  // namespace usdcc::usd

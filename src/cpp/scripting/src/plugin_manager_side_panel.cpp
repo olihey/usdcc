@@ -2,6 +2,7 @@
 
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/editor_setup.h"
+#include "usdcc/scripting/pack_catalog.h"
 #include "usdcc/scripting/package_install_dialog.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/plugin_type_icon.h"
@@ -30,11 +31,13 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStringList>
 #include <QTreeWidget>
@@ -123,6 +126,38 @@ std::pair<int, QString> kindGroup(const std::string& kind) {
 
 // Which rows were expanded, to expand them again after a refresh.
 constexpr int kExpandKeyRole = Qt::UserRole + 1;
+// A pack row's PackListing::State.
+constexpr int kPackStateRole = Qt::UserRole + 2;
+
+// "214 MB", "1.6 MB", "12 KB".
+QString packSizeText(qint64 bytes) {
+    const double megabytes = static_cast<double>(bytes) / (1024.0 * 1024.0);
+    if (megabytes >= 10.0) return QStringLiteral("%1 MB").arg(QString::number(megabytes, 'f', 0));
+    if (megabytes >= 1.0) return QStringLiteral("%1 MB").arg(QString::number(megabytes, 'f', 1));
+    return QStringLiteral("%1 KB").arg(QString::number(std::max<qint64>(1, bytes / 1024)));
+}
+
+QString packStateText(const PackListing& pack) {
+    switch (pack.state) {
+        case PackListing::State::NotInstalled:
+            return PluginManagerSidePanel::tr("Not installed");
+        case PackListing::State::Downloading:
+            return PluginManagerSidePanel::tr("Downloading %1%").arg(pack.progress);
+        case PackListing::State::Installing:
+            return PluginManagerSidePanel::tr("Unpacking...");
+        case PackListing::State::RestartToUse:
+            return PluginManagerSidePanel::tr("Restart to use");
+        case PackListing::State::Installed:
+            return PluginManagerSidePanel::tr("Installed");
+        case PackListing::State::RemovedAtRestart:
+            return PluginManagerSidePanel::tr("Removed at the next start");
+        case PackListing::State::NotLoaded:
+            return PluginManagerSidePanel::tr("Not loaded");
+        case PackListing::State::NotAvailable:
+            break;
+    }
+    return PluginManagerSidePanel::tr("Not for this version");
+}
 
 QTreeWidgetItem* addRow(QTreeWidgetItem* parent, const QString& text, const QString& key = {}) {
     auto* row = new QTreeWidgetItem(parent, {text});
@@ -304,6 +339,109 @@ PluginManagerSidePanel::PluginManagerSidePanel(PluginManager& plugins, QWidget* 
     folders->setObjectName(QStringLiteral("pluginFolders"));
     buttons->addWidget(folders);
     layout->addLayout(buttons);
+
+    // The packs usdcc can download (docs/USD_PLUGINS.md §10). Hidden until setPackCatalog().
+    m_packSection = new QWidget(content);
+    auto* packLayout = new QVBoxLayout(m_packSection);
+    usdcc::ui::scaled::margins(packLayout, 0, 6, 0, 0);
+    usdcc::ui::scaled::spacing(packLayout, 6);
+    auto* packHeader = new QHBoxLayout;
+    auto* packTitle = new QLabel(tr("Packs"), m_packSection);
+    QFont packTitleFont = packTitle->font();
+    packTitleFont.setBold(true);
+    packTitle->setFont(packTitleFont);
+    packTitle->setToolTip(tr("Plugins too large to come with usdcc, such as renderers. A pack is downloaded for this version of "
+                             "usdcc, and fetched again when usdcc updates."));
+    packHeader->addWidget(packTitle);
+    packHeader->addStretch(1);
+    auto* packRefresh =
+        new usdcc::ui::PanelIconButton(QStringLiteral(":/usdcc/theme/reload.png"), tr("Read the list of packs again"), m_packSection);
+    packRefresh->setObjectName(QStringLiteral("packRefresh"));
+    packHeader->addWidget(packRefresh);
+    packLayout->addLayout(packHeader);
+
+    m_packTree = new QTreeWidget(m_packSection);
+    m_packTree->setObjectName(QStringLiteral("packList"));
+    m_packTree->setColumnCount(3);
+    m_packTree->setHeaderLabels({tr("Pack"), tr("Size"), tr("State")});
+    m_packTree->setRootIsDecorated(true);
+    m_packTree->setWordWrap(true);  // why a pack isn't loaded, or wasn't installed
+    m_packTree->header()->setStretchLastSection(false);
+    m_packTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_packTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_packTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_packTree->setMinimumHeight(usdcc::ui::scaled::pixels(72));
+    m_packTree->setMaximumHeight(usdcc::ui::scaled::pixels(180));
+    packLayout->addWidget(m_packTree);
+
+    m_packNote = new QLabel(m_packSection);
+    m_packNote->setObjectName(QStringLiteral("propertyNote"));
+    m_packNote->setWordWrap(true);
+    m_packNote->setTextFormat(Qt::PlainText);
+    m_packNote->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_packNote->setMinimumWidth(1);
+    packLayout->addWidget(m_packNote);
+
+    // For the pack selected: those its state allows.
+    auto* packButtons = new QHBoxLayout;
+    const auto packButton = [this, packButtons](const QString& text, const char* name, const QString& tip) {
+        auto* button = new QPushButton(text, m_packSection);
+        button->setObjectName(QLatin1String(name));
+        button->setToolTip(tip);
+        packButtons->addWidget(button);
+        return button;
+    };
+    m_packInstall = packButton(tr("Install"), "packInstall", tr("Download the pack; it is there from the next start of usdcc"));
+    m_packCancel = packButton(tr("Cancel"), "packCancel", tr("Stop installing it, and leave things as they were"));
+    m_packRestart = packButton(tr("Restart Now"), "packRestart", tr("Close usdcc, asking about unsaved changes, and start it again"));
+    m_packKeep = packButton(tr("Keep"), "packKeep", tr("Don't remove it after all"));
+    m_packRemove = packButton(tr("Remove..."), "packRemove", tr("Delete the pack from this computer, and don't fetch it again when usdcc updates"));
+    packButtons->addStretch(1);
+    packLayout->addLayout(packButtons);
+    m_packSection->hide();
+    layout->addWidget(m_packSection);
+
+    connect(packRefresh, &QAbstractButton::clicked, this, [this]() {
+        if (m_packs) m_packs->refresh();
+    });
+    connect(m_packTree, &QTreeWidget::currentItemChanged, this, [this]() { updatePackButtons(); });
+    connect(m_packInstall, &QAbstractButton::clicked, this, [this]() {
+        if (m_packs && !currentPack().isEmpty()) m_packs->install(currentPack());
+    });
+    connect(m_packCancel, &QAbstractButton::clicked, this, [this]() {
+        if (m_packs && !currentPack().isEmpty()) m_packs->cancel(currentPack());
+    });
+    connect(m_packKeep, &QAbstractButton::clicked, this, [this]() {
+        if (m_packs && !currentPack().isEmpty()) m_packs->keep(currentPack());
+    });
+    connect(m_packRestart, &QAbstractButton::clicked, this, [this]() {
+        if (m_packs) m_packs->restart();
+    });
+    connect(m_packRemove, &QAbstractButton::clicked, this, [this]() {
+        const QString name = currentPack();
+        if (!m_packs || name.isEmpty()) return;
+        const std::vector<PackListing> listed = m_packs->packs();
+        const auto pack = std::find_if(listed.begin(), listed.end(), [&name](const PackListing& each) { return each.name == name; });
+        if (pack == listed.end()) return;
+        // Chosen, but not here: nothing to delete, only to forget.
+        if (pack->state == PackListing::State::NotAvailable) {
+            m_packs->remove(name);
+            return;
+        }
+        QString text = tr("Remove %1 from this computer?").arg(pack->title);
+        if (pack->installedSize > 0) text += QLatin1Char(' ') + tr("It frees %1.").arg(packSizeText(pack->installedSize));
+        text += QLatin1Char(' ') + (pack->state == PackListing::State::Installed
+                                        ? tr("usdcc is using it, so it goes at the next start.")
+                                        : tr("usdcc won't fetch it again when it updates."));
+        QMessageBox box(QMessageBox::Question, tr("Remove Pack"), text, QMessageBox::NoButton, window());
+        box.setObjectName(QStringLiteral("packRemoveConfirm"));
+        const QPushButton* remove = box.addButton(tr("Remove"), QMessageBox::AcceptRole);
+        box.setDefaultButton(box.addButton(QMessageBox::Cancel));
+        box.exec();
+        // The catalog may be gone, or the list changed, while the question was up.
+        if (box.clickedButton() == remove && m_packs) m_packs->remove(name);
+    });
+
     setWidget(content);
 
     connect(m_install, &QAbstractButton::clicked, this, [this]() { installPackages(false); });
@@ -456,7 +594,94 @@ QString PluginManagerSidePanel::pluginIdOf(const QTreeWidgetItem* item) const {
 
 void PluginManagerSidePanel::showEvent(QShowEvent* event) {
     refresh();
+    // The list of packs is asked for when the panel is first looked at, not before:
+    // nothing uses the network for a panel nobody opened.
+    if (m_packs && !m_packsRead) {
+        m_packsRead = true;
+        m_packs->refresh();
+    }
     SidePanel::showEvent(event);
+}
+
+void PluginManagerSidePanel::setPackCatalog(PackCatalog* packs) {
+    if (m_packs) m_packs->disconnect(this);
+    m_packs = packs;
+    m_packSection->setVisible(packs != nullptr);
+    if (!packs) return;
+    connect(packs, &PackCatalog::changed, this, [this]() { refreshPacks(); });
+    connect(packs, &QObject::destroyed, this, [this]() {
+        m_packs = nullptr;
+        m_packSection->hide();
+    });
+    refreshPacks();
+}
+
+QString PluginManagerSidePanel::currentPack() const {
+    const QTreeWidgetItem* item = m_packTree->currentItem();
+    while (item && item->parent()) item = item->parent();
+    return item ? item->data(0, Qt::UserRole).toString() : QString();
+}
+
+void PluginManagerSidePanel::refreshPacks() {
+    if (!m_packs) return;
+    const QString current = currentPack();
+    std::set<QString> expanded;
+    for (QTreeWidgetItemIterator it(m_packTree); *it; ++it) {
+        if ((*it)->isExpanded()) expanded.insert((*it)->data(0, kExpandKeyRole).toString());
+    }
+    const QSignalBlocker blocker(m_packTree);
+    m_packTree->clear();
+    for (const PackListing& pack : m_packs->packs()) {
+        const bool here = pack.state != PackListing::State::NotInstalled && pack.state != PackListing::State::Downloading &&
+                          pack.state != PackListing::State::Installing && pack.state != PackListing::State::NotAvailable;
+        const qint64 size = here && pack.installedSize > 0 ? pack.installedSize : pack.downloadSize;
+        auto* item = new QTreeWidgetItem(m_packTree, {pack.title, size > 0 ? packSizeText(size) : QString(), packStateText(pack)});
+        item->setData(0, Qt::UserRole, pack.name);
+        item->setData(0, kExpandKeyRole, pack.name);
+        item->setData(0, kPackStateRole, static_cast<int>(pack.state));
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        QStringList tip;
+        if (!pack.description.isEmpty()) tip << pack.description;
+        if (pack.downloadSize > 0) tip << tr("Download: %1").arg(packSizeText(pack.downloadSize));
+        if (pack.installedSize > 0) tip << tr("Installed: %1").arg(packSizeText(pack.installedSize));
+        item->setToolTip(0, tip.join(QLatin1Char('\n')));
+        if (!pack.problem.isEmpty()) item->setToolTip(2, pack.problem);
+
+        if (!pack.description.isEmpty()) dim(addRow(item, pack.description), m_packTree);
+        if (!pack.renderers.isEmpty()) addRow(item, tr("Renderers: %1").arg(pack.renderers.join(QStringLiteral(", "))));
+        QStringList about;
+        if (!pack.version.isEmpty()) about << tr("Version %1").arg(pack.version);
+        if (!pack.license.isEmpty()) about << pack.license;
+        if (!pack.homepage.isEmpty()) about << pack.homepage;
+        if (!about.isEmpty()) dim(addRow(item, about.join(QStringLiteral(", "))), m_packTree);
+        if (!pack.problem.isEmpty()) {
+            QTreeWidgetItem* problem = addGroup(item, tr("Problem"), pack.name + QStringLiteral("/problem"));
+            addRow(problem, pack.problem);
+            problem->setExpanded(true);
+            item->setExpanded(true);  // it is why the pack isn't there: not behind an arrow
+        }
+        if (expanded.count(pack.name)) item->setExpanded(true);
+        if (pack.name == current) m_packTree->setCurrentItem(item);
+    }
+    if (!m_packTree->currentItem() && m_packTree->topLevelItemCount() > 0) m_packTree->setCurrentItem(m_packTree->topLevelItem(0));
+    const QString note = m_packs->note();
+    m_packNote->setText(note);
+    m_packNote->setVisible(!note.isEmpty());
+    updatePackButtons();
+}
+
+void PluginManagerSidePanel::updatePackButtons() {
+    const QTreeWidgetItem* item = m_packTree->currentItem();
+    while (item && item->parent()) item = item->parent();
+    const bool any = m_packs && item;
+    const auto state = static_cast<PackListing::State>(any ? item->data(0, kPackStateRole).toInt() : 0);
+    using State = PackListing::State;
+    m_packInstall->setVisible(any && state == State::NotInstalled);
+    m_packCancel->setVisible(any && (state == State::Downloading || state == State::Installing));
+    m_packRestart->setVisible(any && (state == State::RestartToUse || state == State::RemovedAtRestart));
+    m_packKeep->setVisible(any && state == State::RemovedAtRestart);
+    m_packRemove->setVisible(any && (state == State::RestartToUse || state == State::Installed || state == State::NotLoaded ||
+                                     state == State::NotAvailable));
 }
 
 }  // namespace usdcc::scripting

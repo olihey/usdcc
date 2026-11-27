@@ -150,6 +150,9 @@ QJsonObject SessionController::capture(const QString& name, const QImage& previe
             entry.insert(QStringLiteral("id"), QString::fromStdString(plugin.manifest.id));
             entry.insert(QStringLiteral("name"), QString::fromStdString(plugin.manifest.name));
             entry.insert(QStringLiteral("version"), QString::fromStdString(plugin.manifest.version));
+            // A pack's plugin, by the pack's name (its folder's): one the user removes
+            // is then left out of the session quietly.
+            if (plugin.pack) entry.insert(QStringLiteral("pack"), QString::fromStdString(plugin.manifest.folder.filename().string()));
             plugins << entry;
         }
         json.insert(QStringLiteral("plugins"), plugins);
@@ -248,11 +251,14 @@ SessionController::PluginDifference SessionController::pluginDifference(const QJ
     if (!m_context.plugins || !session.contains(QStringLiteral("plugins"))) return difference;
     QSet<QString> wanted;
     QHash<QString, QString> names;
+    QSet<QString> removed;  // ids of the plugins of packs the user removed
     for (const QJsonValue& value : session.value(QStringLiteral("plugins")).toArray()) {
         const QJsonObject plugin = value.toObject();
         const QString id = plugin.value(QStringLiteral("id")).toString();
         wanted.insert(id);
         names.insert(id, plugin.value(QStringLiteral("name")).toString(id));
+        const QString pack = plugin.value(QStringLiteral("pack")).toString();
+        if (!pack.isEmpty() && m_context.packRemoved && m_context.packRemoved(pack)) removed.insert(id);
     }
     for (const PluginInfo& plugin : m_context.plugins->plugins()) {
         const QString id = QString::fromStdString(plugin.manifest.id);
@@ -260,7 +266,7 @@ SessionController::PluginDifference SessionController::pluginDifference(const QJ
         if (wanted.contains(id) && !active) {
             if (!m_context.plugins->isEnabled(plugin.manifest.id)) {
                 difference.enable << id;
-            } else {
+            } else if (!removed.contains(id)) {
                 // On, but not running here (refused, failed): a restart won't change that.
                 difference.missing << QString::fromStdString(plugin.manifest.name);
             }
@@ -269,7 +275,7 @@ SessionController::PluginDifference SessionController::pluginDifference(const QJ
         }
     }
     for (const QString& id : std::as_const(wanted)) {
-        if (!m_context.plugins->find(id.toStdString())) difference.missing << names.value(id);
+        if (!m_context.plugins->find(id.toStdString()) && !removed.contains(id)) difference.missing << names.value(id);
     }
     return difference;
 }

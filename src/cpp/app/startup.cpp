@@ -3,6 +3,7 @@
 #include "usdcc/core/file_log_sink.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/core/version.h"
+#include "usdcc/scripting/pack_store.h"
 #include "usdcc/scripting/plugin_manager.h"
 #include "usdcc/scripting/validation_rule_files.h"
 #include "usdcc/scripting/python_settings.h"
@@ -128,6 +129,21 @@ std::vector<std::filesystem::path> pluginFolders(const QStringList& values) {
         folders.emplace_back(QFileInfo(folder).absoluteFilePath().toStdU16String());
     }
     return folders;
+}
+
+usdcc::scripting::PluginManager::Options pluginOptions(const QStringList& pluginPaths, bool enabled,
+                                                       usdcc::scripting::PackStore& packs) {
+    usdcc::scripting::PluginManager::Options options =
+        usdcc::scripting::PluginManager::defaultOptions(pluginFolders(pluginPaths), enabled);
+    if (!enabled || options.packsFolder.empty()) return options;
+    for (const usdcc::scripting::InstalledPack& pack : packs.prepare()) {
+        if (pack.removed) {
+            options.packsRemoved.insert(pack.record.name);
+        } else if (!pack.problem.empty()) {
+            options.packsRefused[pack.record.name] = pack.problem;
+        }
+    }
+    return options;
 }
 
 void configurePluginUsd(const usdcc::scripting::PluginManager& plugins) {

@@ -294,6 +294,49 @@ def _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources, libraries
     sources.append(f"  source:     {record['repository']} at {record['commit']}")
 
 
+def _pack_folder(pack, source_root, names, target, version, windows):
+    """Writes an optional pack as usdcc installs one it downloads (docs/USD_PLUGINS.md
+    section 10): `target`, a plugin folder laid out as an install, which
+    tools/ci/pack_index.py archives. `names` are the pack's files under `source_root`,
+    placed as a deploy has them.
+
+    The folder lives in the user's data folder, not in usdcc's. On Windows its DLLs
+    are in its own bin, which usdcc puts on its PATH. Elsewhere its lib is a link
+    usdcc makes to its own libraries, where the files' RUNPATHs lead: so a pack
+    can't have files of its own in lib, and has to keep them under plugin/."""
+    source_root = Path(source_root)
+    target = Path(target)
+    if target.exists():
+        remove_tree(target)
+    in_lib = [name for name in names if not windows and name.split("/")[0] in ("bin", "lib")]
+    if in_lib:
+        fail(f"The {pack} pack has files in lib/, where an installed pack has the link to usdcc's own libraries: "
+             f"{', '.join(in_lib[:5])}. Its build has to keep them under plugin/usd/ (deps/usd-plugins/{pack}.*), "
+             "as MoonRay's does (docs/USD_PLUGINS.md section 10).")
+    if not any(name.startswith("plugin/usd/") for name in names):
+        fail(f"The {pack} pack has nothing in plugin/usd/, which is the folder usdcc registers.")
+    for name in names:
+        if name.split("/")[0] not in ("bin", "plugin", "licenses", USD_PACKS_DIR):
+            fail(f"The {pack} pack has a file an installed pack has no place for: {name}")
+        (target / name).parent.mkdir(parents=True, exist_ok=True)
+        if (source_root / name).is_symlink():
+            os.symlink(os.readlink(source_root / name), target / name)
+        else:
+            copy_file(source_root / name, (target / name).parent)
+    # OpenUSD's own plugin/usd has this file; a folder of its own needs one too.
+    plug_info = target / "plugin/usd/plugInfo.json"
+    if not plug_info.exists():
+        plug_info.write_text('{\n    "Includes": [ "*/resources/" ]\n}\n', encoding="utf-8", newline="\n")
+    catalog = REPO / "deps/packs.json"
+    shown = json.loads(catalog.read_text(encoding="utf-8")).get(pack, {}) if catalog.is_file() else {}
+    manifest = {"id": f"org.usdcc.pack.{pack}", "name": shown.get("title", pack), "version": version or "0",
+                "description": shown.get("description", ""), "api": 1, "usd": ["plugin/usd"]}
+    (target / "usdcc-plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
+    size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
+    print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), as usdcc installs it")
+    return target
+
+
 def _usd_notices(usd_install, licenses_dir):
     target = licenses_dir / "OpenUSD"
     target.mkdir(parents=True, exist_ok=True)
@@ -334,6 +377,10 @@ def main(argv=None):
     parser.add_argument("--optional-packs", metavar="DIR",
                         help="also deploy the optional set's USD plugin packs, each into DIR/<pack>/<name>/: on Linux "
                              "to be unpacked over the deploy, on macOS a usdcc.app with it (docs/USD_PLUGINS.md section 5)")
+    parser.add_argument("--pack-folders", metavar="DIR",
+                        help="also write the optional set's packs as usdcc installs one it downloads, DIR/<pack>/, for "
+                             "tools/ci/pack_index.py (docs/USD_PLUGINS.md section 10); on Linux and macOS with "
+                             "--optional-packs, whose checked files they are")
     parser.add_argument("--with-blender-mesh-tools", action="store_true",
                         help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
     parser.add_argument("--blender-source-bundle", metavar="FILE",
@@ -347,6 +394,8 @@ def main(argv=None):
         args.omit_rtx = True
     elif args.blender_source_bundle:
         fail("--blender-source-bundle requires --with-blender-mesh-tools")
+    if args.pack_folders and not WINDOWS and not args.optional_packs:
+        fail("--pack-folders needs --optional-packs here: the folders are made from the packs it deploys and checks.")
     if MACOS:
         deploy_macos(args)
         return
@@ -653,7 +702,23 @@ def main(argv=None):
     for pack, manifest in shipped_packs.items():
         print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, sources)
-    for pack in sorted(set(usd_packs) - set(shipped_packs)):
+    # The optional set, as folders usdcc installs when it downloads one: not in the deploy.
+    # Laid out first as a deploy has them, in a folder of their own, by the same function.
+    pack_folders = Path(_full(args.pack_folders)) if args.pack_folders else None
+    optional_packs = {} if not pack_folders or args.with_blender_mesh_tools else {
+        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "optional"}
+    for pack, manifest in optional_packs.items():
+        print(f"  USD plugin pack, a download of its own: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
+        staging = pack_folders / ".staging" / pack
+        if staging.exists():
+            remove_tree(staging)
+        _deploy_usd_pack(pack, manifest, usd_install, staging, [])
+        record = json.loads((staging / USD_PACKS_DIR / f"{pack}.json").read_text(encoding="utf-8"))
+        _pack_folder(pack, staging, [*record["files"], f"{USD_PACKS_DIR}/{pack}.json"], pack_folders / pack,
+                     manifest.get("version", ""), windows=True)
+    if pack_folders and (pack_folders / ".staging").exists():
+        remove_tree(pack_folders / ".staging")
+    for pack in sorted(set(usd_packs) - set(shipped_packs) - set(optional_packs)):
         print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
     if (python_home / "LICENSE.txt").is_file():
@@ -1277,6 +1342,10 @@ def deploy_linux(args):
                 parent = parent.parent
         size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
         print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), to unpack over the deploy")
+        # And as usdcc installs it when it downloads it itself (docs/USD_PLUGINS.md section 10).
+        if args.pack_folders:
+            _pack_folder(pack, target, names, Path(_full(args.pack_folders)) / pack, optional_packs[pack].get("version", ""),
+                         windows=False)
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with ./usdcc or bin/usdcc.")
@@ -1701,6 +1770,13 @@ def deploy_macos(args):
     for pack, manifest in optional_packs.items():
         print(f"  USD plugin pack, a download of its own: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _macos_optional_pack(pack, manifest, usd_install, app, optional_dir / pack / deploy_dir.name / "usdcc.app", args.sign)
+        # And as usdcc installs it when it downloads it itself (docs/USD_PLUGINS.md section 10):
+        # from that bundle, where each of its binaries got its own signature.
+        if args.pack_folders:
+            with_pack = optional_dir / pack / deploy_dir.name / "usdcc.app/Contents/Resources"
+            record = json.loads((with_pack / USD_PACKS_DIR / f"{pack}.json").read_text(encoding="utf-8"))
+            _pack_folder(pack, with_pack, [*record["files"], f"{USD_PACKS_DIR}/{pack}.json"], Path(_full(args.pack_folders)) / pack,
+                         manifest.get("version", ""), windows=False)
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {app} ({size / 2**20:,.0f} MB). Start it with: open {app}")

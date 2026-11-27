@@ -14,8 +14,10 @@ Cycles checkout is at the pinned commit with patches/cycles-usdcc.patch applied.
 2. Cycles' CMake build, the Hydra delegate only: no standalone cycles, no GPU
    devices, no OSL, no Alembic.
 3. Into the pack: plugin/usd/hdCycles.<dll|so|dylib> and its resources, and Open
-   Image Denoise's base library, core and CPU device (bin/ on Windows, lib/
-   elsewhere). Its GPU devices aren't taken.
+   Image Denoise's base library, core and CPU device (bin/ on Windows,
+   plugin/usd/hdCycles/lib elsewhere: an installed pack's lib is a link to usdcc's
+   own libraries, so nothing of its own can be there, docs/USD_PLUGINS.md section
+   10). Its GPU devices aren't taken.
 
 Blender's library folders have no licence files: LICENCES downloads each one's at
 the version Blender's lib/<platform>/deps.md names, checked by SHA-256. Returns
@@ -243,9 +245,10 @@ def build(ctx):
     copy_file(library, plugins)
     shutil.copytree(resources, plugins / "hdCycles" / "resources")
 
-    # Open Image Denoise, beside the libraries it's found with.
+    # Open Image Denoise: on Windows in bin/, beside the DLLs it's found with; elsewhere in
+    # a folder of the delegate's, as MoonRay keeps its libraries under plugin/usd/moonray.
     oidn = libraries / "openimagedenoise" / ("bin" if WINDOWS else "lib")
-    target = prefix / ("bin" if WINDOWS else "lib")
+    target = prefix / "bin" if WINDOWS else plugins / "hdCycles" / "lib"
     taken = []
     for file in sorted(oidn.iterdir()):
         stem = file.name.split(".")[0]
@@ -268,11 +271,18 @@ def build(ctx):
     shutil.copytree(source / "src" / "doc" / "license", notices, ignore=shutil.ignore_patterns("CMakeLists.txt"))
 
     if LINUX:
-        # The delegate finds OpenUSD's libraries and Open Image Denoise in lib/;
-        # Open Image Denoise finds its modules beside itself.
+        # The delegate finds OpenUSD's libraries in lib/ and Open Image Denoise in
+        # hdCycles/lib; Open Image Denoise finds its modules beside itself and TBB in lib/.
         from _elf import elf_files, set_runpath
-        set_runpath(plugins / library.name, ["$ORIGIN/../../lib"])
+        set_runpath(plugins / library.name, ["$ORIGIN/../../lib", "$ORIGIN/hdCycles/lib"])
         for file in elf_files(target):
             if file.name.split(".")[0].removeprefix("lib") in OIDN_PARTS:
-                set_runpath(file, ["$ORIGIN"])
+                set_runpath(file, ["$ORIGIN", "$ORIGIN/../../../../lib"])
+    if MACOS:
+        # The delegate finds Open Image Denoise in hdCycles/lib. tools/build_usd_plugin.py
+        # then keeps that relative rpath and adds the ones to lib/ (OpenUSD's, and TBB
+        # for Open Image Denoise's CPU device).
+        from _macho import edit, rpaths
+        delegate = plugins / library.name
+        edit(delegate, new_rpaths=[*rpaths(delegate), "@loader_path/hdCycles/lib"])
     return licences
