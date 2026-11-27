@@ -117,8 +117,9 @@ Notes:
   - **Material Editor nodes.** Cycles has no Sdr plugin; the Material Editor's Cycles
     nodes need the generator in MATERIAL_EDITOR.md §3.4. That is MATERIAL_EDITOR's phase 6,
     not the pack's: the pack has none yet.
-- **Aurora.** Whether hdAurora's DirectX backend builds against a stock OpenUSD, rather
-  than Autodesk's fork, is not known. It decides whether this pack exists at all (§8).
+- **Aurora.** hdAurora's DirectX backend builds against a stock OpenUSD, not only
+  Autodesk's fork, with a small patch (§7 phase 6, §8). Whether this pack exists now depends
+  on whether its renderer starts in usdcc, which it doesn't yet.
 - **Arnold.** Its Sdr plugin starts the Arnold core at discovery (`AiBegin`), so the pack
   is off unless the user turns it on. (Here that took under half a second, for 160 Arnold
   shader nodes, but it also loads Arnold's own plugins, its USD procedural among them.)
@@ -276,8 +277,9 @@ Notes:
   - `preload` and `plugin_folders` in `check`: a library the check loads by its full
     path first (`{arnold}/bin/ai.dll`; `tools/ci/check_usd_plugin.py` takes `--sdk` too),
     and the pack's folders it registers, as usdcc does for a pack that is off by default.
-- Still to come: a small Python hook next to the JSON for a build that isn't plain CMake
-  (Cycles' `make update`, Aurora's externals script).
+- `hook`: a Python file next to the JSON whose `build(ctx)` replaces the configure, build
+  and install, for a build that isn't plain CMake (`cycles.py`, `moonray.py`; Aurora's
+  pin would need one, for its externals script).
 
 ### `tools/build_usd_plugin.py`
 
@@ -398,7 +400,7 @@ Three sets, decided by licence:
 
 | Set | Where it goes | Packs |
 |---|---|---|
-| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` |
+| `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `cycles` (`optional` and unpublished until its licences are read), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
 | `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `gatling` (unpublished) |
 
 How an optional pack ships (Linux, and macOS in the last point; no Windows one is published yet):
@@ -678,9 +680,9 @@ How an optional pack ships (Linux, and macOS in the last point; no Windows one i
      makes it a `TF_FATAL_ERROR`. **The message and the cause aren't known:** neither DLL had
      symbols. The next thing to look at is that message, which the callback also writes to
      Aurora's console log (`AU_DEV_ALWAYS_DUMP_LOGS`).*
-   - *Not done: the pin. Aurora's build isn't plain CMake (its externals script first),
-     which needs §4's "small Python hook next to the JSON", not built yet; and there's no
-     point publishing a pack that can't start its renderer.*
+   - *Not done: the pin. Aurora's build isn't plain CMake (its externals script first), so
+     it needs a hook (§4's `hook`, as Cycles and MoonRay have); but there's no point
+     publishing a pack that can't start its renderer, so the crash comes first.*
 7. **Arnold**, as a `local` pack.
    *Built, and checked locally on Windows, then macOS. Not built by this repository's CI
    (`local`); since 2026-11-26 built and checked for Windows x64, macOS arm64 and Linux x64 by
