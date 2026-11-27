@@ -1011,8 +1011,10 @@ Built 2026-11-26.
 - **The relay**, `python -m usdcc_peers.relay` (or `usdcc-relay`): needs only `websockets`. A host
   opens `/host` (with the token, if the relay has one) and gets a room id; members open
   `/r/<id>`. It forwards bytes it can't read, logs connections and byte counts, and limits members
-  per room, a message's size and a room's bytes a second. `--certfile` and `--keyfile` give it
-  TLS of its own; otherwise it sits behind an HTTPS proxy for `wss://`.
+  per room, a message's size and a room's bytes a second. `--certfile` (the full chain: the
+  relay's certificate, then its CA's) and `--keyfile` give it TLS of its own. Windows checks a
+  certificate only against what the server sends and its own store, so a relay that sends its
+  certificate alone isn't trusted there. Otherwise it sits behind an HTTPS proxy for `wss://`.
 - **The Dockerfile** (`src/usdcc_peers/Dockerfile`) runs the relay by default, or the hub.
 - **Links:** `usdcc://join?relay=<room's URL on the relay>#k=…&s=…`, made and read by
   `makeJoinLink()` and `parseJoinLink()` (and `usdcc_peers.make_link()`), whose `JoinLink` has a

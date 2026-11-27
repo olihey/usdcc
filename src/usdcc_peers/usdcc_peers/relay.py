@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--address", default="0.0.0.0", help="where to listen (default: every address)")
     parser.add_argument("--port", type=int, default=8443, help="the port (default: 8443; 0: any)")
     parser.add_argument("--token-file", help="a file holding the token a host needs to open a room")
-    parser.add_argument("--certfile", help="TLS certificate (PEM), for wss:// without a reverse proxy")
+    parser.add_argument("--certfile", help="TLS certificate chain (PEM: the relay's, then its CA's), for wss:// without a reverse proxy")
     parser.add_argument("--keyfile", help="its private key (PEM)")
     parser.add_argument("--max-members", type=int, default=50, help="members per room (default: 50)")
     parser.add_argument("--max-rooms", type=int, default=10000)
