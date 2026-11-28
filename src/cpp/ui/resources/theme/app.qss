@@ -1241,6 +1241,12 @@ QTreeWidget#settingsCategories::item {
     padding: 4px 6px;
 }
 
+/* The headings between the categories (General, Pipeline, …): labels, which
+   can't be picked, so the only disabled items in the tree. */
+QTreeWidget#settingsCategories::item:disabled {
+    color: rgba(@ink-rgb, 40%);
+}
+
 QScrollArea#settingsPage,
 QWidget#settingsPageContent {
     background: @surface-panel;
