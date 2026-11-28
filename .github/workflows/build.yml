@@ -26,9 +26,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # windows and linux (x64) are master's required checks; windows-arm64,
-  # linux-arm64 and macos aren't. A pull request is merged, by GitHub's auto-merge, once
-  # the required ones pass, and stays open when one fails (docs/RELEASE.md §8).
+  # All five checks are master's required checks: windows, windows-arm64, linux,
+  # linux-arm64 and macos. A pull request is merged, by GitHub's auto-merge, once
+  # all of them pass, and stays open when one fails (docs/RELEASE.md §8).
   # A job that is renamed has to be renamed in master's protection too.
   #
   # Twice, as the linux job: x64, whose check keeps the name windows, and arm64
@@ -276,8 +276,8 @@ jobs:
           if-no-files-found: ignore
 
   # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). The tests run headless: Xvfb, with Mesa's llvmpipe.
-  # Twice: x64, whose check keeps the name linux (master's required check), and
-  # arm64 on GitHub's Arm runner, checked as linux-arm64, which isn't required.
+  # Twice: x64, whose check keeps the name linux, and arm64 on GitHub's Arm
+  # runner, checked as linux-arm64. Both are among master's required checks.
   # tools/_common.py picks the vcpkg triplet and the OpenUSD asset by the machine.
   linux:
     name: ${{ matrix.name }}
