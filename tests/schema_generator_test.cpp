@@ -161,4 +161,42 @@ USDCC_TEST(schema_generator) {
     result = usdcc::usd::generateSchemaLibrary(studioUsd.toStdString(), "other", python);
     CHECK(!result.ok && result.error.find("libraryName is 'studio'") != std::string::npos, "a name that doesn't match: %s",
           result.error.c_str());
+
+    // A library whose last schema was removed generates too: its plugin stays,
+    // with no types, so the schema is gone at the next start.
+    const QString lastUsd = root.filePath(QStringLiteral("last/usd"));
+    SchemaLibraryDef last;
+    last.name = "last";
+    last.sublayers = {"usd/schema.usda"};
+    SchemaClassDef only;
+    only.name = "LastOnlyAPI";
+    only.kind = SchemaInfo::Kind::SingleApplyAPI;
+    only.base = "APISchemaBase";
+    only.properties = {property("last:value", "int", "1")};
+    last.classes = {only};
+    usdcc::usd::writeSchemaLibrary(last, usdcc::usd::schemaSourcePath(lastUsd.toStdString(), "last"), &error);
+    result = usdcc::usd::generateSchemaLibrary(lastUsd.toStdString(), "last", python);
+    CHECK(result.ok && has(result.tried, "LastOnlyAPI"), "a library of one schema generates: %s", result.error.c_str());
+    last.classes.clear();
+    usdcc::usd::writeSchemaLibrary(last, usdcc::usd::schemaSourcePath(lastUsd.toStdString(), "last"), &error);
+    result = usdcc::usd::generateSchemaLibrary(lastUsd.toStdString(), "last", python);
+    CHECK(result.ok && result.tried.empty(), "emptied, it still generates: %s\n%s", result.error.c_str(), result.output.c_str());
+    const std::string lastPlugInfo = readText(QDir(lastUsd).filePath(QStringLiteral("plugInfo.json")));
+    CHECK(lastPlugInfo.find("LastOnlyAPI") == std::string::npos && lastPlugInfo.find("\"Name\": \"last\"") != std::string::npos,
+          "its plugInfo.json keeps the plugin and drops the type: %s", lastPlugInfo.c_str());
+    CHECK(readText(QDir(lastUsd).filePath(QStringLiteral("generatedSchema.usda"))).find("LastOnlyAPI") == std::string::npos,
+          "and generatedSchema.usda no longer has it");
+    CHECK(lastPlugInfo.rfind("# Portions of this file", 0) == 0 && lastPlugInfo.find("\"Type\": \"resource\"") != std::string::npos,
+          "the rest of plugInfo.json as usdGenSchema wrote it");
+
+    // One that never had a schema has no plugin to make.
+    const QString noneUsd = root.filePath(QStringLiteral("none/usd"));
+    SchemaLibraryDef none;
+    none.name = "none";
+    none.sublayers = {"usd/schema.usda"};
+    usdcc::usd::writeSchemaLibrary(none, usdcc::usd::schemaSourcePath(noneUsd.toStdString(), "none"), &error);
+    result = usdcc::usd::generateSchemaLibrary(noneUsd.toStdString(), "none", python);
+    CHECK(!result.ok && result.error.find("no schemas yet") != std::string::npos, "a library with no schema says so: %s",
+          result.error.c_str());
+    CHECK(!QFileInfo::exists(QDir(noneUsd).filePath(QStringLiteral("plugInfo.json"))), "and writes nothing");
 }

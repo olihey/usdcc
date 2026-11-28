@@ -12,6 +12,7 @@
 #include <functional>
 
 class QComboBox;
+class QFileSystemWatcher;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -66,6 +67,11 @@ public:
     bool reload(QString* error = nullptr);
     // Asks to save unsaved edits: false if the user cancelled.
     bool maybeSave();
+    // Lets go of the library, its unsaved edits with it: it was deleted.
+    void forget();
+    // Whether it follows schema.usda on disk (it does, from open()). Off while
+    // the file is being deleted: a watched file's folder can't always go.
+    void setWatching(bool watching);
 
     bool selectClass(const QString& name);
     QString currentClass() const;
@@ -154,6 +160,7 @@ private:
     QTableWidget* m_properties;
     QListWidget* m_issues;
     QTimer* m_checkTimer;
+    QFileSystemWatcher* m_watcher;
 };
 
 }  // namespace usdcc::usd
