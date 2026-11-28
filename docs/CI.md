@@ -182,9 +182,10 @@ the whole job 2 h 3 min, inside the 6-hour job limit. The runner started with 79
 
 ## 4. Workflow `build.yml`
 
-Runs on pull requests and on pushes to `master`. Its two jobs, `windows` and `linux`, are
-`master`'s required checks: a pull request is merged once both pass, and stays open when
-one fails ([RELEASE.md](RELEASE.md) §8). What a pull request builds is its branch merged
+Runs on pull requests and on pushes to `master`. Its five checks, `windows`,
+`windows-arm64`, `linux`, `linux-arm64` and `macos`, are `master`'s required checks: a
+pull request is merged once all of them pass, and stays open when one fails
+([RELEASE.md](RELEASE.md) §8). What a pull request builds is its branch merged
 into `master` as it was when the run started. The push to `master` the merge makes is
 built again: that run saves the vcpkg cache (step 5), and it is the one that has the
 pull requests merged in the meantime together.
@@ -366,8 +367,8 @@ has how Linux was brought up, in WSL 2):
 GitHub's Arm runners, `ubuntu-24.04-arm` and `windows-11-arm`. `tools/_common.py` picks
 the vcpkg triplet (`arm64-linux-dynamic`, `arm64-windows`), the asset names (`linux-arm64`,
 `win-arm64`) and Visual Studio's `-A ARM64` by the machine, so the jobs are the x64 ones
-as a matrix. Their `build.yml` checks are `linux-arm64` and `windows-arm64`, not among
-master's required checks; the x64 ones keep the names `linux` and `windows`.
+as a matrix. Their `build.yml` checks are `linux-arm64` and `windows-arm64`; the x64 ones
+keep the names `linux` and `windows`. All four are among master's required checks.
 
 - On Windows ARM64, OpenUSD's `build_usd.py` requires `--onetbb`, which
   `tools/ci/usd_asset.py` adds to `deps/usd.json`'s flags there, with
@@ -414,7 +415,7 @@ The `macos` jobs mirror the `linux` ones on `macos-15` (Apple Silicon;
   anything but itself, the system and libpython. The SDK check can't: it runs on the same Mac.
 - **`deps-pyside.yml`** and **`deps-usd-plugins.yml`** as on Linux. `macos-arm64` is in
   Adobe's file formats' pin only.
-- **`build.yml`**'s check is `macos`, which isn't one of master's required checks. It fails
-  until the OpenUSD asset for macOS is published; a missing pack or PySide6 is a warning.
+- **`build.yml`**'s check is `macos`, one of master's required checks. It fails when
+  there is no OpenUSD asset for macOS; a missing pack or PySide6 is a warning.
 - **`release.yml`** makes a disk image of `usdcc.app` ([RELEASE.md](RELEASE.md) §4).
 - **vcpkg's host tools** are built static, for the triplet `arm64-osx`: [MACOS.md](MACOS.md) §2.

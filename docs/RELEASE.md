@@ -356,8 +356,8 @@ notes.
      `.github/release.yml` maps the labels to the headings. A pull request with none of
      them is listed under "Other changes".
 3. `gh pr merge <number> --squash --auto`, right after creating it. Opening the pull
-   request starts `build.yml` ([CI.md](CI.md) §4), and GitHub merges it when both jobs
-   have passed, about 25 minutes later: one commit on `master` per pull request, with the
+   request starts `build.yml` ([CI.md](CI.md) §4), and GitHub merges it when all five
+   checks have passed, an hour or so later: one commit on `master` per pull request, with the
    pull request's number in its subject. The repository deletes the branch once it's
    merged.
 4. **When the Build fails, nothing happens:** the pull request stays open and `master` is
@@ -366,8 +366,12 @@ notes.
 
 Two settings of the repository do the waiting, so nobody has to watch the run:
 
-- **`master` is protected, with `windows` and `linux` as required status checks.** These
-  are `build.yml`'s two jobs, by name. The branch doesn't have to be level with `master`
+- **`master` is protected, with `windows`, `windows-arm64`, `linux`, `linux-arm64` and
+  `macos` as required status checks.** These are all of `build.yml`'s checks, by name: its
+  `windows` and `linux` jobs each run twice, on x64 and on arm64, and `macos` once. The
+  arm64 and macOS ones were added on 2026-11-28; until then a pull request could be merged
+  while they were still running, or after one had failed. The branch doesn't have to be
+  level with `master`
   ("Require branches to be up to date" is off): several sessions merge at once, and each
   would otherwise build again after every other merge. Administrators aren't held to it,
   so the owner can still merge by hand (`gh pr merge --squash --admin`) when the Build
@@ -384,7 +388,10 @@ with `protection.json`:
 
 ```json
 {
-  "required_status_checks": { "strict": false, "contexts": ["windows", "linux"] },
+  "required_status_checks": {
+    "strict": false,
+    "contexts": ["windows", "windows-arm64", "linux", "linux-arm64", "macos"]
+  },
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null
