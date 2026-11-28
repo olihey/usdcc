@@ -177,10 +177,29 @@ while a listed path is offline.
 at a time.
 
 **Layout.**
-- Categories are listed on the left as a tree, those the app knows first (Appearance,
-  Viewport, Renderers, Color Management, Tools, Shortcuts, Notifications, Python), then the others in definition order.
-  A category with more than one group lists its groups under it: picking one scrolls the
-  page to that group's heading, and scrolling the page picks the group at the top.
+- Categories are listed on the left as a tree, under headings that can't be picked
+  (`SettingsDialog::headingOf()`):
+
+  | Heading | Categories, in order |
+  |---|---|
+  | General | Appearance, Files, Shortcuts, Notifications, Updates |
+  | Viewport & Rendering | Viewport, Materials, Color Management, Renderers, Final Render, RTX, Physics |
+  | Pipeline | Tools, Validation, Assets, USD, Python, Plugins |
+  | Collaboration | Peers |
+  | Other | any other category (a plugin's), alphabetically |
+
+  Only categories with settings are listed, and only headings over one of them.
+- A category with three or more groups lists them under it: picking one scrolls the
+  page to that group's heading, and scrolling the page picks the group at the top. A
+  page of one or two groups is short enough without them.
+- Only the category shown lists its groups: picking another category unfolds it and
+  folds the rest, so the tree stays about one row per category.
+- **Search.** The field above the tree (Escape clears it, then closes the dialog) shows only the settings whose label, key, description, group or
+  category contain every word typed, ignoring case. The tree keeps the categories and
+  groups with a match, unfolded, and the headings over them; a page keeps its matching
+  rows, and their groups open even if folded. The page shown stays if it still has a
+  match, otherwise the first that has one is shown; with no match at all, the dialog
+  says so. `showCategory()` clears a search that hides the page asked for.
 - The page has no title of its own: the tree already shows which one it is.
 - Every page is generated from the definitions: a section per group and a row per
   setting. A row holds the label, an editor for the type, the description, and a Reset

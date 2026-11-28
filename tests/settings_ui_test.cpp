@@ -32,6 +32,7 @@
 #include <QMainWindow>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QToolButton>
@@ -171,6 +172,8 @@ USDCC_TEST(settings_dialog) {
                      .description = "The accent.", .type = SettingType::Color, .defaultValue = std::string("#3d8bfd")});
     settings.define({.key = "Appearance/size", .category = "Appearance", .group = "Interface", .label = "Size",
                      .type = SettingType::Int, .defaultValue = 1});
+    settings.define({.key = "Appearance/font", .category = "Appearance", .group = "Fonts", .label = "Font",
+                     .description = "The typeface.", .type = SettingType::String, .defaultValue = std::string("Inter")});
     settings.define({.key = "Shortcuts/a", .category = "Shortcuts", .group = "Tools", .label = "Tool A",
                      .type = SettingType::Shortcut, .defaultValue = std::string("W")});
     settings.define({.key = "Shortcuts/b", .category = "Shortcuts", .group = "Tools", .label = "Tool B",
@@ -183,22 +186,86 @@ USDCC_TEST(settings_dialog) {
     CHECK(dialog.showCategory(QStringLiteral("My Plugin")) && !dialog.showCategory(QStringLiteral("Viewport")),
           "pages can be picked by name, and categories without settings have none");
 
-    // The list is a tree: a category's groups under it, when it has more than one.
+    // The list is a tree: headings over the categories, and a category's groups under it
+    // when it has enough of them to need finding.
     auto* tree = dialog.findChild<QTreeWidget*>(QStringLiteral("settingsCategories"));
-    CHECK(tree && tree->topLevelItemCount() == 3, "the categories are the tree's top level");
+    CHECK(tree, "the categories are a tree");
     if (!tree) return;
-    const QTreeWidgetItem* appearance = tree->topLevelItem(0);
-    CHECK(appearance->childCount() == 2 && appearance->child(0)->text(0) == QStringLiteral("Theme") &&
-              appearance->child(1)->text(0) == QStringLiteral("Interface"),
+    const auto item = [tree](const QString& text) -> QTreeWidgetItem* {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            if (tree->topLevelItem(i)->text(0) == text) return tree->topLevelItem(i);
+        }
+        return nullptr;
+    };
+    const auto topLevel = [tree]() {
+        QStringList texts;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            if (!tree->topLevelItem(i)->isHidden()) texts << tree->topLevelItem(i)->text(0);
+        }
+        return texts;
+    };
+    CHECK(topLevel() == QStringList({"General", "Appearance", "Shortcuts", "Other", "My Plugin"}),
+          "under headings, which only show over categories there are: %s", qPrintable(topLevel().join(", ")));
+    CHECK(usdcc::ui::SettingsDialog::headingOf(QStringLiteral("Viewport")) == QStringLiteral("Viewport & Rendering") &&
+              usdcc::ui::SettingsDialog::headingOf(QStringLiteral("Peers")) == QStringLiteral("Collaboration") &&
+              usdcc::ui::SettingsDialog::headingOf(QStringLiteral("My Plugin")) == QStringLiteral("Other"),
+          "each known category has its heading; a plugin's is under Other");
+    CHECK(item(QStringLiteral("General")) && item(QStringLiteral("General"))->flags() == Qt::NoItemFlags,
+          "a heading can't be picked");
+    QTreeWidgetItem* const appearance = item(QStringLiteral("Appearance"));
+    QTreeWidgetItem* const shortcuts = item(QStringLiteral("Shortcuts"));
+    QTreeWidgetItem* const myPlugin = item(QStringLiteral("My Plugin"));
+    if (!appearance || !shortcuts || !myPlugin) return;
+    CHECK(appearance->childCount() == 3 && appearance->child(0)->text(0) == QStringLiteral("Theme") &&
+              appearance->child(1)->text(0) == QStringLiteral("Interface") &&
+              appearance->child(2)->text(0) == QStringLiteral("Fonts"),
           "a category's groups are listed under it, in order");
-    CHECK(tree->topLevelItem(1)->childCount() == 0, "a category with a single group has no branches");
+    CHECK(shortcuts->childCount() == 0, "a category with a group or two has no branches");
     CHECK(dialog.showCategory(QStringLiteral("Appearance"), QStringLiteral("Interface")) &&
               dialog.currentCategory() == QStringLiteral("Appearance") &&
               dialog.currentGroup() == QStringLiteral("Interface"),
           "a group can be picked: %s / %s", qPrintable(dialog.currentCategory()), qPrintable(dialog.currentGroup()));
-    tree->setCurrentItem(tree->topLevelItem(2));
+    CHECK(appearance->isExpanded(), "the page shown lists its groups");
+    tree->setCurrentItem(myPlugin);
     CHECK(dialog.currentCategory() == QStringLiteral("My Plugin") && dialog.currentGroup().isEmpty(),
           "picking a category in the tree shows its page");
+    CHECK(!appearance->isExpanded(), "and folds the others' groups away");
+    tree->setCurrentItem(appearance);
+    CHECK(appearance->isExpanded(), "which come back with their page");
+
+    // The search narrows the tree and the pages to the settings that match.
+    {
+        const auto rowShown = [&dialog](const QString& key) {
+            QWidget* editor = withKey<QWidget>(&dialog, key, QStringLiteral("settingEditor"));
+            if (!editor) editor = withKey<QWidget>(&dialog, key);
+            return editor && !editor->isHidden();
+        };
+        auto* search = dialog.findChild<QLineEdit*>(QStringLiteral("settingsSearch"));
+        CHECK(search, "a search field above the tree");
+        if (!search) return;
+        search->setText(QStringLiteral("typeface"));
+        CHECK(topLevel() == QStringList({"General", "Appearance"}), "only categories with a match: %s",
+              qPrintable(topLevel().join(", ")));
+        CHECK(appearance->child(2) && !appearance->child(2)->isHidden() && appearance->child(0)->isHidden(),
+              "and only their groups with one");
+        CHECK(rowShown(QStringLiteral("Appearance/font")) && !rowShown(QStringLiteral("Appearance/size")),
+              "a description is searched, and the other rows hide");
+        search->setText(QStringLiteral("tool B"));
+        CHECK(dialog.currentCategory() == QStringLiteral("Shortcuts"), "the page follows to a match: %s",
+              qPrintable(dialog.currentCategory()));
+        CHECK(rowShown(QStringLiteral("Shortcuts/b")) && !rowShown(QStringLiteral("Shortcuts/a")),
+              "every word has to match");
+        search->setText(QStringLiteral("my plugin"));
+        CHECK(topLevel() == QStringList({"Other", "My Plugin"}) && rowShown(QStringLiteral("Plugin/level")),
+              "a category's name finds its whole page");
+        search->setText(QStringLiteral("nothing like this"));
+        CHECK(topLevel().isEmpty() && dialog.findChild<QStackedWidget*>()->isHidden(), "no match, no pages");
+        search->clear();
+        CHECK(topLevel().size() == 5 && rowShown(QStringLiteral("Appearance/size")) &&
+                  rowShown(QStringLiteral("Shortcuts/a")),
+              "clearing it shows everything again");
+        CHECK(dialog.showCategory(QStringLiteral("Appearance")), "back to the first page");
+    }
     CHECK(dialog.findChildren<QLabel*>(QStringLiteral("settingsPageTitle")).isEmpty(),
           "pages have no title of their own; the tree names them");
 
