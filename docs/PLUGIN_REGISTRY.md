@@ -102,7 +102,7 @@ a proposal or an assumption. §11 has the questions still open.
 | S3, WebDAV, HTTP assets | 0.7, 0.5, 0.3 MB | Yes |
 | Viewport Broadcast | 0.3 MB | Yes |
 | Blender mesh tools | 2.2 MB | Its own distribution (GPL) |
-| MoonRay pack | 214 MB download | A separate archive, Linux and macOS |
+| MoonRay pack | 214 MB download | A download in the app, Linux and macOS |
 | Cycles pack | 55 MB installed, 45 MB zipped (CPU only) | Not yet |
 | Gatling pack | 58 MB zipped | Not published (GPL) |
 
@@ -112,7 +112,8 @@ So taking the shipped plugins out saves about 4 MB of 225. What the registry is 
   macOS that can't be done to a signed bundle at all, so there is a second disk image, and that
   copy can't update itself (UPDATES.md §9). *Since 2026-11-26 these, and optional packs of any
   other kind, get their own download in the app instead (Status), which leaves the three
-  points below as the registry's reasons.*
+  points below as the registry's reasons. The archive to unpack by hand and the second disk
+  image are gone since 2026-11-28.*
 - **Licences.** A GPL plugin as its own download, chosen by the user, rather than a second
   distribution of the whole app. Whether usdcc may publish one is still USD_PLUGINS.md §8
   item 2; the registry makes it practical, not allowed.

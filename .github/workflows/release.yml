@@ -83,7 +83,7 @@ jobs:
           "archive=usdcc-$version-windows-${{ matrix.arch }}.7z" >> $env:GITHUB_OUTPUT
           "symbols=usdcc-$version-windows-${{ matrix.arch }}-symbols.7z" >> $env:GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -99,7 +99,7 @@ jobs:
       # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: arm64
@@ -112,7 +112,7 @@ jobs:
       # exact interpreter, and usdcc embeds the same one.
       - name: Set up Python
         if: matrix.arch == 'x64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
           architecture: x64
@@ -181,7 +181,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -199,7 +199,7 @@ jobs:
 
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -328,7 +328,7 @@ jobs:
 
       - name: Keep the installer with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.name }}
           path: ${{ runner.temp }}/velopack/*Setup.exe
@@ -377,7 +377,7 @@ jobs:
           echo "tarball=usdcc-$version-linux-${{ matrix.arch }}.tar.xz" >> "$GITHUB_OUTPUT"
           echo "symbols=usdcc-$version-linux-${{ matrix.arch }}-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -409,7 +409,7 @@ jobs:
         run: python3 tools/ci/usd_asset.py --github-output
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
 
@@ -447,7 +447,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -468,7 +468,7 @@ jobs:
       # info goes into the symbols folder, laid out as the deploy is.
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -497,7 +497,7 @@ jobs:
       # each, and the index an install of this version reads; a platform without packs gets
       # an empty index, so usdcc knows there are none. Then each is installed the way a
       # user's usdcc does it, into a test profile, loaded from there and removed again.
-      # Here, while the deploy has no pack in it: the step after next unpacks them over it.
+      # These archives are the only way a pack ships: none is unpacked over the deploy.
       - name: Pack and check the optional packs
         env:
           LIBGL_ALWAYS_SOFTWARE: 1
@@ -521,34 +521,13 @@ jobs:
             if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
           done
 
-      # Each optional pack (docs/USD_PLUGINS.md section 5) is checked unpacked over the
-      # deploy, which is packed by now, and becomes usdcc-<version>-linux-<arch>-<pack>.tar.xz,
-      # whose top folder is the deploy's name: unpacked where usdcc was, it lands in it.
-      - name: Check and pack the optional USD plugin packs
-        run: |
-          mkdir -p "$RUNNER_TEMP/optional-archives"
-          deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
-          for folder in "$RUNNER_TEMP"/optional/*/; do
-            [ -d "$folder" ] || continue
-            pack=$(basename "$folder")
-            cp -a "$folder/${{ steps.tag.outputs.name }}/." "$deploy/"
-            python tools/ci/smoke_test.py --deploy "$deploy" --expect-version ${{ steps.tag.outputs.version }}
-            file="${{ steps.tag.outputs.name }}-linux-${{ matrix.arch }}-$pack.tar.xz"
-            tar -C "$folder" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/optional-archives/$file"
-            size=$(stat -c %s "$RUNNER_TEMP/optional-archives/$file")
-            echo "$file: $((size / 1048576)) MB"
-            if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
-          done
-          ls -la "$RUNNER_TEMP/optional-archives"
-
       - name: Keep the archive with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tag.outputs.tarball }}
           path: |
             ${{ runner.temp }}/${{ steps.tag.outputs.tarball }}
-            ${{ runner.temp }}/optional-archives/
             ${{ runner.temp }}/pack-archives/
           compression-level: 0
           retention-days: 3
@@ -556,18 +535,18 @@ jobs:
       - name: Attach to the release
         if: ${{ !inputs.dry_run }}
         run: |
-          shopt -s nullglob  # arm64 has no optional pack
           # pack-archives: the packs' index and archives, which usdcc reads by these names.
+          # arm64 has no optional pack, and so only the index, with an empty list.
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.tarball }}" \
-            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-archives/*.tar.xz \
+            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" \
             "$RUNNER_TEMP"/pack-archives/* --clobber --repo "$GITHUB_REPOSITORY"
 
       # The AppImage, which updates itself (docs/UPDATES.md section 9), from the deploy that
-      # is packed by now. Out of the deploy again: the optional packs checked above. vpk names
-      # the file usdcc-linux-<arch>.AppImage, and the packages and the feed by the channel.
+      # is packed by now. vpk names the file usdcc-linux-<arch>.AppImage, and the packages
+      # and the feed by the channel.
       # .NET was removed above, for the space.
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -603,7 +582,7 @@ jobs:
 
       - name: Keep the AppImage with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appimage-${{ matrix.name }}
           path: ${{ runner.temp }}/velopack/*.AppImage
@@ -652,7 +631,7 @@ jobs:
           echo "dmg=usdcc-$version-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
           echo "symbols=usdcc-$version-macos-arm64-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -706,7 +685,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -722,7 +701,7 @@ jobs:
 
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -735,6 +714,8 @@ jobs:
           deploy="$RUNNER_TEMP/${{ steps.tag.outputs.name }}"
           # packs/<pack>/: each optional pack as usdcc installs one it downloads (docs/USD_PLUGINS.md
           # section 10), its binaries signed; then an archive each and the index usdcc reads.
+          # optional/ has a usdcc.app with each pack, which the pack is checked and signed in
+          # and taken from; it isn't shipped.
           python tools/deploy.py "$deploy" --sign "$SIGN" --require-vsix --optional-packs "$RUNNER_TEMP/optional" --pack-folders "$RUNNER_TEMP/packs"
           python tools/ci/pack_index.py --packs "$RUNNER_TEMP/packs" --version ${{ steps.tag.outputs.version }} \
             --platform macos-arm64 --out "$RUNNER_TEMP/pack-archives"
@@ -745,18 +726,11 @@ jobs:
             fi
           done
           python tools/ci/split_dsym.py --deploy "$deploy" --symbols "$RUNNER_TEMP/symbols/${{ steps.tag.outputs.name }}" --sign "$SIGN"
-          # Each optional pack's usdcc.app has the same binaries, so these symbols aren't kept.
-          for folder in "$RUNNER_TEMP"/optional/*/; do
-            [ -d "$folder" ] || continue
-            python tools/ci/split_dsym.py --deploy "$folder/${{ steps.tag.outputs.name }}" --symbols "$RUNNER_TEMP/symbols-again" --sign "$SIGN"
-            rm -rf "$RUNNER_TEMP/symbols-again"
-          done
 
       # The update packages (docs/UPDATES.md section 9). vpk puts its updater into usdcc.app and
-      # signs the bundle again, so the app in the disk image is the one it puts out. An app
-      # with an optional pack isn't packed: an update would take its pack away.
+      # signs the bundle again, so the app in the disk image is the one it puts out.
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -798,26 +772,16 @@ jobs:
           mv "$list.new" "$list"
           rm "$releases/usdcc-osx-arm64-Portable.zip"
 
-      # And one for each optional USD plugin pack (docs/USD_PLUGINS.md section 5): usdcc with
-      # the pack, as files can't be added to a signed bundle.
-      - name: Make the disk images
+      # One disk image, the plain usdcc: the optional packs are downloads usdcc installs
+      # itself (docs/USD_PLUGINS.md section 10), not a second image of usdcc with one in it.
+      - name: Make the disk image
         run: |
-          mkdir "$RUNNER_TEMP/optional-images"
-          make_image() {  # <folder with usdcc.app> <disk image>
-            rm -rf "$RUNNER_TEMP/image"
-            mkdir "$RUNNER_TEMP/image"
-            ditto "$1/usdcc.app" "$RUNNER_TEMP/image/usdcc.app"
-            ln -s /Applications "$RUNNER_TEMP/image/Applications"
-            hdiutil create -volname 'usdcc ${{ steps.tag.outputs.version }}' -srcfolder "$RUNNER_TEMP/image" -format ULMO -ov "$2"
-          }
-          make_image "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
-          for folder in "$RUNNER_TEMP"/optional/*/; do
-            [ -d "$folder" ] || continue
-            make_image "$folder/${{ steps.tag.outputs.name }}" "$RUNNER_TEMP/optional-images/${{ steps.tag.outputs.name }}-macos-arm64-$(basename "$folder").dmg"
-          done
+          mkdir "$RUNNER_TEMP/image"
+          ditto "$RUNNER_TEMP/${{ steps.tag.outputs.name }}/usdcc.app" "$RUNNER_TEMP/image/usdcc.app"
+          ln -s /Applications "$RUNNER_TEMP/image/Applications"
+          hdiutil create -volname 'usdcc ${{ steps.tag.outputs.version }}' -srcfolder "$RUNNER_TEMP/image" -format ULMO -ov "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
           tar -C "$RUNNER_TEMP/symbols" -cf - '${{ steps.tag.outputs.name }}' | xz -9e -T0 > "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}"
-          for file in "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-images/*; do
-            [ -f "$file" ] || continue
+          for file in "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}"; do
             size=$(stat -f %z "$file")
             echo "$(basename "$file"): $((size / 1048576)) MB"
             if [ "$size" -ge 2147483648 ]; then echo "::error::$file is over GitHub's 2 GiB per-asset limit"; exit 1; fi
@@ -830,31 +794,24 @@ jobs:
           mkdir "$RUNNER_TEMP/away"
           mv build external/pyside-install "$RUNNER_TEMP/${{ steps.tag.outputs.name }}" "$USD_INSTALL" "$RUNNER_TEMP/away/"
           if [ -d "$RUNNER_TEMP/optional" ]; then mv "$RUNNER_TEMP/optional" "$RUNNER_TEMP/away/"; fi
-          for image in "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" "$RUNNER_TEMP"/optional-images/*.dmg; do
-            [ -f "$image" ] || continue
-            rm -rf "$RUNNER_TEMP/installed"
-            mkdir "$RUNNER_TEMP/installed"
-            hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$image"
-            ditto "$RUNNER_TEMP/mounted/usdcc.app" "$RUNNER_TEMP/installed/usdcc.app"
-            hdiutil detach "$RUNNER_TEMP/mounted"
-            python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/installed" \
-              --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
-            # The plain usdcc installs the optional packs itself (docs/USD_PLUGINS.md section 10), into
-            # a test profile; they load from there, are removed again, and the bundle stays whole.
-            if [ "$image" = "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" ]; then
-              python tools/ci/check_pack_install.py --deploy "$RUNNER_TEMP/installed" --packs "$RUNNER_TEMP/pack-archives"
-            fi
-            codesign --verify --deep --strict "$RUNNER_TEMP/installed/usdcc.app"
-          done
+          mkdir "$RUNNER_TEMP/installed"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}"
+          ditto "$RUNNER_TEMP/mounted/usdcc.app" "$RUNNER_TEMP/installed/usdcc.app"
+          hdiutil detach "$RUNNER_TEMP/mounted"
+          python tools/ci/smoke_test.py --deploy "$RUNNER_TEMP/installed" \
+            --expect-version ${{ steps.tag.outputs.version }} --expect-standard-usd-packs
+          # It installs the optional packs itself (docs/USD_PLUGINS.md section 10), into a test
+          # profile; they load from there, are removed again, and the bundle stays whole.
+          python tools/ci/check_pack_install.py --deploy "$RUNNER_TEMP/installed" --packs "$RUNNER_TEMP/pack-archives"
+          codesign --verify --deep --strict "$RUNNER_TEMP/installed/usdcc.app"
 
       - name: Keep the disk image with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tag.outputs.dmg }}
           path: |
             ${{ runner.temp }}/${{ steps.tag.outputs.dmg }}
-            ${{ runner.temp }}/optional-images/
             ${{ runner.temp }}/pack-archives/
           compression-level: 0
           retention-days: 3
@@ -862,10 +819,9 @@ jobs:
       - name: Attach to the release
         if: ${{ !inputs.dry_run }}
         run: |
-          shopt -s nullglob
           # pack-archives: the packs' index and archives, which usdcc reads by these names.
           gh release upload "$TAG" "$RUNNER_TEMP/${{ steps.tag.outputs.dmg }}" \
-            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" "$RUNNER_TEMP"/optional-images/*.dmg \
+            "$RUNNER_TEMP/${{ steps.tag.outputs.symbols }}" \
             "$RUNNER_TEMP"/pack-archives/* --clobber --repo "$GITHUB_REPOSITORY"
           pre=()
           if [[ '${{ steps.tag.outputs.version }}' == *-* ]]; then pre=(--pre); fi

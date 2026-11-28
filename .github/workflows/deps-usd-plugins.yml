@@ -45,7 +45,7 @@ jobs:
       linux: ${{ steps.packs.outputs.linux }}
       macos: ${{ steps.packs.outputs.macos }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # A run started by hand may name one pack, to try it on a branch without
       # building, and publishing, the others.
       - name: List the packs
@@ -97,14 +97,14 @@ jobs:
       # that a plugin fetches do; CMake 3 ignores it (deps-usd.yml).
       CMAKE_POLICY_VERSION_MINIMUM: '3.5'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The tools run on the image's own Python before setup-python; on the Arm
       # image that has to be an arm64 one, or they'd name the x64 assets.
       # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: arm64
@@ -133,7 +133,7 @@ jobs:
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true' && matrix.arch == 'x64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
           architecture: x64
@@ -206,7 +206,7 @@ jobs:
       # is kept with the run for two weeks instead.
       - name: Keep it with the run
         if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.asset.outputs.name }}
           path: ${{ runner.temp }}/${{ steps.asset.outputs.zip }}
@@ -243,7 +243,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the pack
         id: asset
@@ -291,7 +291,7 @@ jobs:
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
 
@@ -328,7 +328,7 @@ jobs:
 
       - name: Keep it with the run
         if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.asset.outputs.name }}
           path: ${{ runner.temp }}/${{ steps.asset.outputs.zip }}
@@ -363,7 +363,7 @@ jobs:
       # The image's CMake 4, as on Windows arm64 above.
       CMAKE_POLICY_VERSION_MINIMUM: '3.5'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the pack
         id: asset
@@ -436,7 +436,7 @@ jobs:
 
       - name: Keep it with the run
         if: steps.published.outputs.found != 'true' && (steps.asset.outputs.publish != 'true' || github.ref != 'refs/heads/master')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.asset.outputs.name }}
           path: ${{ runner.temp }}/${{ steps.asset.outputs.zip }}

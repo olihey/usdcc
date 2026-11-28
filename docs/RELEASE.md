@@ -120,8 +120,9 @@ attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it 
 unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
 finds it ([CI.md](CI.md) §8). On x64 it also attaches each USD plugin pack of the optional
-set as `usdcc-<version>-linux-x64-<pack>.tar.xz` (MoonRay's, about 214 MB), unpacked over the
-usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each job runs twice, x64 and arm64 (`windows-arm64` on
+set as `usdcc-<version>-linux-x64-pack-<pack>.tar.xz` (MoonRay's, about 200 MB), which usdcc
+downloads and installs itself ([USD_PLUGINS.md](USD_PLUGINS.md) §10); the archive to unpack
+over the usdcc folder by hand is gone since 2026-11-28 (§5 there). Each job runs twice, x64 and arm64 (`windows-arm64` on
 `windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
@@ -130,8 +131,9 @@ that installs update from ([UPDATES.md](UPDATES.md) §9). This hasn't run yet.
 
 The `macos` job attaches `usdcc-<version>-macos-arm64.dmg`, with `usdcc.app` and a link to
 Applications, and the dSYMs of usdcc's own binaries. And
-`usdcc-<version>-macos-arm64-<pack>.dmg` for each optional USD plugin pack, usdcc with the pack
-(MoonRay's, [USD_PLUGINS.md](USD_PLUGINS.md) §5). It has not run yet (2026-11-23).
+`usdcc-<version>-macos-arm64-pack-<pack>.tar.xz` for each optional USD plugin pack, which usdcc
+installs itself ([USD_PLUGINS.md](USD_PLUGINS.md) §10); the second disk image, usdcc with the
+pack, is gone since 2026-11-28 (§5 there). It has not run yet (2026-11-23).
 `tools/deploy.py` makes the bundle and checks it, `tools/ci/split_dsym.py` takes the symbols
 out, and the smoke test runs a copy from the disk image.
 
@@ -354,8 +356,8 @@ notes.
      `.github/release.yml` maps the labels to the headings. A pull request with none of
      them is listed under "Other changes".
 3. `gh pr merge <number> --squash --auto`, right after creating it. Opening the pull
-   request starts `build.yml` ([CI.md](CI.md) §4), and GitHub merges it when both jobs
-   have passed, about 25 minutes later: one commit on `master` per pull request, with the
+   request starts `build.yml` ([CI.md](CI.md) §4), and GitHub merges it when all five
+   checks have passed, an hour or so later: one commit on `master` per pull request, with the
    pull request's number in its subject. The repository deletes the branch once it's
    merged.
 4. **When the Build fails, nothing happens:** the pull request stays open and `master` is
@@ -364,8 +366,12 @@ notes.
 
 Two settings of the repository do the waiting, so nobody has to watch the run:
 
-- **`master` is protected, with `windows` and `linux` as required status checks.** These
-  are `build.yml`'s two jobs, by name. The branch doesn't have to be level with `master`
+- **`master` is protected, with `windows`, `windows-arm64`, `linux`, `linux-arm64` and
+  `macos` as required status checks.** These are all of `build.yml`'s checks, by name: its
+  `windows` and `linux` jobs each run twice, on x64 and on arm64, and `macos` once. The
+  arm64 and macOS ones were added on 2026-11-28; until then a pull request could be merged
+  while they were still running, or after one had failed. The branch doesn't have to be
+  level with `master`
   ("Require branches to be up to date" is off): several sessions merge at once, and each
   would otherwise build again after every other merge. Administrators aren't held to it,
   so the owner can still merge by hand (`gh pr merge --squash --admin`) when the Build
@@ -382,7 +388,10 @@ with `protection.json`:
 
 ```json
 {
-  "required_status_checks": { "strict": false, "contexts": ["windows", "linux"] },
+  "required_status_checks": {
+    "strict": false,
+    "contexts": ["windows", "windows-arm64", "linux", "linux-arm64", "macos"]
+  },
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null

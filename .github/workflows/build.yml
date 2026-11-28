@@ -26,9 +26,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # windows and linux (x64) are master's required checks; windows-arm64,
-  # linux-arm64 and macos aren't. A pull request is merged, by GitHub's auto-merge, once
-  # the required ones pass, and stays open when one fails (docs/RELEASE.md §8).
+  # All five checks are master's required checks: windows, windows-arm64, linux,
+  # linux-arm64 and macos. A pull request is merged, by GitHub's auto-merge, once
+  # all of them pass, and stays open when one fails (docs/RELEASE.md §8).
   # A job that is renamed has to be renamed in master's protection too.
   #
   # Twice, as the linux job: x64, whose check keeps the name windows, and arm64
@@ -60,7 +60,7 @@ jobs:
       VCPKG_DISABLE_METRICS: 1
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -75,7 +75,7 @@ jobs:
       # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: arm64
@@ -88,7 +88,7 @@ jobs:
       # exact interpreter, and usdcc embeds the same one.
       - name: Set up Python
         if: matrix.arch == 'x64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
           architecture: x64
@@ -165,7 +165,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -204,7 +204,7 @@ jobs:
 
       - name: Blender verification reports
         if: always() && matrix.arch == 'x64' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blender-verification-windows
           path: |
@@ -248,7 +248,7 @@ jobs:
       # gets, and pull requests restore master's.
       - name: Save the vcpkg cache
         if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -267,7 +267,7 @@ jobs:
 
       - name: Upload vcpkg's logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.logs }}
           path: |
@@ -276,8 +276,8 @@ jobs:
           if-no-files-found: ignore
 
   # The same on Ubuntu 24.04 with GCC 13 (docs/LINUX_WSL.md). The tests run headless: Xvfb, with Mesa's llvmpipe.
-  # Twice: x64, whose check keeps the name linux (master's required check), and
-  # arm64 on GitHub's Arm runner, checked as linux-arm64, which isn't required.
+  # Twice: x64, whose check keeps the name linux, and arm64 on GitHub's Arm
+  # runner, checked as linux-arm64. Both are among master's required checks.
   # tools/_common.py picks the vcpkg triplet and the OpenUSD asset by the machine.
   linux:
     name: ${{ matrix.name }}
@@ -298,7 +298,7 @@ jobs:
       VCPKG_DISABLE_METRICS: 1
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -332,7 +332,7 @@ jobs:
       # The Python OpenUSD was built with, at the same path: pxrConfig.cmake
       # names it, and usdcc embeds it.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
 
@@ -369,7 +369,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -401,7 +401,7 @@ jobs:
 
       - name: Blender verification reports
         if: always() && matrix.name == 'linux' && github.event_name == 'workflow_dispatch' && inputs.mesh_distribution_checks
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blender-verification-linux
           path: |
@@ -435,7 +435,7 @@ jobs:
 
       - name: Save the vcpkg cache
         if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -449,7 +449,7 @@ jobs:
 
       - name: Upload vcpkg's logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcpkg-logs-${{ matrix.name }}
           path: |
@@ -469,7 +469,7 @@ jobs:
       VCPKG_DISABLE_METRICS: 1
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -524,7 +524,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -581,7 +581,7 @@ jobs:
 
       - name: Save the vcpkg cache
         if: always() && github.event_name != 'pull_request' && steps.vcpkg-prune.outputs.added == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -595,7 +595,7 @@ jobs:
 
       - name: Upload vcpkg's logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vcpkg-logs-macos
           path: |

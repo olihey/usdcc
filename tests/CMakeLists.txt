@@ -392,6 +392,11 @@ add_test(NAME usdcc_ui_schema_adopt COMMAND usdcc_ui_tests schema_explorer_adopt
 get_test_property(usdcc_ui_tests ENVIRONMENT_MODIFICATION _usdcc_ui_schema_env)
 set_tests_properties(usdcc_ui_schema_adopt PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" ENVIRONMENT_MODIFICATION
     "${_usdcc_ui_schema_env};PXR_PLUGINPATH_NAME=path_list_append:${CMAKE_SOURCE_DIR}/test_data/schemas/usdccTestSchemas")
+# And what the panel says of a schema its library no longer has, and Delete Library:
+# the test registers a copy of that library itself, to rewrite and delete its files.
+add_test(NAME usdcc_ui_schema_removed COMMAND usdcc_ui_tests schema_explorer_removed)
+set_tests_properties(usdcc_ui_schema_removed PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;USDCC_TEST_SCHEMA_REMOVED=1"
+    ENVIRONMENT_MODIFICATION "${_usdcc_ui_schema_env}")
 
 # Qt's plugins beside the test programs, as the app has them (src/cpp/app/CMakeLists.txt):
 # ctest points Qt at vcpkg's folder, but a test program started by hand, or from Visual

@@ -21,7 +21,10 @@
 #include <QClipboard>
 #include <QColor>
 #include <QComboBox>
+#include <QDir>
 #include <QEvent>
+#include <QFile>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QFont>
 #include <QHBoxLayout>
@@ -54,6 +57,7 @@ constexpr int kNameRole = Qt::UserRole;  // a schema's name; empty on a category
 constexpr int kUnregisteredRole = Qt::UserRole + 1;  // This stage: a name USD doesn't know
 constexpr int kStageRowRole = Qt::UserRole + 2;      // This stage: a schema it uses
 constexpr int kLibraryRole = Qt::UserRole + 3;       // Schema Libraries: a library's name
+constexpr int kRemovedRole = Qt::UserRole + 4;       // a schema its library's files no longer have
 // As the Applied Schemas pill of an unregistered schema (theme/app.qss).
 QColor unregisteredColor() { return usdcc::ui::theme::color(usdcc::ui::theme::Token::Warning); }
 constexpr std::size_t kMaxPrimsListed = 20;
@@ -69,6 +73,30 @@ QString primCount(std::size_t n) {
 }
 
 QString escaped(const std::string& text) { return qs(text).toHtmlEscaped(); }
+
+// Where a deleted file goes, as the system calls it.
+QString trashName() {
+#if defined(Q_OS_WIN)
+    return QObject::tr("Recycle Bin");
+#elif defined(Q_OS_MACOS)
+    return QObject::tr("Trash");
+#else
+    return QObject::tr("trash");
+#endif
+}
+
+// A schema USD still has that its library's files don't, in a line.
+QString removalText(SchemaRemoval removal) {
+    switch (removal) {
+        case SchemaRemoval::FromSource:
+            return QObject::tr("Removed from its library's schema.usda, which hasn't been generated since: it stays until it is");
+        case SchemaRemoval::AtNextStart:
+            return QObject::tr("Removed from its library: gone at the next start. USD can't unload a schema before");
+        case SchemaRemoval::LibraryDeleted:
+            return QObject::tr("Its library was deleted: gone at the next start. USD can't unload a schema before");
+    }
+    return {};
+}
 
 // Schema documentation is plain text with Doxygen markup in it here and there;
 // paragraphs are separated by blank lines.
@@ -214,9 +242,9 @@ SchemaExplorerViewPanel::SchemaExplorerViewPanel(StageManager* stageManager, Sta
     sizeToCurrent(0);
     connect(m_editor, &SchemaLibraryEditor::closeRequested, this, [this]() {
         m_stack->setCurrentIndex(0);
-        rebuildLibraryGroup();
+        librariesChanged();
     });
-    connect(m_editor, &SchemaLibraryEditor::libraryChanged, this, [this]() { rebuildLibraryGroup(); });
+    connect(m_editor, &SchemaLibraryEditor::libraryChanged, this, [this]() { librariesChanged(); });
     auto* split = new QSplitter(Qt::Horizontal, container);
     m_split = split;
     split->setChildrenCollapsible(false);
@@ -452,7 +480,7 @@ bool SchemaExplorerViewPanel::closeEditor() {
     if (!isEditing()) return true;
     if (!m_editor->maybeSave()) return false;
     m_stack->setCurrentIndex(0);
-    rebuildLibraryGroup();
+    librariesChanged();
     return true;
 }
 
@@ -463,8 +491,106 @@ bool SchemaExplorerViewPanel::newLibrary(const QString& name, QString* error) {
         if (error) *error = qs(why);
         return false;
     }
-    rebuildLibraryGroup();
+    librariesChanged();
     return editLibrary(name);
+}
+
+bool SchemaExplorerViewPanel::deleteLibrary(const QString& name, QString* error, bool permanently) {
+    // An editor open on it stops watching the file first: a watched file's folder can't
+    // always go. Its edits go with the library, and stay if the library does.
+    const bool editing = m_editor->library() == name;
+    if (editing) m_editor->setWatching(false);
+    std::function<bool(const std::string&)> toTrash;
+    if (!permanently) toTrash = [](const std::string& path) { return QFile::moveToTrash(qs(path)); };
+    std::string why;
+    const bool deleted = SchemaLibraries::instance().remove(name.toStdString(), &why, toTrash);
+    if (!deleted && error) *error = qs(why);
+    if (editing && deleted) {
+        m_editor->forget();
+        m_stack->setCurrentIndex(0);
+    } else if (editing) {
+        m_editor->setWatching(true);
+    }
+    librariesChanged();  // also when only some of it went
+    return deleted;
+}
+
+void SchemaExplorerViewPanel::deleteLibraryInteractively(const QString& name) {
+    std::string why;
+    const std::optional<SchemaLibraryDeletion> deletion = SchemaLibraries::instance().deletionOf(name.toStdString(), &why);
+    if (!deletion) {
+        QMessageBox::warning(this, tr("Delete Schema Library"), qs(why));
+        return;
+    }
+    QStringList paths;
+    for (const std::string& path : deletion->paths) paths << QStringLiteral("    ") + QDir::toNativeSeparators(qs(path));
+    QStringList text;
+    text << (deletion->wholePlugin ? tr("Its plugin's folder goes to the %1:").arg(trashName())
+                                   : tr("Its files go to the %1; the rest of its plugin stays:").arg(trashName())) +
+                QLatin1Char('\n') + paths.join(QLatin1Char('\n'));
+    // What USD has of it now, and what uses that.
+    QStringList loaded;
+    std::set<PXR_NS::SdfPath> prims;  // a prim with two of them counts once
+    for (const SchemaInfo& info : m_schemas) {
+        if (!info.codeless || info.plugin != name.toStdString()) continue;
+        loaded << qs(info.name);
+        if (const auto use = m_use.prims.find(info.name); use != m_use.prims.end()) prims.insert(use->second.begin(), use->second.end());
+    }
+    if (!loaded.isEmpty()) {
+        QString schemas = tr("USD keeps its schemas until the next start: %1.").arg(loaded.join(QStringLiteral(", ")));
+        if (!prims.empty()) schemas += QLatin1Char(' ') + tr("This stage uses them on %1.").arg(primCount(prims.size()));
+        schemas += QLatin1Char(' ') + tr("Files that use them keep their names, as types and API schemas that aren't registered.");
+        text << schemas;
+    }
+    if (m_editor->library() == name && m_editor->isModified()) text << tr("Its edits not saved are dropped.");
+    QMessageBox box(QMessageBox::Warning, tr("Delete Schema Library"), tr("Delete the schema library %1?").arg(name),
+                    QMessageBox::Cancel, this);
+    box.setInformativeText(text.join(QStringLiteral("\n\n")));
+    QPushButton* go = box.addButton(tr("Delete"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != go) return;
+    QString error;
+    if (deleteLibrary(name, &error)) return;
+    // No trash there (a network drive, some Linux mounts): for good, if that's wanted.
+    if (!SchemaLibraries::instance().find(name.toStdString())) {
+        QMessageBox::warning(this, tr("Delete Schema Library"), error);
+        return;
+    }
+    if (QMessageBox::question(this, tr("Delete Schema Library"),
+                              tr("%1.\n\nIt may not fit the %2. Delete %3 for good instead?").arg(error, trashName(), name),
+                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
+    if (!deleteLibrary(name, &error, /*permanently=*/true)) QMessageBox::warning(this, tr("Delete Schema Library"), error);
+}
+
+void SchemaExplorerViewPanel::librariesChanged() {
+    {
+        const QSignalBlocker blocker(m_tree);  // the details below, once
+        rebuildLibraryGroup();
+        refreshRemoved();
+        applyFilter();
+    }
+    updateDetailsText();
+}
+
+void SchemaExplorerViewPanel::refreshRemoved() {
+    m_removed = usdcc::usd::removedSchemas(m_schemas);
+    for (const auto& [name, item] : m_items) {
+        const SchemaInfo* info = find(name);
+        if (!info) continue;
+        const auto removal = m_removed.find(name);
+        const bool removed = removal != m_removed.end();
+        const QString kind = qs(schemaKindName(info->kind));
+        const QString firstParagraph = qs(info->documentation).section(QStringLiteral("\n\n"), 0, 0).simplified();
+        item->setText(Kind, removed ? tr("%1, removed").arg(kind) : kind);
+        item->setData(Name, kRemovedRole, removed ? QVariant(true) : QVariant());
+        item->setToolTip(Name, removed ? removalText(removal->second) : firstParagraph.isEmpty() ? qs(info->name) : firstParagraph);
+        // Amber, as what the stage names that isn't registered: applyFilter() leaves it.
+        item->setForeground(Name, removed ? QBrush(unregisteredColor()) : QBrush());
+        item->setForeground(Kind, removed ? QBrush(unregisteredColor()) : QBrush());
+    }
 }
 
 void SchemaExplorerViewPanel::newLibraryInteractively() {
@@ -539,7 +665,9 @@ QString SchemaExplorerViewPanel::libraryHtml(const std::string& name) const {
                           : library->changed            ? tr("Changed since it was generated.")
                           : library->waitingForRestart  ? tr("Generated: it loads at the next start.")
                                                         : tr("Loaded.");
-    html += QStringLiteral("<p>%1 <a href=\"edit:%2\">%3</a></p>").arg(state, escaped(name), tr("Edit"));
+    html += QStringLiteral("<p>%1 <a href=\"edit:%2\">%3</a>").arg(state, escaped(name), tr("Edit"));
+    if (library->writable) html += QStringLiteral(" · <a href=\"delete:%1\">%2</a>").arg(escaped(name), tr("Delete"));
+    html += QStringLiteral("</p>");
     QString rows;
     auto row = [&rows](const QString& label, const QString& value) {
         rows += QStringLiteral("<tr><td><i>%1</i>&nbsp;&nbsp;</td><td>%2</td></tr>").arg(label, value);
@@ -553,6 +681,16 @@ QString SchemaExplorerViewPanel::libraryHtml(const std::string& name) const {
             schemas << (find(c.name) ? schemaLink(c.name) : escaped(c.name));
         }
         row(tr("Schemas"), schemas.isEmpty() ? tr("none yet") : schemas.join(QStringLiteral(", ")));
+    }
+    // What USD has of it from this start that its files don't.
+    QStringList gone, notGenerated;
+    for (const auto& [schema, removal] : m_removed) {
+        const SchemaInfo* info = find(schema);
+        if (info && info->plugin == name) (removal == SchemaRemoval::FromSource ? notGenerated : gone) << schemaLink(schema);
+    }
+    if (!gone.isEmpty()) row(tr("Removed"), tr("%1: loaded until the next start").arg(gone.join(QStringLiteral(", "))));
+    if (!notGenerated.isEmpty()) {
+        row(tr("Removed, not generated"), tr("%1: they stay until it's generated").arg(notGenerated.join(QStringLiteral(", "))));
     }
     html += QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">%1</table>").arg(rows);
     return html;
@@ -602,6 +740,7 @@ void SchemaExplorerViewPanel::refresh() {
         rebuildTree();
         rebuildStageGroup();
         rebuildLibraryGroup();
+        refreshRemoved();
         applyFilter();
         const bool found = !unregistered.isEmpty() ? selectUnregistered(unregistered)
                            : !library.isEmpty()    ? selectLibrary(library)
@@ -747,12 +886,7 @@ void SchemaExplorerViewPanel::rebuildTree() {
             m_items[info->name] = item;
         }
     }
-    for (const auto& [name, item] : m_items) {
-        if (const SchemaInfo* info = find(name)) {
-            const QString firstParagraph = qs(info->documentation).section(QStringLiteral("\n\n"), 0, 0).simplified();
-            item->setToolTip(Name, firstParagraph.isEmpty() ? qs(info->name) : firstParagraph);
-        }
-    }
+    // Their tooltips, and which are removed, are refreshRemoved()'s.
 }
 
 void SchemaExplorerViewPanel::applyFilter() {
@@ -782,6 +916,7 @@ void SchemaExplorerViewPanel::applyFilter() {
         // An ancestor shown only for a match below it is dimmed.
         // This stage's unregistered rows, and their group, keep their amber.
         const bool amber = item->data(Name, kUnregisteredRole).isValid() || item->data(Name, kLibraryRole).isValid() ||
+                           item->data(Name, kRemovedRole).toBool() ||
                            (m_stageGroup && item->parent() == m_stageGroup && !item->data(Name, kNameRole).isValid());
         if (!amber) {
             item->setForeground(Name, matches || !item->data(Name, kNameRole).isValid() || !filtering
@@ -813,6 +948,7 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
     if (info.version > 0) facts << tr("version %1 of %2").arg(info.version).arg(schemaLink(info.family));
     facts << QStringLiteral("<code>%1</code>").arg(escaped(info.typeName));
     html += QStringLiteral("<p>%1</p>").arg(facts.join(QStringLiteral(" · ")));
+    if (const auto removal = m_removed.find(info.name); removal != m_removed.end()) html += removalHtml(info, removal->second);
 
     QString rows;
     auto row = [&rows](const QString& label, const QString& value) {
@@ -881,6 +1017,30 @@ QString SchemaExplorerViewPanel::detailsHtml(const SchemaInfo& info) const {
     html += info.documentation.empty() ? QStringLiteral("<p><i>%1</i></p>").arg(tr("No documentation."))
                                        : documentationHtml(info.documentation);
     return html;
+}
+
+QString SchemaExplorerViewPanel::removalHtml(const SchemaInfo& info, SchemaRemoval removal) const {
+    const QString library = escaped(info.plugin);
+    QString text;
+    QString link;
+    switch (removal) {
+        case SchemaRemoval::FromSource: {
+            text = tr("Removed from %1's schema.usda, which hasn't been generated since: it stays until it is.").arg(library);
+            const std::optional<SchemaLibraryLocation> location = SchemaLibraries::instance().find(info.plugin);
+            if (location && location->writable) link = QStringLiteral("<a href=\"edit:%1\">%2</a>").arg(library, tr("Edit"));
+            break;
+        }
+        case SchemaRemoval::AtNextStart:
+        case SchemaRemoval::LibraryDeleted:
+            text = (removal == SchemaRemoval::AtNextStart ? tr("Removed from its library %1: it's gone at the next start.")
+                                                         : tr("Its library %1 was deleted: it's gone at the next start."))
+                       .arg(library) +
+                   QLatin1Char(' ') + tr("USD can't unload a schema, so until then it is as it was when usdcc started.");
+            if (schemaEditorHooks().restart) link = QStringLiteral("<a href=\"restart:\">%1</a>").arg(tr("Restart"));
+            break;
+    }
+    if (!link.isEmpty()) text += QStringLiteral(" ") + link;
+    return QStringLiteral("<p><span style=\"color:%1\">%2</span></p>").arg(unregisteredColor().name(), text);
 }
 
 QString SchemaExplorerViewPanel::stageUseHtml(const std::string& name) const {
@@ -986,6 +1146,10 @@ void SchemaExplorerViewPanel::openLink(const QUrl& url) {
         applyToSelection(rest);
     } else if (scheme == QLatin1String("edit")) {
         editLibrary(rest.section(QLatin1Char(':'), 0, 0), rest.section(QLatin1Char(':'), 1));
+    } else if (scheme == QLatin1String("delete")) {
+        deleteLibraryInteractively(rest);
+    } else if (scheme == QLatin1String("restart")) {
+        if (schemaEditorHooks().restart) schemaEditorHooks().restart();
     } else if (scheme == QLatin1String("adopt")) {
         applyToPrimsWithItsAttributes(rest);
     } else if (scheme == QLatin1String("prim") && currentStage()) {
@@ -1022,6 +1186,14 @@ void SchemaExplorerViewPanel::showMenu(const QPoint& pos) {
         QAction* source = menu.addAction(tr("Show Source"), this, [this, path]() { showUsdaPreview(path, this); });
         source->setEnabled(!path.isEmpty());
         menu.addAction(tr("Copy Path"), this, [path]() { QApplication::clipboard()->setText(path); });
+        menu.addSeparator();
+        QAction* remove = menu.addAction(tr("Delete Library..."), this, [this, library]() {
+            // Queued: it asks, and the menu should be gone first.
+            QMetaObject::invokeMethod(this, [this, library]() { deleteLibraryInteractively(library); }, Qt::QueuedConnection);
+        });
+        remove->setEnabled(location && location->writable);
+        remove->setToolTip(location && location->writable ? tr("Moves its files to the %1").arg(trashName())
+                                                          : tr("Read-only: its folder can't be written"));
         menu.exec(m_tree->viewport()->mapToGlobal(pos));
         return;
     }

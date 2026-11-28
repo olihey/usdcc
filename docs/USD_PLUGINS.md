@@ -426,9 +426,15 @@ Three sets, decided by licence:
 | Set | Where it goes | Packs |
 |---|---|---|
 | `standard` | In the usdcc zip | `adobe-fileformats` (glTF, OBJ, PLY, STL, SPZ), `aurora` (no pin: its renderer doesn't start yet, §7 phase 6) |
-| `optional` | Its own archive on the usdcc release, unpacked over the usdcc folder by the user; on macOS a disk image of usdcc with it | `moonray` (Linux x64: `usdcc-<version>-linux-x64-moonray.tar.xz`; macOS: `usdcc-<version>-macos-arm64-moonray.dmg`), `cycles` (published since 2026-11-27; Windows x64: a download usdcc installs itself, §10; Linux x64: `usdcc-<version>-linux-x64-cycles.tar.xz`; macOS: `usdcc-<version>-macos-arm64-cycles.dmg`), `gatling` (unpublished) |
+| `optional` | A download usdcc installs itself (§10), `usdcc-<version>-<platform>-pack-<name>` on the usdcc release | `moonray` (Linux x64, macOS), `cycles` (published since 2026-11-27; Windows x64, Linux x64, macOS), `gatling` (unpublished) |
 
-How an optional pack ships (Linux, and macOS in the last point; on Windows only as a download usdcc installs itself, §10, the first being Cycles):
+How an optional pack ships: on every platform as a download usdcc installs itself (§10, on
+Windows the first being Cycles), and in no other way. Until 2026-11-28 a release had each a
+second time: on Linux `usdcc-<version>-linux-<arch>-<pack>.tar.xz`, to unpack over the usdcc
+folder by hand, and on macOS `usdcc-<version>-macos-arm64-<pack>.dmg`, usdcc with the pack in
+it. **Both dropped,** after release 26.11.11 had the packs and their indexes for both: they
+were the same files again, the archive couldn't serve an AppImage, and the disk image's usdcc
+couldn't update itself.
 
 - `deps-usd-plugins.yml` publishes it beside the OpenUSD asset like any pack, once its pin
   says `"publish": true`.
@@ -439,14 +445,13 @@ How an optional pack ships (Linux, and macOS in the last point; on Windows only 
   `plugin/` keep the RUNPATHs the pack's build gave them, which are relative to an OpenUSD
   install, laid out as the deploy is. The deploy's `licenses/SOURCES.txt` doesn't name it; the
   pack carries its own in `licenses/OpenUSD-plugins/<pack>/`.
-- After the usdcc archive is made, the job unpacks the pack over the deploy, runs the smoke
-  test again (its plugins load from the deploy, its renderers are listed), and attaches
-  `usdcc-<version>-linux-<arch>-<pack>.tar.xz`. Its top folder is the deploy's name, so
-  `tar -xf` where usdcc was unpacked puts it in place.
+- That folder isn't attached: `--pack-folders` makes the pack usdcc installs from it
+  (§10.3), and `check_pack_install.py` installs and loads that one, which is the check of
+  what the user gets.
 - On macOS `--optional-packs DIR` makes `DIR/<pack>/<deploy's name>/usdcc.app`, a copy of the
-  deployed bundle with the pack in it, checked and signed as a whole: files unpacked over a signed
-  bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
-| `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never by this repository's. Not published, unless its pin says `"publish": true`: then the plugins, never the SDK, are a download usdcc installs itself (§10) and nothing else: no archive to unpack over usdcc, no second disk image | `arnold` (published since 2026-11-28, Windows x64, Linux x64, macOS arm64), `usdfbx`, `usdsbsar` |
+  deployed bundle with the pack in it, checked and signed as a whole, so each of the pack's
+  binaries has its own signature. It isn't attached either: the pack is taken from it.
+| `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never by this repository's. Not published, unless its pin says `"publish": true`: then the plugins, never the SDK, are a download usdcc installs itself (§10) and nothing else, as an optional pack is | `arnold` (published since 2026-11-28, Windows x64, Linux x64, macOS arm64), `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0-or-later.** Loaded into usdcc's process it makes the whole a combined
   work, the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
@@ -979,15 +984,15 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 ## 10. Optional packs in the app
 
 An optional pack stays a separate download (§5), but usdcc fetches the one for its own version
-itself, in **View > Plugins > Packs**, in place of an archive the user unpacks over it, and of
-the second disk image on macOS. Not through a plugin registry:
+itself, in **View > Plugins > Packs**, in place of an archive the user unpacked over it, and of
+the second disk image on macOS (both gone since 2026-11-28, §5). Not through a plugin registry:
 [PLUGIN_REGISTRY.md](PLUGIN_REGISTRY.md) is parked.
 
 **Status (2026-11-26):** built, and checked on Windows with a test pack, in the app and by the
 tests of §10.6; nothing is released with it. On Linux and macOS none of it has run yet: its
 parts were tried by hand before (§10.6). The release workflow's new steps haven't run either;
-a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stay
-until a release has shown that this works. Cycles is the first Windows optional pack
+a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stayed
+until release 26.11.11 had the packs for Linux and macOS, and were dropped 2026-11-28. Cycles is the first Windows optional pack
 (published 2026-11-27, §5), so the first release after it is also the first to run these
 Windows steps with a real pack. Arnold's plugins join it (2026-11-28): the first pack of
 the `local` set that is published, the first that isn't a whole renderer, and one the
@@ -1012,7 +1017,7 @@ release can't load, as it has no Arnold.
 - **A chosen pack the new version doesn't have is asked about** before the update, with Update
   Anyway and Later. usdcc doesn't hold an update back for a pack, nor go ahead without saying.
 - **In View > Plugins,** where an installed pack's plugins show anyway, not in a dialog of its own.
-- **Not an update channel per set of packs** (usdcc with the pack, as the second disk image is):
+- **Not an update channel per set of packs** (usdcc with the pack, as the second disk image was):
   with several packs it is a channel per combination, or one that gives everyone everything.
 
 ### 10.2 The store
@@ -1086,9 +1091,8 @@ How they are made:
   pack itself. Title and description come from [deps/packs.json](../deps/packs.json), not the
   pins: an edit to a pin, or to `usd_plugin_asset.py`, renames and rebuilds packs.
 - **On Linux and macOS a pack may have nothing in `lib/`,** where the installed pack has its link:
-  it keeps its own libraries under `plugin/usd/`, as MoonRay's does. `deploy.py` fails on one
-  that doesn't. **Cycles' pack doesn't yet** on those two (Open Image Denoise is in `lib/`, §7
-  phase 5): its hook has to change before it is published there.
+  it keeps its own libraries under `plugin/usd/`, as MoonRay's does, and Cycles' (Open Image
+  Denoise in `plugin/usd/hdCycles/lib`, §7 phase 5). `deploy.py` fails on one that doesn't.
 - `tools/ci/pack_index.py --packs DIR --version V --out DIR` archives them and writes the index.
 - `tools/ci/check_pack_install.py --deploy D --packs DIR` installs each with the deploy's own
   usdcc (`--install-packs`, into a test profile), starts it and checks that OpenUSD registered
@@ -1280,4 +1284,5 @@ and keep, what a new version means for the chosen packs, the unattended install)
   one while usdcc runs.
 - **macOS packs carry their debug symbols:** the folder is made before `split_dsym.py` strips
   the bundle they come from.
-- **Retiring the old route:** the archives to unpack over usdcc, and the second disk image.
+- ~~**Retiring the old route:** the archives to unpack over usdcc, and the second disk image.~~
+  Done 2026-11-28 (§5).

@@ -5,7 +5,10 @@
 
 #include <pxr/base/plug/plugin.h>
 #include <pxr/base/plug/registry.h>
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/base/tf/stringUtils.h>
+#include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/path.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/primDefinition.h>
@@ -190,6 +193,145 @@ std::vector<std::string> SchemaLibraries::baseFolders(const SchemaLibraryDef& li
         if (const std::optional<SchemaLibraryLocation> base = find(first)) folders.push_back(base->usdFolder);
     }
     return folders;
+}
+
+namespace {
+
+// Files that say nothing about what a folder is for.
+bool isClutter(const std::filesystem::path& file) {
+    const std::string name = textOf(file.filename());
+    return name == ".DS_Store" || name == "Thumbs.db" || name == "desktop.ini";
+}
+
+// What Generate leaves beside a file it couldn't finish replacing.
+std::vector<std::filesystem::path> withLeftovers(const std::filesystem::path& file) {
+    return {file, std::filesystem::path(file).concat(".new"), std::filesystem::path(file).concat(".old")};
+}
+
+// Whether `folder` has no file but `known` ones and clutter, however deep.
+bool holdsOnly(const std::filesystem::path& folder, const std::vector<std::filesystem::path>& known) {
+    std::error_code error;
+    for (std::filesystem::recursive_directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
+        if (it->is_directory(error)) continue;
+        const bool expected = std::any_of(known.begin(), known.end(), [&](const std::filesystem::path& file) {
+            std::error_code ec;
+            return std::filesystem::equivalent(it->path(), file, ec);
+        });
+        if (!expected && !isClutter(it->path())) return false;
+    }
+    return !error;
+}
+
+}  // namespace
+
+std::optional<SchemaLibraryDeletion> SchemaLibraries::deletionOf(const std::string& name, std::string* error) const {
+    auto fail = [error](const std::string& why) -> std::optional<SchemaLibraryDeletion> {
+        if (error) *error = why;
+        return std::nullopt;
+    };
+    const std::optional<SchemaLibraryLocation> location = find(name);
+    if (!location) return fail("No schema library " + name);
+    if (!location->writable) return fail(name + " is read-only: its folder can't be written");
+    const std::filesystem::path usd = pathOf(location->usdFolder);
+    const std::filesystem::path sourceFolder = usd / pathOf(name);
+    const std::filesystem::path source = sourceFolder / "schema.usda";
+    std::vector<std::filesystem::path> generated = withLeftovers(pathOf(plugInfoPath(location->usdFolder)));
+    for (const std::filesystem::path& file : withLeftovers(pathOf(generatedSchemaPath(location->usdFolder)))) generated.push_back(file);
+
+    SchemaLibraryDeletion deletion;
+    // The plugin's folder, when the library is all there is to the plugin.
+    if (!location->pluginFolder.empty()) {
+        const std::filesystem::path plugin = pathOf(location->pluginFolder);
+        std::vector<std::filesystem::path> known = generated;
+        known.push_back(source);
+        known.push_back(plugin / "usdcc-plugin.json");
+        if (holdsOnly(plugin, known)) {
+            deletion.paths = {textOf(plugin)};
+            deletion.wholePlugin = true;
+            return deletion;
+        }
+    }
+    // Its own files, the source last: should one not go, the library is still there to try again.
+    std::error_code ec;
+    for (const std::filesystem::path& file : generated) {
+        if (std::filesystem::exists(file, ec)) deletion.paths.push_back(textOf(file));
+    }
+    deletion.paths.push_back(textOf(holdsOnly(sourceFolder, {source}) ? sourceFolder : source));
+    return deletion;
+}
+
+bool SchemaLibraries::remove(const std::string& name, std::string* error, const std::function<bool(const std::string& path)>& discard) {
+    auto fail = [error](const std::string& why) {
+        if (error) *error = why;
+        return false;
+    };
+    const std::optional<SchemaLibraryLocation> location = find(name);
+    std::string why;
+    const std::optional<SchemaLibraryDeletion> deletion = deletionOf(name, &why);
+    if (!location || !deletion) return fail(why);
+    for (const std::string& path : deletion->paths) {
+        bool gone = false;
+        if (discard) {
+            gone = discard(path);
+        } else {
+            std::error_code ec;
+            std::filesystem::remove_all(pathOf(path), ec);
+            gone = !ec;
+        }
+        if (!gone) return fail("Can't remove " + path);
+    }
+    if (deletion->wholePlugin) {
+        // Its folder is gone: a library of that name made anew is another one.
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_usdFolders.erase(std::remove(m_usdFolders.begin(), m_usdFolders.end(), location->usdFolder), m_usdFolders.end());
+        m_generatedAtStart.erase(location->usdFolder);
+    }
+    return true;
+}
+
+std::map<std::string, SchemaRemoval> removedSchemas(const std::string& usdFolder, const std::string& library,
+                                                    const std::vector<std::string>& schemas) {
+    std::map<std::string, SchemaRemoval> removed;
+    std::error_code ec;
+    const std::string generated = generatedSchemaPath(usdFolder);
+    if (!std::filesystem::is_regular_file(pathOf(generated), ec) ||
+        !std::filesystem::is_regular_file(pathOf(plugInfoPath(usdFolder)), ec)) {
+        for (const std::string& schema : schemas) removed[schema] = SchemaRemoval::LibraryDeleted;
+        return removed;
+    }
+    // As anonymous layers: read from the files as they are now, whatever Sdf has open.
+    // A file that doesn't parse (one being written as text) says nothing.
+    TfErrorMark mark;
+    const SdfLayerRefPtr generatedLayer = SdfLayer::OpenAsAnonymous(generated);
+    const std::string source = schemaSourcePath(usdFolder, library);
+    const SdfLayerRefPtr sourceLayer =
+        std::filesystem::is_regular_file(pathOf(source), ec) ? SdfLayer::OpenAsAnonymous(source) : SdfLayerRefPtr();
+    mark.Clear();
+    if (!generatedLayer) return removed;
+    for (const std::string& schema : schemas) {
+        if (!SdfPath::IsValidIdentifier(schema)) continue;
+        const SdfPath path = SdfPath::AbsoluteRootPath().AppendChild(TfToken(schema));
+        if (!generatedLayer->GetPrimAtPath(path)) {
+            removed[schema] = SchemaRemoval::AtNextStart;
+        } else if (sourceLayer && !sourceLayer->GetPrimAtPath(path)) {
+            removed[schema] = SchemaRemoval::FromSource;
+        }
+    }
+    return removed;
+}
+
+std::map<std::string, SchemaRemoval> removedSchemas(const std::vector<SchemaInfo>& loaded) {
+    std::map<std::string, std::vector<std::string>> byPlugin;
+    for (const SchemaInfo& info : loaded) {
+        if (info.codeless && !info.plugin.empty()) byPlugin[info.plugin].push_back(info.name);
+    }
+    std::map<std::string, SchemaRemoval> removed;
+    for (const auto& [name, schemas] : byPlugin) {
+        const PlugPluginPtr plugin = PlugRegistry::GetInstance().GetPluginWithName(name);
+        if (!plugin || plugin->GetResourcePath().empty()) continue;
+        removed.merge(removedSchemas(plugin->GetResourcePath(), name, schemas));
+    }
+    return removed;
 }
 
 std::vector<std::string> schemaLibraryChanges(const SchemaLibraryDef& library) {
