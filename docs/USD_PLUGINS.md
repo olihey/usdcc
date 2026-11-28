@@ -1098,11 +1098,11 @@ How they are made:
   usdcc (`--install-packs`, into a test profile), starts it and checks that OpenUSD registered
   the pack from the data folder, that the plugins its pin's `check` names load and its
   renderers are listed, and removes it again. `release.yml` runs the three in each platform's job.
-- **A published pack of the `local` set (Arnold)** is written by `--pack-folders` too, and by
-  nothing else: on Linux it is deployed and checked with the optional ones and then leaves
-  `--optional-packs`' folder empty, on macOS its binaries are signed in a copy of the bundle
-  that is deleted again, so neither an archive to unpack nor a disk image is made of it. Its
-  plugins are in `plugin/arnold`, not `plugin/usd`, so its `usdcc-plugin.json` has `"usd": []`
+- **A published pack of the `local` set (Arnold)** is written by `--pack-folders` too, and
+  only with it: on Linux it is deployed and checked with the optional ones and moved out to
+  `--optional-packs`' folder as they are, on macOS its binaries are signed in a copy of the
+  bundle there. Its plugins are in `plugin/arnold`, not `plugin/usd`, so its
+  `usdcc-plugin.json` has `"usd": []`
   (§3, Arnold). The library its pin's `check.preload` names (Arnold's core) is the user's, so
   the macOS check doesn't look for it in the bundle, and `check_pack_install.py` checks only
   that the pack is in the store, complete, and that OpenUSD registered nothing from it: no

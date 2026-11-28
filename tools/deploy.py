@@ -77,7 +77,7 @@ its own signature when --pack-folders takes them from it.
 downloads one, DIR/<pack>/ (docs/USD_PLUGINS.md section 10). And the packs of the local
 set whose pin says "publish": true (Arnold): plugins built against an SDK that isn't
 theirs to ship, which load only once the user names their own copy of it. Those too
-are a download in the app and nothing else, and --optional-packs leaves no folder of theirs.
+are a download in the app and nothing else, made as the optional set's are.
 
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
@@ -1415,11 +1415,8 @@ def deploy_linux(args):
             fail(f"uv can't use the deploy's Python: {(found.stdout + found.stderr).strip()}")
 
     # The optional packs out of the deploy, each into a folder of the deploy's name.
-    # A published pack of the local set leaves nothing in --optional-packs' folder.
-    staging = Path(_full(args.pack_folders)) / ".staging" if args.pack_folders else None
     for pack, names in optional_files.items():
-        app_only = _app_only(pack, optional_packs[pack])
-        target = (staging if app_only else optional_dir) / pack / deploy_dir.name
+        target = optional_dir / pack / deploy_dir.name
         if target.exists():
             remove_tree(target)
         for name in names:
@@ -1430,14 +1427,11 @@ def deploy_linux(args):
                 parent.rmdir()
                 parent = parent.parent
         size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
-        if not app_only:
-            print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), checked in the deploy and moved out of it")
+        print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), checked in the deploy and moved out of it")
         # And as usdcc installs it when it downloads it itself (docs/USD_PLUGINS.md section 10).
         if args.pack_folders:
             _pack_folder(pack, target, names, Path(_full(args.pack_folders)) / pack, optional_packs[pack].get("version", ""),
                          windows=False)
-    if staging and staging.exists():
-        remove_tree(staging)
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {deploy_dir} ({size / 2**20:,.0f} MB). Start it with ./usdcc or bin/usdcc.")
@@ -1872,9 +1866,6 @@ def deploy_macos(args):
             record = json.loads((with_pack / USD_PACKS_DIR / f"{pack}.json").read_text(encoding="utf-8"))
             _pack_folder(pack, with_pack, [*record["files"], f"{USD_PACKS_DIR}/{pack}.json"], Path(_full(args.pack_folders)) / pack,
                          manifest.get("version", ""), windows=False)
-        # A published pack of the local set leaves nothing in --optional-packs' folder.
-        if _app_only(pack, manifest):
-            remove_tree(optional_dir / pack)
 
     size = sum(file.stat().st_size for file in deploy_dir.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"Done: {app} ({size / 2**20:,.0f} MB). Start it with: open {app}")
