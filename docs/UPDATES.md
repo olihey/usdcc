@@ -246,7 +246,7 @@ them are under MIT, Apache-2.0, BSD, ISC, Zlib, Unicode and MPL-2.0 licences (wh
 | Windows installer | Yes | Yes |
 | Windows 7z | Yes | No |
 | macOS disk image | Yes | Yes |
-| macOS disk image with an optional pack (MoonRay) | Yes | No: an update would take its pack away. The plain image installs the pack itself and keeps it over updates ([USD_PLUGINS.md](USD_PLUGINS.md) §10), which is to replace this one |
+| ~~macOS disk image with an optional pack (MoonRay)~~ | | Not made since 2026-11-28: an update would have taken its pack away. The plain image installs the pack itself and keeps it over updates ([USD_PLUGINS.md](USD_PLUGINS.md) §10) |
 | Linux tar.xz | Yes | No |
 | Linux AppImage | Yes | Yes |
 

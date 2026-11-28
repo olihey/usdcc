@@ -421,7 +421,9 @@ without building the others.
 
 - **A download of its own** (§8 item 2): `usdcc-<version>-linux-x64-moonray.tar.xz`, about 214 MB,
   beside usdcc's 154 MB, unpacked over the usdcc folder. `release.yml`'s Linux job makes it with
-  `tools/deploy.py --optional-packs` (USD_PLUGINS.md §5).
+  `tools/deploy.py --optional-packs` (USD_PLUGINS.md §5). *Dropped 2026-11-28: the release has
+  the pack only as the download usdcc installs itself,
+  `usdcc-<version>-linux-x64-pack-moonray.tar.xz` (USD_PLUGINS.md §10).*
 - **Licences read** (§3.1). The pack now ships only the MoonRay libraries something loads: 64 of 72,
   without Arras's HTTP server (and so without libmicrohttpd), the test libraries and the 13 test
   shaders. It also carries Lua's notice, MoonRay's `THIRD-PARTY.md` and Open Image Denoise's
@@ -487,6 +489,8 @@ too, through Arras.
 **Shipping:** files can't be unpacked over a signed bundle, so the release has a second disk image,
 `usdcc-<version>-macos-arm64-moonray.dmg`: usdcc with the pack (USD_PLUGINS.md §5).
 It was 371 MB here, and 160 MB without; the pack is 291 MB installed, 224 MB zipped.
+*Dropped 2026-11-28: the plain usdcc installs the pack itself,
+`usdcc-<version>-macos-arm64-pack-moonray.tar.xz` (USD_PLUGINS.md §10).*
 
 **The first start** of a newly installed MoonRay can take several seconds (5 to 17 s seen), while macOS
 checks its libraries, and blocks the UI. Later ones take 0.3 s.
@@ -573,6 +577,6 @@ whether the in-process renderer takes the sample counts.
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | Platform | **Decided:** Linux x64, and macOS on Apple silicon (§7.6) |
-| 2 | Standard or separate download? | **Decided:** separate, `usdcc-<version>-linux-x64-moonray.tar.xz` (§7.5) |
+| 2 | Standard or separate download? | **Decided:** separate; since 2026-11-28 only the one usdcc installs itself, `usdcc-<version>-<platform>-pack-moonray.tar.xz` (§7.5, §7.6) |
 | 3 | Rebuild the OpenUSD asset's Embree | **Not needed** (§7.1) |
 | 4 | Before or after Cycles? | Cycles first if one renderer with MaterialX on every platform is the goal |
