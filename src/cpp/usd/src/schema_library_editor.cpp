@@ -226,13 +226,10 @@ SchemaLibraryEditor::SchemaLibraryEditor(QWidget* parent) : QWidget(parent) {
     connect(m_checkTimer, &QTimer::timeout, this, &SchemaLibraryEditor::refreshIssues);
 
     // Edit as Text: the form follows the file, unless it has edits of its own.
-    auto* watcher = new QFileSystemWatcher(this);
-    connect(this, &SchemaLibraryEditor::libraryChanged, watcher, [this, watcher]() {
-        if (!watcher->files().isEmpty()) watcher->removePaths(watcher->files());
-        if (const auto location = SchemaLibraries::instance().find(m_library.toStdString())) watcher->addPath(qs(location->source()));
-    });
-    connect(watcher, &QFileSystemWatcher::fileChanged, this, [this, watcher](const QString& path) {
-        if (!watcher->files().contains(path)) watcher->addPath(path);  // replaced, not written: watch it again
+    m_watcher = new QFileSystemWatcher(this);
+    connect(this, &SchemaLibraryEditor::libraryChanged, m_watcher, [this]() { setWatching(true); });
+    connect(m_watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString& path) {
+        if (!m_watcher->files().contains(path)) m_watcher->addPath(path);  // replaced, not written: watch it again
         if (stampOf(path) == m_known) return;  // its own Save
         if (m_modified) {
             m_status->setText(tr("schema.usda changed on disk: More > Reload shows it"));
@@ -397,6 +394,28 @@ bool SchemaLibraryEditor::maybeSave() {
         return false;
     }
     return true;
+}
+
+void SchemaLibraryEditor::setWatching(bool watching) {
+    if (!m_watcher->files().isEmpty()) m_watcher->removePaths(m_watcher->files());
+    if (!watching) return;
+    if (const auto location = SchemaLibraries::instance().find(m_library.toStdString())) m_watcher->addPath(qs(location->source()));
+}
+
+void SchemaLibraryEditor::forget() {
+    m_library.clear();
+    m_def = {};
+    m_known.clear();
+    m_modified = false;
+    m_current = -1;
+    m_checkTimer->stop();
+    m_title->setText(QString());
+    refreshClassList();
+    showClass();
+    m_issues->clear();
+    m_issues->setVisible(false);
+    refreshStatus();
+    Q_EMIT libraryChanged();  // the watcher lets go of the file
 }
 
 SchemaClassDef* SchemaLibraryEditor::current() {

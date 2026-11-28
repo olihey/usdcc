@@ -5,6 +5,7 @@
 // through the app's hooks; then a prim's custom attributes made into an API.
 #include "python_test_app.h"
 #include "test_harness.h"
+#include "trash_temp_dir.h"
 
 #include "usdcc/scripting/python_runtime.h"
 #include "usdcc/ui/scale_controller.h"
@@ -77,7 +78,7 @@ USDCC_TEST(schema_editor) {
     QTemporaryDir settings;
     usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
                                        settings.filePath(QStringLiteral("ui.ini")));
-    QTemporaryDir userPlugins;
+    QTemporaryDir userPlugins(usdcc::test::trashableTempTemplate());  // Delete Library moves one to the trash
     usdcc::usd::SchemaLibraries::instance().configure({}, userPlugins.path().toStdString(), 1);
 
     usdcc::scripting::PythonRuntime& runtime = usdcc::test::pythonTestApp().python;
@@ -225,5 +226,26 @@ USDCC_TEST(schema_editor) {
     CHECK(panel.closeEditor() && !panel.isEditing(), "Close goes back to the details");
     CHECK(panel.selectLibrary(QStringLiteral("studioTest")) && panel.details()->toPlainText().contains("StudioTestGradeAPI"),
           "a library's details list its schemas");
+    CHECK(panel.removedSchemas().empty(), "nothing of it is loaded, so nothing is removed");
+
+    // Its last schema removed, it still generates: the plugin stays, with no types.
+    CHECK(panel.editLibrary(QStringLiteral("studioTest")), "open again");
+    while (editor->classList()->count() > 0) editor->removeCurrentClass();
+    editor->generate(false);
+    CHECK(waitFor([&]() { return !editor->isGenerating(); }, 180000) && editor->lastResult().ok && editor->lastResult().tried.empty(),
+          "emptied, it generates: %s", editor->lastResult().error.c_str());
+    const std::string emptied = readText(usdcc::usd::plugInfoPath(usdcc::usd::SchemaLibraries::instance().find("studioTest")->usdFolder));
+    CHECK(emptied.find("StudioTestAsset") == std::string::npos && emptied.find("\"Name\": \"studioTest\"") != std::string::npos,
+          "its plugInfo.json has no type left: %s", emptied.c_str());
+
+    // Delete Library: the plugin New Schema Library made, whole, to the trash; the editor lets go.
+    editor->addClass(SchemaInfo::Kind::SingleApplyAPI);
+    CHECK(editor->isModified(), "with an edit not saved");
+    CHECK(panel.deleteLibrary(QStringLiteral("studioTest"), &error), "Delete Library: %s", qPrintable(error));
+    CHECK(!panel.isEditing() && editor->library().isEmpty() && !editor->isModified(), "the editor is closed, its edit dropped");
+    CHECK(!QFile::exists(userPlugins.filePath(QStringLiteral("studioTest"))), "the plugin's folder is gone");
+    CHECK(libraryState(panel.tree(), "studioTest").isEmpty() && !usdcc::usd::SchemaLibraries::instance().find("studioTest"),
+          "and Schema Libraries no longer lists it");
+    CHECK(panel.newLibrary(QStringLiteral("studioTest"), &error) && panel.closeEditor(), "its name is free again: %s", qPrintable(error));
     usdcc::usd::setSchemaEditorHooks({});
 }

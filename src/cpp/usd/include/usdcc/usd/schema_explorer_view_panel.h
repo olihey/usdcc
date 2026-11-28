@@ -5,6 +5,7 @@
 #include "usdcc/core/signal.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/schema_info.h"
+#include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/stage.h"
 
 #include <map>
@@ -45,7 +46,12 @@ class UsdaPreviewDialog;
 //
 // Schema Libraries lists the codeless libraries usdcc can edit, each with its
 // state (SchemaLibraries); Edit opens the Schema Editor in place of the
-// details (docs/SCHEMAS.md §5), and New Schema Library makes one.
+// details (docs/SCHEMAS.md §5), New Schema Library makes one and Delete
+// Library removes one.
+//
+// USD can't unload a schema, so one removed from its library, or whose library
+// was deleted, stays in the tree until the next start: its row and details say
+// so (removedSchemas()).
 class USDCC_USD_UI_API SchemaExplorerViewPanel : public usdcc::ui::ViewPanel {
     Q_OBJECT
 
@@ -101,6 +107,16 @@ public:
     bool closeEditor();
     // Makes a library in the user's plugins folder, and edits it.
     bool newLibrary(const QString& name, QString* error = nullptr);
+    // Deletes library `name`: its plugin's folder when the plugin is nothing but
+    // the library, else the library's own files (SchemaLibraries::deletionOf()),
+    // to the trash, or for good with `permanently`. An editor open on it lets
+    // go of it, edits and all. USD keeps its schemas until the next start,
+    // marked as removed. False, with `error`, if something couldn't go.
+    bool deleteLibrary(const QString& name, QString* error = nullptr, bool permanently = false);
+    // The loaded codeless schemas their library's files no longer have, as of
+    // the last refresh or change to a library: they're marked, as USD keeps
+    // them until the next start.
+    const std::map<std::string, SchemaRemoval>& removedSchemas() const { return m_removed; }
     // The chosen row of Schema Libraries, or empty.
     QString currentLibrary() const;
     bool selectLibrary(const QString& name);
@@ -131,6 +147,8 @@ public Q_SLOTS:
     void refreshStageUse();
     // Asks for a name, then newLibrary().
     void newLibraryInteractively();
+    // Says what goes and asks, then deleteLibrary().
+    void deleteLibraryInteractively(const QString& name);
 
 protected:
     void populateOptionsMenu(QMenu* menu) override;
@@ -142,6 +160,12 @@ private:
     void rebuildTree();
     void rebuildStageGroup();
     void rebuildLibraryGroup();
+    // A library was made, saved, generated or deleted: its row, and which
+    // schemas its files no longer have.
+    void librariesChanged();
+    // Marks the rows of the schemas removedSchemas() names.
+    void refreshRemoved();
+    QString removalHtml(const SchemaInfo& info, SchemaRemoval removal) const;
     // The tree beside the details when there's room, above them when narrow.
     void updateOrientation();
     void applyFilter();
@@ -176,6 +200,7 @@ private:
     std::vector<SchemaInfo> m_schemas;
     std::map<std::string, std::size_t> m_index;   // name to m_schemas
     std::map<std::string, QTreeWidgetItem*> m_items;
+    std::map<std::string, SchemaRemoval> m_removed;
 };
 
 }  // namespace usdcc::usd

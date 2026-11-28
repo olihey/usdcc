@@ -3,15 +3,21 @@
 // schemas, the filter and Show, Show Source, and its session state. Runs in
 // usdcc_ui_tests (offscreen).
 #include "test_harness.h"
+#include "trash_temp_dir.h"
 
 #include "usdcc/ui/scale_controller.h"
+#include "usdcc/ui/theme.h"
 #include "usdcc/usd/schema_explorer_view_panel.h"
+#include "usdcc/usd/schema_libraries.h"
+#include "usdcc/usd/schema_library_editor.h"
 #include "usdcc/usd/stage_manager.h"
 #include "usdcc/usd/undo_manager.h"
 #include "usdcc/usd/usda_preview_dialog.h"
 #include "usdcc/usd/usda_view.h"
 
+#include <pxr/base/plug/registry.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/types.h>
 #include <pxr/usd/usd/attribute.h>
 #include <pxr/usd/usd/prim.h>
@@ -20,12 +26,16 @@
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QMessageBox>
 #include <QTimer>
 #include <QUndoStack>
 
 #include <cstdio>
+#include <filesystem>
 #include <functional>
+#include <optional>
 #include <QElapsedTimer>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -394,4 +404,155 @@ USDCC_TEST(schema_explorer_adopt) {
     CHECK(panel.primsWithAttributesOf(QStringLiteral("UsdccTestShotAPI")).empty(), "none left");
     stack->undo();
     CHECK(!s->GetPrimAtPath(SdfPath("/A")).HasAPI(TfToken("UsdccTestShotAPI")), "undo takes it off again");
+}
+
+// What the panel says of a codeless schema its library's files no longer have,
+// and Delete Library (docs/SCHEMAS.md §5.6). It registers a copy of
+// test_data/schemas/usdccTestSchemas before anything has asked USD for a
+// schema, then rewrites and deletes the copy's files: so it runs alone, as the
+// ctest usdcc_ui_schema_removed, which sets USDCC_TEST_SCHEMA_REMOVED.
+USDCC_TEST(schema_explorer_removed) {
+    using namespace PXR_NS;
+    using usdcc::usd::SchemaRemoval;
+    if (qEnvironmentVariableIsEmpty("USDCC_TEST_SCHEMA_REMOVED")) {
+        std::printf("  skipped: it registers a schema library of its own (run the usdcc_ui_schema_removed test)\n");
+        return;
+    }
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir settings;
+    usdcc::ui::UiScaleController scale(*static_cast<QApplication*>(QCoreApplication::instance()),
+                                       settings.filePath(QStringLiteral("ui.ini")));
+    QTemporaryDir folder(usdcc::test::trashableTempTemplate());  // Delete Library moves its files to the trash
+    const QString usd = folder.filePath(QStringLiteral("usdccTestSchemas"));
+    const QString plugInfo = usd + QStringLiteral("/plugInfo.json");
+    const QString generated = usd + QStringLiteral("/generatedSchema.usda");
+    const QString source = usd + QStringLiteral("/usdccTestSchemas/schema.usda");
+    QDir().mkpath(usd + QStringLiteral("/usdccTestSchemas"));
+    const QString from = QStringLiteral(USDCC_TEST_DATA_DIR "/schemas/usdccTestSchemas");
+    CHECK(QFile::copy(from + QStringLiteral("/usdccTestSchemas/schema.usda"), source) &&
+              QFile::copy(from + QStringLiteral("/plugInfo.json"), plugInfo) &&
+              QFile::copy(from + QStringLiteral("/generatedSchema.usda"), generated),
+          "a copy of the test library");
+    // Generated just now: a copy keeps its file's time, and a library whose source is the
+    // newer file reads as changed.
+    std::filesystem::last_write_time(std::filesystem::path(generated.toStdU16String()), std::filesystem::file_time_type::clock::now());
+    CHECK(PlugRegistry::GetInstance().RegisterPlugins(usd.toStdString()).size() == 1, "registered, as at a start");
+    usdcc::usd::SchemaLibraries::instance().configure({}, {}, 1);
+    int restarts = 0;
+    usdcc::usd::SchemaEditorHooks hooks;
+    hooks.restart = [&restarts]() {
+        ++restarts;
+        return true;
+    };
+    usdcc::usd::setSchemaEditorHooks(hooks);
+
+    StageManager stages;
+    auto undo = std::make_shared<UndoManager>();
+    const StageRefPtr stage = stages.createStage();
+    SchemaExplorerViewPanel panel(&stages, stage, undo);
+    panel.resize(1100, 800);
+    panel.show();
+    CHECK(stage->usdStage()->DefinePrim(SdfPath("/A"), TfToken("Xform")).ApplyAPI(TfToken("UsdccTestShotAPI")),
+          "USD has its schemas: one applies");
+    settle();
+    auto kindOf = [&panel](const QString& schema) {
+        for (QTreeWidgetItemIterator it(panel.tree()); *it; ++it) {
+            if ((*it)->text(0) == schema && !(*it)->data(0, Qt::UserRole + 2).toBool()) return (*it)->text(1);
+        }
+        return QString();
+    };
+    auto libraryState = [&panel]() {
+        for (QTreeWidgetItemIterator it(panel.tree()); *it; ++it) {
+            if ((*it)->data(0, Qt::UserRole + 3).toString() == "usdccTestSchemas") return (*it)->text(1);
+        }
+        return QString();
+    };
+    auto details = [&panel]() { return panel.details()->toPlainText(); };
+
+    // Loaded, its files as they were generated: nothing to say.
+    CHECK(panel.selectSchema(QStringLiteral("UsdccTestShotAPI")) && panel.currentSchema()->codeless, "its schema is in the tree");
+    CHECK(panel.removedSchemas().empty() && !kindOf(QStringLiteral("UsdccTestShotAPI")).contains("removed") &&
+              !details().contains("Removed"),
+          "nothing is removed: [%s]", qPrintable(kindOf(QStringLiteral("UsdccTestShotAPI"))));
+    CHECK(libraryState() == "loaded", "its library is loaded: [%s]", qPrintable(libraryState()));
+
+    // Removed in the editor and saved: USD has it, and so do the generated files.
+    QString error;
+    usdcc::usd::SchemaLibraryEditor* editor = panel.editor();
+    CHECK(panel.editLibrary(QStringLiteral("usdccTestSchemas"), QStringLiteral("UsdccTestShotAPI")) &&
+              editor->currentClass() == "UsdccTestShotAPI",
+          "the editor, at the schema");
+    editor->removeCurrentClass();
+    CHECK(editor->save(&error) && panel.closeEditor(), "Remove, Save, Close: %s", qPrintable(error));
+    CHECK(panel.removedSchemas().size() == 1 && panel.removedSchemas().count("UsdccTestShotAPI") &&
+              panel.removedSchemas().at("UsdccTestShotAPI") == SchemaRemoval::FromSource,
+          "removed from the source: [%zu]", panel.removedSchemas().size());
+    CHECK(kindOf(QStringLiteral("UsdccTestShotAPI")).contains("removed"), "its row says so: [%s]",
+          qPrintable(kindOf(QStringLiteral("UsdccTestShotAPI"))));
+    panel.selectSchema(QStringLiteral("UsdccTestShotAPI"));
+    CHECK(details().contains("hasn't been generated since") && details().contains("it stays until it is"),
+          "its details say it stays until a Generate: [%s]", qPrintable(details().left(300)));
+    panel.selectLibrary(QStringLiteral("usdccTestSchemas"));
+    CHECK(details().contains("Removed, not generated") && details().contains("UsdccTestShotAPI"), "its library's details too");
+
+    // Generated, as Generate rewrites the file: gone at the next start, and still there now.
+    {
+        const SdfLayerRefPtr layer = SdfLayer::FindOrOpen(generated.toStdString());
+        CHECK(layer && layer->GetPrimAtPath(SdfPath("/UsdccTestShotAPI")), "the generated file has it");
+        layer->RemoveRootPrim(layer->GetPrimAtPath(SdfPath("/UsdccTestShotAPI")));
+        CHECK(layer->Save(), "and no longer");
+    }
+    panel.refresh();
+    CHECK(panel.removedSchemas().size() == 1 && panel.removedSchemas().at("UsdccTestShotAPI") == SchemaRemoval::AtNextStart,
+          "removed from the generated files");
+    CHECK(panel.selectSchema(QStringLiteral("UsdccTestShotAPI")) && kindOf(QStringLiteral("UsdccTestShotAPI")).contains("removed"),
+          "still in the tree, marked");
+    CHECK(details().contains("gone at the next start") && details().contains("USD can't unload a schema"), "its details say why: [%s]",
+          qPrintable(details().left(300)));
+    CHECK(panel.stageUse().count("UsdccTestShotAPI") == 1 && details().contains("1 prim"), "USD still has it: the stage's prim counts");
+    CHECK(details().contains("Restart"), "Restart is offered");
+    panel.openLink(QUrl(QStringLiteral("restart:")));
+    CHECK(restarts == 1, "and asks the app");
+    panel.setFilterText(QStringLiteral("UsdccTestShot"));
+    CHECK(kindOf(QStringLiteral("UsdccTestShotAPI")).contains("removed") &&
+              panel.tree()->currentItem()->foreground(0).color() == usdcc::ui::theme::color(usdcc::ui::theme::Token::Warning),
+          "a filter leaves it marked");
+    panel.setFilterText(QString());
+    panel.selectLibrary(QStringLiteral("usdccTestSchemas"));
+    CHECK(details().contains("loaded until the next start") && details().contains("Delete"), "its library's details: [%s]",
+          qPrintable(details().left(300)));
+    CHECK(!kindOf(QStringLiteral("UsdccTestAsset")).contains("removed"), "the library's other schemas aren't");
+
+    // Delete Library. Not a usdcc plugin's: its own files go, the folder they were in stays.
+    const std::optional<usdcc::usd::SchemaLibraryDeletion> deletion =
+        usdcc::usd::SchemaLibraries::instance().deletionOf("usdccTestSchemas");
+    CHECK(deletion && !deletion->wholePlugin && deletion->paths.size() == 3, "what it takes: [%zu]",
+          deletion ? deletion->paths.size() : 0);
+    CHECK(panel.editLibrary(QStringLiteral("usdccTestSchemas")), "open in the editor, with an edit");
+    editor->addClass(usdcc::usd::SchemaInfo::Kind::SingleApplyAPI);
+    // It asks first, saying what goes and what stays until the next start.
+    QString asked;
+    answerNextQuestion(QStringLiteral("Cancel"), &asked);
+    panel.deleteLibraryInteractively(QStringLiteral("usdccTestSchemas"));
+    CHECK(asked.contains("Delete the schema library usdccTestSchemas?") && asked.contains("the rest of its plugin stays") &&
+              asked.contains("plugInfo.json") && asked.contains("USD keeps its schemas until the next start") &&
+              asked.contains("UsdccTestAsset") && asked.contains("uses them on 1 prim") && asked.contains("edits not saved are dropped"),
+          "the question: [%s]", qPrintable(asked));
+    CHECK(QFile::exists(source) && panel.isEditing() && editor->isModified(), "Cancel leaves it, and the editor");
+    answerNextQuestion(QStringLiteral("Delete"));
+    panel.deleteLibraryInteractively(QStringLiteral("usdccTestSchemas"));
+    CHECK(!panel.isEditing() && editor->library().isEmpty() && !editor->isModified(), "the editor lets go of it");
+    CHECK(!QFile::exists(plugInfo) && !QFile::exists(generated) && !QFile::exists(source) &&
+              !QDir(usd + QStringLiteral("/usdccTestSchemas")).exists() && QDir(usd).exists(),
+          "its files are gone");
+    CHECK(libraryState().isEmpty() && !panel.selectLibrary(QStringLiteral("usdccTestSchemas")), "Schema Libraries no longer lists it");
+    bool allDeleted = panel.removedSchemas().size() == 5;
+    for (const auto& [name, removal] : panel.removedSchemas()) allDeleted = allDeleted && removal == SchemaRemoval::LibraryDeleted;
+    CHECK(allDeleted, "every schema of it is marked: [%zu]", panel.removedSchemas().size());
+    CHECK(panel.selectSchema(QStringLiteral("UsdccTestAsset")) && kindOf(QStringLiteral("UsdccTestAsset")).contains("removed") &&
+              details().contains("was deleted") && details().contains("gone at the next start"),
+          "and says its library was deleted: [%s]", qPrintable(details().left(300)));
+    CHECK(!panel.deleteLibrary(QStringLiteral("usdccTestSchemas"), &error) && error.contains("No schema library"), "not twice: %s",
+          qPrintable(error));
+    usdcc::usd::setSchemaEditorHooks({});
 }

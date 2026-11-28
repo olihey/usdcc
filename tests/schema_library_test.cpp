@@ -1,8 +1,10 @@
 // A codeless schema library's schema.usda read and written through Sdf, its
 // fallbacks parsed, the checks before Generate, and plugInfo.json's
-// placeholders (docs/SCHEMAS.md §5).
+// placeholders (docs/SCHEMAS.md §5); which loaded schemas a library's files no
+// longer have, and deleting a library (§5.6).
 #include "test_harness.h"
 
+#include "usdcc/usd/schema_libraries.h"
 #include "usdcc/usd/schema_library.h"
 
 #include <pxr/base/vt/dictionary.h>
@@ -13,10 +15,13 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <algorithm>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <sstream>
 
 using usdcc::usd::SchemaClassDef;
@@ -278,4 +283,140 @@ USDCC_TEST(schema_library_plug_info) {
     CHECK(usdcc::usd::fillPlugInfoPlaceholders(path, &error), "fills them: %s", error.c_str());
     CHECK(readText(path) == R"({"Plugins": [{"LibraryPath": "", "ResourcePath": ".", "Root": "."}]})", "as a codeless plugin needs: %s",
           readText(path).c_str());
+}
+
+USDCC_TEST(schema_library_removed) {
+    using usdcc::usd::SchemaRemoval;
+    QTemporaryDir dir;
+    const std::string usd = dir.filePath(QStringLiteral("usd")).toStdString();
+    const std::string source = usdcc::usd::schemaSourcePath(usd, "studio");
+    const std::string generated = usdcc::usd::generatedSchemaPath(usd);
+    const std::string plugInfo = usdcc::usd::plugInfoPath(usd);
+    const std::vector<std::string> loaded = {"StudioAsset", "StudioShotAPI"};
+    auto write = [](const std::string& path, const char* text) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << text;
+    };
+
+    // What USD loaded, and no generated files: the library was deleted.
+    std::map<std::string, SchemaRemoval> removed = usdcc::usd::removedSchemas(usd, "studio", loaded);
+    CHECK(removed.size() == 2 && removed["StudioAsset"] == SchemaRemoval::LibraryDeleted &&
+              removed["StudioShotAPI"] == SchemaRemoval::LibraryDeleted,
+          "no generated files: every schema's library is deleted");
+
+    // Its files as they were generated: nothing is removed.
+    std::string error;
+    CHECK(usdcc::usd::writeSchemaLibrary(studio(), source, &error), "writes the source: %s", error.c_str());
+    const char* both = "#usda 1.0\nclass StudioAsset \"StudioAsset\"\n{\n}\n\nclass \"StudioShotAPI\"\n{\n}\n";
+    write(generated, both);
+    write(plugInfo, "{}");
+    CHECK(usdcc::usd::removedSchemas(usd, "studio", loaded).empty(), "the files have them all");
+
+    // Removed in the source and saved, not generated: it stays until it is.
+    SchemaLibraryDef library = studio();
+    library.classes[0].builtInAPIs.clear();
+    library.classes.pop_back();
+    CHECK(usdcc::usd::writeSchemaLibrary(library, source, &error), "removes the API from the source: %s", error.c_str());
+    removed = usdcc::usd::removedSchemas(usd, "studio", loaded);
+    CHECK(removed.size() == 1 && removed["StudioShotAPI"] == SchemaRemoval::FromSource, "removed from the source only: [%zu]",
+          removed.size());
+
+    // Generated: gone at the next start, whatever the source says.
+    write(generated, "#usda 1.0\nclass StudioAsset \"StudioAsset\"\n{\n}\n");
+    removed = usdcc::usd::removedSchemas(usd, "studio", loaded);
+    CHECK(removed.size() == 1 && removed["StudioShotAPI"] == SchemaRemoval::AtNextStart, "removed from the generated files");
+    CHECK(usdcc::usd::writeSchemaLibrary(studio(), source, &error), "the source has it again");
+    removed = usdcc::usd::removedSchemas(usd, "studio", loaded);
+    CHECK(removed.size() == 1 && removed["StudioShotAPI"] == SchemaRemoval::AtNextStart,
+          "back in the source, it's still gone until that is generated");
+
+    // A plugin that ships no schema.usda has nothing removed from one.
+    QFile::remove(QString::fromStdString(source));
+    write(generated, both);
+    CHECK(usdcc::usd::removedSchemas(usd, "studio", loaded).empty(), "no source: only the generated files count");
+
+    // A generated file that doesn't parse says nothing, and raises nothing.
+    write(generated, "#usda 1.0\nclass \"StudioAsset\" {");
+    CHECK(usdcc::usd::removedSchemas(usd, "studio", loaded).empty(), "a file that doesn't parse");
+
+    // plugInfo.json gone is the plugin gone.
+    write(generated, both);
+    QFile::remove(QString::fromStdString(plugInfo));
+    CHECK(usdcc::usd::removedSchemas(usd, "studio", loaded).size() == 2, "no plugInfo.json: deleted");
+
+    // USD's own schemas have a library: none of them is asked about.
+    CHECK(usdcc::usd::removedSchemas(usdcc::usd::allSchemas()).empty(), "nothing loaded here is removed");
+}
+
+USDCC_TEST(schema_library_delete) {
+    using usdcc::usd::SchemaLibraries;
+    using usdcc::usd::SchemaLibraryDeletion;
+    using usdcc::usd::SchemaLibraryLocation;
+    QTemporaryDir user;
+    SchemaLibraries& libraries = SchemaLibraries::instance();
+    libraries.configure({}, user.path().toStdString(), 1);
+    auto write = [](const QString& path) {
+        QDir().mkpath(QFileInfo(path).path());
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) file.write("x");
+    };
+    auto same = [](const std::string& a, const QString& b) { return QFileInfo(QString::fromStdString(a)) == QFileInfo(b); };
+
+    // As New Schema Library makes it, the plugin is the library: its folder goes.
+    SchemaLibraryLocation made;
+    std::string error;
+    CHECK(libraries.create("gone", &made, &error), "a library: %s", error.c_str());
+    const QString plugin = user.filePath(QStringLiteral("gone"));
+    const QString usd = plugin + QStringLiteral("/usd");
+    std::optional<SchemaLibraryDeletion> deletion = libraries.deletionOf("gone", &error);
+    CHECK(deletion && deletion->wholePlugin && deletion->paths.size() == 1 && same(deletion->paths[0], plugin),
+          "the plugin's folder: %s", error.c_str());
+    // Generated, with what a failed Generate leaves, and the system's clutter: still only the library.
+    write(usd + QStringLiteral("/plugInfo.json"));
+    write(usd + QStringLiteral("/generatedSchema.usda"));
+    write(usd + QStringLiteral("/generatedSchema.usda.old"));
+    write(plugin + QStringLiteral("/.DS_Store"));
+    deletion = libraries.deletionOf("gone");
+    CHECK(deletion && deletion->wholePlugin, "generated, it's still the whole plugin");
+
+    // A plugin with more to it keeps the rest: only the library's files go, the source last.
+    write(plugin + QStringLiteral("/python/tool.py"));
+    deletion = libraries.deletionOf("gone");
+    CHECK(deletion && !deletion->wholePlugin && deletion->paths.size() == 4 &&
+              same(deletion->paths[0], usd + QStringLiteral("/plugInfo.json")) &&
+              same(deletion->paths[1], usd + QStringLiteral("/generatedSchema.usda")) &&
+              same(deletion->paths[2], usd + QStringLiteral("/generatedSchema.usda.old")) &&
+              same(deletion->paths[3], usd + QStringLiteral("/gone")),
+          "the library's files, and its source's folder: [%zu]", deletion ? deletion->paths.size() : 0);
+    write(usd + QStringLiteral("/gone/notes.txt"));
+    deletion = libraries.deletionOf("gone");
+    CHECK(deletion && same(deletion->paths.back(), usd + QStringLiteral("/gone/schema.usda")),
+          "a folder with more in it keeps that: only schema.usda");
+    QFile::remove(usd + QStringLiteral("/gone/notes.txt"));
+
+    // Through the caller's way of discarding; one that fails stops it there.
+    std::vector<std::string> asked;
+    CHECK(!libraries.remove("gone", &error, [&asked](const std::string& path) {
+              asked.push_back(path);
+              return false;
+          }) && asked.size() == 1 && error.find("Can't remove") != std::string::npos && error.find("plugInfo.json") != std::string::npos,
+          "a path that won't go is said: %s", error.c_str());
+    CHECK(libraries.find("gone").has_value(), "and the library is still there");
+
+    // For good.
+    CHECK(libraries.remove("gone", &error), "deletes it: %s", error.c_str());
+    CHECK(!libraries.find("gone") && !QFileInfo::exists(usd + QStringLiteral("/gone")) &&
+              !QFileInfo::exists(usd + QStringLiteral("/plugInfo.json")) && !QFileInfo::exists(usd + QStringLiteral("/generatedSchema.usda")),
+          "its files are gone");
+    CHECK(QFileInfo::exists(plugin + QStringLiteral("/python/tool.py")) && QFileInfo::exists(plugin + QStringLiteral("/usdcc-plugin.json")),
+          "the rest of the plugin stays");
+
+    // The whole plugin, and its name is free again.
+    CHECK(libraries.create("whole", &made, &error) && libraries.remove("whole", &error), "a library of its own: %s", error.c_str());
+    CHECK(!QFileInfo::exists(user.filePath(QStringLiteral("whole"))) && !libraries.find("whole"), "its folder is gone");
+    CHECK(libraries.create("whole", &made, &error) && libraries.libraries().size() == 1, "and can be made anew: %s", error.c_str());
+
+    CHECK(!libraries.remove("nope", &error) && error.find("No schema library nope") != std::string::npos, "one that isn't there: %s",
+          error.c_str());
+    libraries.configure({}, {}, 1);
 }

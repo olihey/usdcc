@@ -4,6 +4,7 @@
 
 #include <pxr/usd/usd/prim.h>
 
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -26,6 +27,16 @@ struct SchemaLibraryLocation {
     bool changed = false;      // schema.usda is newer than what was generated from it
     bool waitingForRestart = false;  // generated since this start, or not loaded
     std::string source() const { return schemaSourcePath(usdFolder, name); }
+};
+
+// What deleting a library removes: files and folders, each whole.
+struct SchemaLibraryDeletion {
+    std::vector<std::string> paths;
+    // `paths` is its plugin's folder: the plugin is nothing but the library, as
+    // New Schema Library makes it. Otherwise they are the library's own files
+    // (its source's folder, plugInfo.json, generatedSchema.usda), and the rest
+    // of the plugin stays.
+    bool wholePlugin = false;
 };
 
 class SchemaLibraries {
@@ -52,6 +63,16 @@ public:
     // ("studio/schema.usda" is studio's), for generateSchemaLibrary().
     std::vector<std::string> baseFolders(const SchemaLibraryDef& library) const;
 
+    // What deleting library `name` takes away. Nothing, with `error`, if there's
+    // no such library or it can't be written.
+    std::optional<SchemaLibraryDeletion> deletionOf(const std::string& name, std::string* error = nullptr) const;
+    // Deletes it: each of deletionOf()'s paths through `discard` (the app's moves
+    // it to the trash), or for good without one. False, with `error`, at the
+    // first that fails. USD keeps its schemas until the next start
+    // (removedSchemas() says so); a library made anew may have its name then.
+    bool remove(const std::string& name, std::string* error = nullptr,
+                const std::function<bool(const std::string& path)>& discard = {});
+
 private:
     SchemaLibraryLocation locate(const std::string& usdFolder, const std::string& name) const;
 
@@ -67,6 +88,23 @@ private:
 // removed, properties removed or changing type, fallbacks changing. Empty if
 // nothing that files would notice; a library not loaded yet changes nothing.
 std::vector<std::string> schemaLibraryChanges(const SchemaLibraryDef& library);
+
+// A codeless schema USD loaded at this start that its library's files no
+// longer have. USD can't unload one (docs/SCHEMAS.md §2, trap 1), so it stays
+// registered, as it was, until usdcc starts again.
+enum class SchemaRemoval {
+    FromSource,      // schema.usda no longer has it, the generated files still do: it stays until a Generate
+    AtNextStart,     // the generated files no longer have it: gone at the next start
+    LibraryDeleted,  // the generated files are gone themselves: gone at the next start
+};
+// Which of `schemas`, loaded from the codeless library `library` in
+// `usdFolder`, the files there no longer have. Those they still have aren't in
+// the result; a library that ships no schema.usda has none removed from it.
+std::map<std::string, SchemaRemoval> removedSchemas(const std::string& usdFolder, const std::string& library,
+                                                    const std::vector<std::string>& schemas);
+// The same for every codeless schema among `loaded` (allSchemas()), each
+// against its plugin's folder.
+std::map<std::string, SchemaRemoval> removedSchemas(const std::vector<SchemaInfo>& loaded);
 
 // Promote to Schema (docs/SCHEMAS.md §6): the prim's authored properties no
 // schema defines, as an API schema's would be (type, uniform, and the value it
