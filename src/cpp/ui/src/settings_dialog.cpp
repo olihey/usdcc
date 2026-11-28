@@ -13,6 +13,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFont>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -27,6 +28,7 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
+#include <QSet>
 #include <QSettings>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -54,15 +56,41 @@ using core::SettingType;
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
-// Categories the app knows come first, in this order; any other (a plugin's)
-// follows in the order it was defined.
-const QStringList& knownCategoryOrder() {
-    static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"), QStringLiteral("Renderers"),
-                                      QStringLiteral("Color Management"),
-                                      QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Navigation"), QStringLiteral("Notifications"),
-                                      QStringLiteral("Python"), QStringLiteral("USD")};
-    return order;
+// The tree's headings and the categories the app knows under each, in order. Any
+// other category (a plugin's) is listed under "Other", alphabetically.
+struct Heading {
+    const char* title;
+    QStringList categories;
+};
+
+const std::vector<Heading>& headings() {
+    static const std::vector<Heading> list = {
+        {QT_TRANSLATE_NOOP("SettingsDialog", "General"),
+         {QStringLiteral("Appearance"), QStringLiteral("Files"), QStringLiteral("Shortcuts"),
+          QStringLiteral("Navigation"), QStringLiteral("Notifications"), QStringLiteral("Updates")}},
+        {QT_TRANSLATE_NOOP("SettingsDialog", "Viewport & Rendering"),
+         {QStringLiteral("Viewport"), QStringLiteral("Materials"), QStringLiteral("Color Management"),
+          QStringLiteral("Renderers"), QStringLiteral("Final Render"), QStringLiteral("RTX"), QStringLiteral("Physics")}},
+        {QT_TRANSLATE_NOOP("SettingsDialog", "Pipeline"),
+         {QStringLiteral("Tools"), QStringLiteral("Validation"), QStringLiteral("Assets"), QStringLiteral("USD"),
+          QStringLiteral("Python"), QStringLiteral("Plugins")}},
+        {QT_TRANSLATE_NOOP("SettingsDialog", "Collaboration"), {QStringLiteral("Peers")}},
+    };
+    return list;
 }
+
+const char* const kOtherHeading = QT_TRANSLATE_NOOP("SettingsDialog", "Other");
+
+// A category lists its groups in the tree only from this many: a page of one or two
+// groups is short enough to see without them.
+constexpr int kListedGroups = 3;
+
+// What a tree item is (Qt::UserRole), and a category's page (kPageRole).
+enum ItemKind { HeadingItem = 0, CategoryItem = 1, GroupItem = 2 };
+constexpr int kKindRole = Qt::UserRole;
+constexpr int kPageRole = Qt::UserRole + 1;
+
+ItemKind kindOf(const QTreeWidgetItem* item) { return ItemKind(item->data(0, kKindRole).toInt()); }
 
 QString valueText(const core::SettingValue& value) {
     if (const bool* b = std::get_if<bool>(&value)) return *b ? QStringLiteral("on") : QStringLiteral("off");
@@ -210,9 +238,23 @@ QList<CategorySection*> groupSections(const QScrollArea* page) {
     return sections;
 }
 
-// The category a tree item belongs to (its own when it is one).
+// The category a tree item belongs to (its own when it is one); none for a heading.
 QTreeWidgetItem* categoryItem(QTreeWidgetItem* item) {
-    return item && item->parent() ? item->parent() : item;
+    if (!item) return nullptr;
+    switch (kindOf(item)) {
+    case HeadingItem: return nullptr;
+    case GroupItem: return item->parent();
+    case CategoryItem: break;
+    }
+    return item;
+}
+
+// Every one of `words` (lower case) is in `text`.
+bool matches(const QString& text, const QStringList& words) {
+    for (const QString& word : words) {
+        if (!text.contains(word)) return false;
+    }
+    return true;
 }
 
 QIcon swatch(const QColor& color) {
@@ -524,6 +566,13 @@ SettingsDialog::SettingsDialog(QWidget* parent, core::Settings& settings) : QDia
     setWindowTitle(tr("Settings"));
     resize(scaled::size(760, 520));
 
+    m_search = new QLineEdit(this);
+    m_search->setObjectName(QStringLiteral("settingsSearch"));
+    m_search->setPlaceholderText(tr("Search settings"));
+    m_search->setClearButtonEnabled(true);
+    scaled::fixedWidth(m_search, 190);
+    connect(m_search, &QLineEdit::textChanged, this, [this]() { applyFilter(); });
+
     m_categories = new QTreeWidget(this);
     m_categories->setObjectName(QStringLiteral("settingsCategories"));
     m_categories->setHeaderHidden(true);
@@ -535,21 +584,30 @@ SettingsDialog::SettingsDialog(QWidget* parent, core::Settings& settings) : QDia
     connect(m_categories, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item) {
         QTreeWidgetItem* category = categoryItem(item);
         if (!category) return;
-        const int index = m_categories->indexOfTopLevelItem(category);
+        const int index = category->data(0, kPageRole).toInt();
         m_pages->setCurrentIndex(index);
+        if (m_search->text().trimmed().isEmpty()) expandOnly(category);
         scrollPageTo(index, item == category ? QString() : item->text(0));
     });
-    // Remembered so a rebuild (a plugin defining settings) keeps them folded.
-    connect(m_categories, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* item) {
-        if (!m_collapsed.contains(item->text(0))) m_collapsed << item->text(0);
-    });
-    connect(m_categories, &QTreeWidget::itemExpanded, this,
-            [this](QTreeWidgetItem* item) { m_collapsed.removeAll(item->text(0)); });
+
+    m_noMatches = new QLabel(tr("No settings match the search."), this);
+    m_noMatches->setObjectName(QStringLiteral("propertyNote"));
+    m_noMatches->setAlignment(Qt::AlignCenter);
+    m_noMatches->hide();
+
+    auto* left = new QVBoxLayout;
+    scaled::spacing(left, 6);
+    left->addWidget(m_search);
+    left->addWidget(m_categories, 1);
+    auto* right = new QVBoxLayout;
+    right->setSpacing(0);
+    right->addWidget(m_pages, 1);
+    right->addWidget(m_noMatches, 1);
 
     auto* body = new QHBoxLayout;
     scaled::spacing(body, 12);
-    body->addWidget(m_categories);
-    body->addWidget(m_pages, 1);
+    body->addLayout(left);
+    body->addLayout(right, 1);
 
     m_resetPage = new QPushButton(tr("Reset Page to Defaults"), this);
     // Not the default button: Enter must never reset a page.
@@ -591,6 +649,12 @@ void SettingsDialog::keyPressEvent(QKeyEvent* event) {
         event->accept();
         return;
     }
+    // Escape clears a search before it closes the dialog.
+    if (event->key() == Qt::Key_Escape && !m_search->text().isEmpty()) {
+        m_search->clear();
+        event->accept();
+        return;
+    }
     QDialog::keyPressEvent(event);
 }
 
@@ -618,8 +682,15 @@ SettingsDialog* SettingsDialog::showDialog(QWidget* parent) {
 
 QStringList SettingsDialog::categories() const {
     QStringList result;
-    for (int row = 0; row < m_categories->topLevelItemCount(); ++row) result << m_categories->topLevelItem(row)->text(0);
+    for (const QTreeWidgetItem* item : m_categoryItems) result << item->text(0);
     return result;
+}
+
+QString SettingsDialog::headingOf(const QString& category) {
+    for (const Heading& heading : headings()) {
+        if (heading.categories.contains(category)) return tr(heading.title);
+    }
+    return tr(kOtherHeading);
 }
 
 QString SettingsDialog::currentCategory() const {
@@ -629,24 +700,42 @@ QString SettingsDialog::currentCategory() const {
 
 QString SettingsDialog::currentGroup() const {
     const QTreeWidgetItem* item = m_categories->currentItem();
-    return item && item->parent() ? item->text(0) : QString();
+    return item && kindOf(item) == GroupItem ? item->text(0) : QString();
+}
+
+QString SettingsDialog::filterText() const { return m_search->text(); }
+
+void SettingsDialog::setFilterText(const QString& text) { m_search->setText(text); }
+
+QTreeWidgetItem* SettingsDialog::categoryItemAt(int index) const {
+    return index >= 0 && index < int(m_categoryItems.size()) ? m_categoryItems[std::size_t(index)] : nullptr;
+}
+
+void SettingsDialog::expandOnly(QTreeWidgetItem* category) {
+    for (QTreeWidgetItem* item : m_categoryItems) {
+        if (item->childCount() > 0) item->setExpanded(item == category);
+    }
 }
 
 bool SettingsDialog::showCategory(const QString& category, const QString& group) {
-    const QList<QTreeWidgetItem*> items = m_categories->findItems(category, Qt::MatchExactly);
-    if (items.isEmpty()) return false;
-    QTreeWidgetItem* const top = items.front();
+    QTreeWidgetItem* top = nullptr;
+    for (QTreeWidgetItem* item : m_categoryItems) {
+        if (item->text(0) == category) top = item;
+    }
+    if (!top) return false;
+    // A page the search hides is still shown when asked for by name.
+    if (top->isHidden()) m_search->clear();
     QTreeWidgetItem* target = top;
     for (int i = 0; !group.isEmpty() && i < top->childCount(); ++i) {
-        if (top->child(i)->text(0) == group) target = top->child(i);
+        if (top->child(i)->text(0) == group && !top->child(i)->isHidden()) target = top->child(i);
     }
-    if (target->parent()) target->parent()->setExpanded(true);
+    const int index = top->data(0, kPageRole).toInt();
     if (target == m_categories->currentItem()) {
-        scrollPageTo(m_categories->indexOfTopLevelItem(top), group);
+        scrollPageTo(index, group);
     } else {
         m_categories->setCurrentItem(target);
-        // A group with no branch of its own (the page's only one) is still scrolled to.
-        if (target == top && !group.isEmpty()) scrollPageTo(m_categories->indexOfTopLevelItem(target), group);
+        // A group with no branch of its own (a short page's) is still scrolled to.
+        if (target == top && !group.isEmpty()) scrollPageTo(index, group);
     }
     return true;
 }
@@ -658,7 +747,7 @@ void SettingsDialog::scrollPageTo(int index, const QString& group) {
     for (CategorySection* section : groupSections(scroll)) {
         if (!group.isEmpty() && section->property(kGroupProperty).toString() == group && section->isCollapsed()) {
             section->setCollapsed(false);
-            storeCollapsed(m_categories->topLevelItem(index)->text(0), group, false);
+            storeCollapsed(categoryItemAt(index)->text(0), group, false);
         }
     }
     const auto apply = [this, scroll, group]() {
@@ -685,14 +774,14 @@ void SettingsDialog::scrollPageTo(int index, const QString& group) {
 
 void SettingsDialog::followScroll(int index) {
     if (m_scrolling || index != m_pages->currentIndex()) return;
-    QTreeWidgetItem* category = m_categories->topLevelItem(index);
+    QTreeWidgetItem* category = categoryItemAt(index);
     auto* scroll = qobject_cast<QScrollArea*>(m_pages->widget(index));
     if (!category || category->childCount() == 0 || !category->isExpanded() || !scroll || !scroll->widget()) return;
     // The last section starting at or above the top of the view; the category above the first.
     const int top = scroll->verticalScrollBar()->value() + scaled::pixels(12);
     QString group;
     for (const CategorySection* section : groupSections(scroll)) {
-        if (section->y() <= top) group = section->property(kGroupProperty).toString();
+        if (section->isVisible() && section->y() <= top) group = section->property(kGroupProperty).toString();
     }
     QTreeWidgetItem* target = category;
     for (int i = 0; !group.isEmpty() && i < category->childCount(); ++i) {
@@ -718,43 +807,157 @@ void SettingsDialog::rebuild() {
     const QString current = currentCategory();
     const QString group = currentGroup();
 
-    QStringList categories;
-    for (const QString& known : knownCategoryOrder()) {
-        if (!m_settings.definitions(known.toStdString()).empty()) categories << known;
+    // The categories under each heading: the known ones in their order, then the others
+    // alphabetically under the last.
+    std::vector<std::pair<QString, QStringList>> listed;
+    QStringList known;
+    for (const Heading& heading : headings()) {
+        QStringList categories;
+        for (const QString& category : heading.categories) {
+            if (!m_settings.definitions(category.toStdString()).empty()) categories << category;
+        }
+        known << heading.categories;
+        listed.emplace_back(tr(heading.title), categories);
     }
+    QStringList others;
     for (const std::string& category : m_settings.categories()) {
-        if (!categories.contains(qs(category))) categories << qs(category);
+        if (!known.contains(qs(category))) others << qs(category);
     }
+    std::sort(others.begin(), others.end(),
+              [](const QString& a, const QString& b) { return QString::localeAwareCompare(a, b) < 0; });
+    listed.emplace_back(tr(kOtherHeading), others);
 
     const QSignalBlocker block(m_categories);
     m_categories->clear();
+    m_categoryItems.clear();
+    m_rows.clear();
     while (m_pages->count() > 0) {
         QWidget* page = m_pages->widget(0);
         m_pages->removeWidget(page);
         delete page;
     }
-    for (const QString& category : categories) {
-        auto* item = new QTreeWidgetItem(m_categories, {category});
-        QStringList groups;
-        m_pages->addWidget(buildPage(category.toStdString(), groups));
-        // A single group is the whole page: it gets no branch of its own.
-        if (groups.size() > 1) {
-            for (const QString& name : groups) new QTreeWidgetItem(item, {name});
+    for (const auto& [title, categories] : listed) {
+        if (categories.isEmpty()) continue;
+        // A heading is a label, not a place: it can't be picked, and the arrow keys pass it.
+        auto* heading = new QTreeWidgetItem(m_categories, {title});
+        heading->setData(0, kKindRole, HeadingItem);
+        heading->setFlags(Qt::NoItemFlags);
+        QFont font = m_categories->font();
+        font.setBold(true);
+        font.setCapitalization(QFont::AllUppercase);
+        font.setPointSizeF(font.pointSizeF() * 0.85);
+        heading->setFont(0, font);
+        for (const QString& category : categories) {
+            auto* item = new QTreeWidgetItem(m_categories, {category});
+            item->setData(0, kKindRole, CategoryItem);
+            item->setData(0, kPageRole, m_pages->count());
+            m_categoryItems.push_back(item);
+            QStringList groups;
+            m_pages->addWidget(buildPage(category.toStdString(), groups));
+            if (groups.size() >= kListedGroups) {
+                for (const QString& name : groups) {
+                    auto* child = new QTreeWidgetItem(item, {name});
+                    child->setData(0, kKindRole, GroupItem);
+                }
+            }
         }
-        item->setExpanded(!m_collapsed.contains(category));
     }
-    const int row = std::max(0, int(categories.indexOf(current)));
-    if (row < m_categories->topLevelItemCount()) {
-        QTreeWidgetItem* category = m_categories->topLevelItem(row);
+    const QStringList names = categories();
+    const int row = std::max(0, int(names.indexOf(current)));
+    if (QTreeWidgetItem* category = categoryItemAt(row)) {
         QTreeWidgetItem* target = category;
         for (int i = 0; !group.isEmpty() && i < category->childCount(); ++i) {
             if (category->child(i)->text(0) == group) target = category->child(i);
         }
+        expandOnly(category);
         m_categories->setCurrentItem(target);
         m_pages->setCurrentIndex(row);
         if (target != category) scrollPageTo(row, group);
     }
-    m_resetPage->setEnabled(m_categories->topLevelItemCount() > 0);
+    applyFilter();
+}
+
+void SettingsDialog::applyFilter() {
+    const QStringList words = m_search->text().toLower().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const bool filtering = !words.isEmpty();
+
+    // The rows, and from them which groups and pages have something to show.
+    std::vector<bool> pageShown(m_categoryItems.size(), false);
+    std::vector<QSet<QString>> groupsShown(m_categoryItems.size());
+    for (FilterRow& row : m_rows) {
+        const bool shown = matches(row.text, words);
+        *row.shown = shown;
+        for (QWidget* widget : row.widgets) widget->setVisible(shown);
+        row.refresh();  // the widgets that also come and go with the value
+        if (shown) {
+            pageShown[std::size_t(row.page)] = true;
+            groupsShown[std::size_t(row.page)].insert(row.group);
+        }
+    }
+    for (std::size_t page = 0; page < m_categoryItems.size(); ++page) {
+        auto* scroll = qobject_cast<QScrollArea*>(m_pages->widget(int(page)));
+        if (!scroll || !scroll->widget()) continue;
+        for (CategorySection* section : groupSections(scroll)) {
+            const bool shown = groupsShown[page].contains(section->property(kGroupProperty).toString());
+            section->setVisible(shown);
+            // What the search found is shown, folded group or not.
+            section->setForceExpanded(filtering && shown);
+        }
+        // The settings without a group sit above the sections.
+        if (QWidget* ungrouped = scroll->widget()->findChild<QWidget*>(QStringLiteral("settingsUngrouped"),
+                                                                        Qt::FindDirectChildrenOnly)) {
+            ungrouped->setVisible(groupsShown[page].contains(QString()));
+        }
+    }
+
+    // The tree: the categories with something to show, their groups that have, and the
+    // headings over them.
+    const QSignalBlocker block(m_categories);
+    QTreeWidgetItem* heading = nullptr;
+    bool headingUsed = false;
+    const auto closeHeading = [&]() {
+        if (heading) heading->setHidden(!headingUsed);
+    };
+    for (int i = 0; i < m_categories->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_categories->topLevelItem(i);
+        if (kindOf(item) == HeadingItem) {
+            closeHeading();
+            heading = item;
+            headingUsed = false;
+            continue;
+        }
+        const std::size_t page = std::size_t(item->data(0, kPageRole).toInt());
+        const bool shown = pageShown[page];
+        item->setHidden(!shown);
+        headingUsed = headingUsed || shown;
+        for (int c = 0; c < item->childCount(); ++c) {
+            item->child(c)->setHidden(!groupsShown[page].contains(item->child(c)->text(0)));
+        }
+    }
+    closeHeading();
+
+    // Stay on the page shown if it still has something; otherwise the first that has.
+    QTreeWidgetItem* current = categoryItem(m_categories->currentItem());
+    if (current && current->isHidden()) current = nullptr;
+    for (std::size_t i = 0; !current && i < m_categoryItems.size(); ++i) {
+        if (!m_categoryItems[i]->isHidden()) current = m_categoryItems[i];
+    }
+    // A hidden group picked gives way to its category.
+    if (current && (!m_categories->currentItem() || m_categories->currentItem()->isHidden())) {
+        m_categories->setCurrentItem(current);
+    }
+    if (current) m_pages->setCurrentIndex(current->data(0, kPageRole).toInt());
+    if (filtering) {
+        // Every category the search found lists where in it.
+        for (QTreeWidgetItem* item : m_categoryItems) {
+            if (item->childCount() > 0) item->setExpanded(!item->isHidden());
+        }
+    } else {
+        expandOnly(current);
+    }
+    m_pages->setVisible(current != nullptr);
+    m_noMatches->setVisible(current == nullptr);
+    m_resetPage->setEnabled(current != nullptr);
 }
 
 QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& groupNames) {
@@ -783,6 +986,7 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
         // settings without a group sit above the sections, unfolded.
         auto* rows = new QWidget(content);
         if (group.empty()) {
+            rows->setObjectName(QStringLiteral("settingsUngrouped"));
             layout->addWidget(rows);
         } else {
             const QString name = qs(group);
@@ -851,8 +1055,9 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
                 conflict->setProperty("settingKey", qs(key));
                 grid->addWidget(conflict, row++, 1);
             }
+            QLabel* description = nullptr;
             if (!definition->description.empty()) {
-                auto* description = new QLabel(qs(definition->description), content);
+                description = new QLabel(qs(definition->description), content);
                 description->setObjectName(QStringLiteral("propertyNote"));
                 description->setWordWrap(true);
                 grid->addWidget(description, row++, 1, 1, 2);
@@ -865,10 +1070,17 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
                 grid->addWidget(nextStart, row++, 1, 1, 2);
             }
 
-            const auto refresh = [this, key, show = editor.refresh, reset, conflict, nextStart]() {
+            // Whether the search shows the row: the widgets below come and go with the
+            // value too, and are only shown while both say so.
+            auto shown = std::make_shared<bool>(true);
+            const auto refresh = [this, key, show = editor.refresh, reset, conflict, nextStart, shown]() {
                 show();
-                reset->setVisible(!m_settings.isDefault(key));
-                if (nextStart) nextStart->setVisible(m_settings.isPendingNextStart(key));
+                // A row the search hides keeps no room for its Reset button.
+                QSizePolicy policy = reset->sizePolicy();
+                policy.setRetainSizeWhenHidden(*shown);
+                reset->setSizePolicy(policy);
+                reset->setVisible(*shown && !m_settings.isDefault(key));
+                if (nextStart) nextStart->setVisible(*shown && m_settings.isPendingNextStart(key));
                 if (conflict) {
                     const SettingDefinition* current = m_settings.definition(key);
                     QStringList others;
@@ -878,7 +1090,7 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
                         others = shortcutConflicts(m_settings, *current);
                     }
                     conflict->setText(others.isEmpty() ? QString() : tr("Also used by: %1").arg(others.join(", ")));
-                    conflict->setVisible(!others.isEmpty());
+                    conflict->setVisible(*shown && !others.isEmpty());
                 }
             };
             // What was pressed and refused, until the next press or change.
@@ -892,6 +1104,17 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
                     }
                 };
             }
+            FilterRow filterRow;
+            filterRow.page = m_pages->count();  // the page's index once added
+            filterRow.group = qs(group);
+            filterRow.text = QStringList({label->text(), qs(key), qs(definition->description), qs(group), qs(category)})
+                                 .join(QLatin1Char('\n'))
+                                 .toLower();
+            filterRow.shown = shown;
+            filterRow.refresh = refresh;
+            filterRow.widgets = {label, editor.widget};
+            if (description) filterRow.widgets.push_back(description);
+            m_rows.push_back(std::move(filterRow));
             // Shortcut conflicts depend on the other shortcuts too.
             if (conflict) {
                 onSettingsChanged(label, [refresh](const std::string&) { refresh(); }, m_settings);
