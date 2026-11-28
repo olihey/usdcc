@@ -12,7 +12,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Build native RTX and tests
@@ -35,7 +35,7 @@ jobs:
           python tools/deploy.py build/rtx-package --bundle-rtx-runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python tools/ci/rtx_smoke_test.py --deploy build/rtx-package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: native-rtx-validation

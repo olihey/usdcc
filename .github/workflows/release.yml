@@ -83,7 +83,7 @@ jobs:
           "archive=usdcc-$version-windows-${{ matrix.arch }}.7z" >> $env:GITHUB_OUTPUT
           "symbols=usdcc-$version-windows-${{ matrix.arch }}-symbols.7z" >> $env:GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -99,7 +99,7 @@ jobs:
       # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: arm64
@@ -112,7 +112,7 @@ jobs:
       # exact interpreter, and usdcc embeds the same one.
       - name: Set up Python
         if: matrix.arch == 'x64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
           architecture: x64
@@ -181,7 +181,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -199,7 +199,7 @@ jobs:
 
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -328,7 +328,7 @@ jobs:
 
       - name: Keep the installer with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.name }}
           path: ${{ runner.temp }}/velopack/*Setup.exe
@@ -377,7 +377,7 @@ jobs:
           echo "tarball=usdcc-$version-linux-${{ matrix.arch }}.tar.xz" >> "$GITHUB_OUTPUT"
           echo "symbols=usdcc-$version-linux-${{ matrix.arch }}-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -409,7 +409,7 @@ jobs:
         run: python3 tools/ci/usd_asset.py --github-output
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
 
@@ -447,7 +447,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -468,7 +468,7 @@ jobs:
       # info goes into the symbols folder, laid out as the deploy is.
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -523,7 +523,7 @@ jobs:
 
       - name: Keep the archive with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tag.outputs.tarball }}
           path: |
@@ -546,7 +546,7 @@ jobs:
       # and the feed by the channel.
       # .NET was removed above, for the space.
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -582,7 +582,7 @@ jobs:
 
       - name: Keep the AppImage with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appimage-${{ matrix.name }}
           path: ${{ runner.temp }}/velopack/*.AppImage
@@ -631,7 +631,7 @@ jobs:
           echo "dmg=usdcc-$version-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
           echo "symbols=usdcc-$version-macos-arm64-symbols.tar.xz" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A dry run builds the branch it was run on.
           ref: ${{ inputs.dry_run && github.sha || format('refs/tags/{0}', env.TAG) }}
@@ -685,7 +685,7 @@ jobs:
         run: python tools/ci/vcpkg_cache.py --access read
 
       - name: Restore the vcpkg cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.vcpkg.outputs.dir }}
           key: ${{ steps.vcpkg.outputs.key }}
@@ -701,7 +701,7 @@ jobs:
 
       # For the VS Code extension, which the deploy has (docs/VSCODE.md).
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -730,7 +730,7 @@ jobs:
       # The update packages (docs/UPDATES.md section 9). vpk puts its updater into usdcc.app and
       # signs the bundle again, so the app in the disk image is the one it puts out.
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -807,7 +807,7 @@ jobs:
 
       - name: Keep the disk image with the run
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.tag.outputs.dmg }}
           path: |

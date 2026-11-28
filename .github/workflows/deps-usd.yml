@@ -66,14 +66,14 @@ jobs:
       WORK: C:\b
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The tools run on the image's own Python before setup-python; on the Arm
       # image that has to be an arm64 one, or they'd name the x64 asset.
       # Any arm64 Python 3.9+ does; the pinned one is set up after (see below).
       - name: Set up Python for the tools
         if: matrix.arch == 'arm64'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: arm64
@@ -99,7 +99,7 @@ jobs:
       - name: Set up Python
         if: matrix.arch == 'x64' && steps.published.outputs.found != 'true'
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
           architecture: x64
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload the build log
         if: failure() && steps.published.outputs.found != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.log }}
           path: |
@@ -297,7 +297,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the asset
         id: asset
@@ -334,7 +334,7 @@ jobs:
 
       - name: Set up Python
         if: steps.published.outputs.found != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ steps.asset.outputs.python }}
 
@@ -349,7 +349,7 @@ jobs:
 
       - name: Upload the build log
         if: failure() && steps.published.outputs.found != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build_usd-log-linux-${{ matrix.arch }}
           path: |
@@ -410,7 +410,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the asset
         id: asset
@@ -454,7 +454,7 @@ jobs:
 
       - name: Upload the build log
         if: failure() && steps.published.outputs.found != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build_usd-log-macos
           path: |
