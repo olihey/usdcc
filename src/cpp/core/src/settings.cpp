@@ -1,5 +1,7 @@
 #include "usdcc/core/settings.h"
 
+#include "usdcc/core/mouse_binding.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -11,7 +13,7 @@ namespace usdcc::core {
 
 namespace {
 
-constexpr std::array<std::pair<SettingType, std::string_view>, 10> kTypeNames = {{
+constexpr std::array<std::pair<SettingType, std::string_view>, 11> kTypeNames = {{
     {SettingType::Bool, "bool"},
     {SettingType::Int, "int"},
     {SettingType::Float, "float"},
@@ -22,6 +24,7 @@ constexpr std::array<std::pair<SettingType, std::string_view>, 10> kTypeNames = 
     {SettingType::Folder, "folder"},
     {SettingType::FolderList, "folders"},
     {SettingType::Action, "action"},
+    {SettingType::MouseBinding, "mouse"},
 }};
 
 bool hasRange(const SettingDefinition& definition) { return definition.maximum > definition.minimum; }
@@ -155,6 +158,13 @@ std::optional<SettingValue> Settings::normalized(const SettingDefinition& defini
             }
         }
         return std::nullopt;
+    case SettingType::MouseBinding:
+        if (const std::string* s = std::get_if<std::string>(&value)) {
+            if (const auto binding = parseMouseBinding(*s)) {
+                return mouseBindingText(*binding);
+            }
+        }
+        return std::nullopt;
     }
     return std::nullopt;
 }
@@ -176,7 +186,9 @@ SettingValue Settings::load(const SettingDefinition& definition) {
     if (definition.type == SettingType::Action) return definition.defaultValue;
     if (auto stored = m_backend->read(definition)) {
         if (auto value = normalized(definition, *stored)) {
-            return std::move(*value);
+            if (!definition.refuses || definition.refuses(*value).empty()) {
+                return std::move(*value);
+            }
         }
     }
     return definition.defaultValue;
@@ -211,6 +223,9 @@ bool Settings::define(SettingDefinition definition) {
 
     if (Entry* entry = find(key)) {
         auto kept = normalized(definition, entry->value);
+        if (kept && definition.refuses && *kept != definition.defaultValue && !definition.refuses(*kept).empty()) {
+            kept.reset();
+        }
         entry->definition = std::move(definition);
         if (kept) {
             entry->value = std::move(*kept);
@@ -285,6 +300,11 @@ bool Settings::setValue(std::string_view key, const SettingValue& value) {
     }
     if (*checked == entry->value) {
         return true;
+    }
+    // The default is always allowed: reset() restores it without asking.
+    if (entry->definition.refuses && *checked != entry->definition.defaultValue &&
+        !entry->definition.refuses(*checked).empty()) {
+        return false;
     }
     entry->value = std::move(*checked);
     m_backend->write(entry->definition, entry->value);

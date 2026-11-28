@@ -10,6 +10,7 @@ add_library(usdcc_ui SHARED
     include/usdcc/ui/log_model.h
     include/usdcc/ui/log_panel.h
     include/usdcc/ui/main_window.h
+    include/usdcc/ui/navigation.h
     include/usdcc/ui/panel_icon_button.h
     include/usdcc/ui/options_menu_view.h
     include/usdcc/ui/panel_menu_button.h
@@ -47,6 +48,7 @@ add_library(usdcc_ui SHARED
     src/log_model.cpp
     src/log_panel.cpp
     src/main_window.cpp
+    src/navigation.cpp
     src/panel_icon_button.cpp
     src/options_menu_view.cpp
     src/panel_menu_button.cpp

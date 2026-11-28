@@ -340,50 +340,77 @@ void UvCanvas::paintEvent(QPaintEvent*) {
 }
 
 void UvCanvas::mousePressEvent(QMouseEvent* event) {
-    m_pressAt = m_lastAt = event->position();
-    m_panning = event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && event->modifiers() & Qt::AltModifier);
+    using usdcc::ui::NavigationAction;
     event->accept();
+    // One drag at a time: another button during it isn't another.
+    if (m_navigation.dragging() != NavigationAction::None && (event->buttons() & ~event->button())) return;
+    m_navigation.cancel();
+    m_pressAt = m_lastAt = event->position();
+    // What Settings > Navigation binds pans and zooms. A left drag pans too (below): it
+    // has nothing else to do here.
+    m_navigation.press(event);
 }
 
 void UvCanvas::mouseMoveEvent(QMouseEvent* event) {
+    using usdcc::ui::NavigationAction;
     const QPointF at = event->position();
-    if (event->buttons() & (Qt::LeftButton | Qt::MiddleButton)) {
-        // A drag pans, once it's more than a nudge.
-        if (!m_panning && (at - m_pressAt).manhattanLength() > 4) m_panning = true;
-        if (m_panning) {
-            m_origin += at - m_lastAt;
-            m_lastAt = at;
-            m_moved = true;
-            update();
-            return;
-        }
+    // A left drag pans, once it's more than a nudge.
+    if (m_navigation.dragging() == NavigationAction::None && (event->buttons() & Qt::LeftButton) &&
+        (at - m_pressAt).manhattanLength() > 4) {
+        m_navigation.begin(NavigationAction::Pan, Qt::LeftButton, m_lastAt);
+    }
+    if (m_navigation.dragging() != NavigationAction::None) {
+        navigate(m_navigation.move(event));
+        m_lastAt = at;
+        return;
     }
     m_lastAt = at;
     m_view->hoverAt(toUv(at));
 }
 
 void UvCanvas::mouseReleaseEvent(QMouseEvent* event) {
-    if (!m_panning && event->button() == Qt::LeftButton) {
+    const bool navigated = m_navigation.release(event);
+    if (!navigated && event->button() == Qt::LeftButton) {
         m_view->pickAt(toUv(event->position()), event->modifiers() & Qt::ShiftModifier, event->modifiers() & Qt::ControlModifier);
     }
-    m_panning = false;
 }
 
 void UvCanvas::wheelEvent(QWheelEvent* event) {
-    const double factor = std::pow(1.0015, event->angleDelta().y());
-    const QPointF at = event->position();
-    const GfVec2f uv = toUv(at);
-    m_scale = std::clamp(m_scale * factor, 1e-3, 1e7);
-    // The point under the cursor stays put.
-    m_origin = QPointF(at.x() - uv[0] * m_scale, at.y() + uv[1] * m_scale);
-    m_fitted = true;
-    m_moved = true;
-    update();
+    navigate(m_navigation.wheel(event));
     event->accept();
 }
 
+bool UvCanvas::event(QEvent* event) {
+    // The key that frames is this view's while it has the focus.
+    if (usdcc::ui::claimFrameKey(event)) return true;
+    // A pinch zooms, as the wheel does.
+    if (const usdcc::ui::NavigationStep step = m_navigation.gesture(event)) {
+        navigate(step);
+        return true;
+    }
+    return QWidget::event(event);
+}
+
+void UvCanvas::navigate(const usdcc::ui::NavigationStep& step) {
+    switch (step.action) {
+        case usdcc::ui::NavigationAction::Pan: m_origin += step.delta; break;
+        case usdcc::ui::NavigationAction::Zoom: {
+            if (step.zoom == 0.0) return;
+            const GfVec2f uv = toUv(step.anchor);
+            m_scale = std::clamp(m_scale / usdcc::ui::navigationZoomFactor(step.zoom), 1e-3, 1e7);
+            // The point under the cursor, or the one the drag began on, stays put.
+            m_origin = QPointF(step.anchor.x() - uv[0] * m_scale, step.anchor.y() + uv[1] * m_scale);
+            m_fitted = true;
+            break;
+        }
+        default: return;
+    }
+    m_moved = true;
+    update();
+}
+
 void UvCanvas::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_F) {
+    if (usdcc::ui::isFrameKey(event)) {
         fit();
         return;
     }

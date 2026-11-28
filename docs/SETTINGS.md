@@ -29,21 +29,23 @@ and lives in its shared library, so the exe and the Python modules see one insta
 | Field | Meaning |
 |---|---|
 | `key` | `"Group/name"`: also where it is saved (`Appearance/accentColor`, `Shortcuts/tools.move`) |
-| `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Python`, `USD` (docs/USD_RUNTIME.md §3), or a plugin's own |
+| `category` | Its page in the dialog: `Appearance`, `Viewport`, `Tools`, `Shortcuts`, `Navigation` ([NAVIGATION.md](NAVIGATION.md)), `Python`, `USD` (docs/USD_RUNTIME.md §3), or a plugin's own |
 | `group` | A heading on that page (`Theme`, `Interface`, `Tools`) |
 | `label`, `description` | What the dialog shows |
-| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none), `FolderList` (paths separated by `;`, in order; `""` for none), `Action` (a button; the default value is its text, nothing is stored, and the definition's `action` runs on a click: Settings > Assets > Clear Cache) |
+| `type` | `Bool`, `Int`, `Float`, `String`, `Choice`, `Color` (`"#rrggbb"`), `Shortcut` (`QKeySequence` portable text such as `"W"` or `"Ctrl+Shift+S"`; `""` for none), `Folder` (a path; `""` for none), `FolderList` (paths separated by `;`, in order; `""` for none), `Action` (a button; the default value is its text, nothing is stored, and the definition's `action` runs on a click: Settings > Assets > Clear Cache), `MouseBinding` (a mouse button with modifiers, `"Alt+Left"` or `"Shift+Middle"`, as `usdcc/core/mouse_binding.h` writes it; `""` for none: Settings > Navigation) |
 | `defaultValue` | A `SettingValue`: `std::variant<bool, int, double, std::string>` |
 | `minimum`, `maximum` | An Int or Float range, used when `maximum > minimum` |
 | `choices` | A Choice setting's values |
 | `fixedFolders` | A FolderList's folders that are always used: listed greyed before the value's (or after, with `after`), with a label, not part of the value and not removable (Settings > Plugins > Plugin folders) |
 | `appliesAtNextStart` | A change is saved at once but used from the next start. The dialog says so while the value differs from the one the session started with |
 | `action` | An Action's `std::function<void()>`, run on the UI thread |
+| `refuses` | Why a value that fits the type is refused all the same, `""` if it isn't: a rule the type can't say. `setValue()` then changes nothing, a stored value falls back to the default, and the dialog shows the reason (a left drag without Alt as a navigation binding) |
 
 **Values.**
 - `define()` loads the saved value. If none is saved, or the saved value no longer fits
   the definition, the setting gets its default.
-- `setValue()` checks the type, range, choices and color format. It writes through to the
+- `setValue()` checks the type, range, choices, color and mouse binding format, and the
+  definition's `refuses`. It writes through to the
   backend and fires `changed(key)`. An unchanged value fires nothing.
 - `reset()` restores the default and removes the key from the file, so a later change of
   the default in code applies.
@@ -97,12 +99,16 @@ take them for a `bool`.
 | `Shortcuts/tools.rotate` | Shortcut | `E` | `ViewportToolBars` |
 | `Shortcuts/tools.scale` | Shortcut | `R` | `ViewportToolBars` |
 | `Shortcuts/tools.<id>` | Shortcut | none | `ViewportToolBars`, for each tool a plugin adds ([PLUGINS.md](PLUGINS.md)) |
-| `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport |
+| `Shortcuts/viewport.fitToView` | Shortcut | `F` | `ViewportViewPanel::addFitToViewAction()`: Fit to View in the active viewport. The key that frames in the curve editor, dope sheet, UV view and Material editor too, while one has the focus ([NAVIGATION.md](NAVIGATION.md) §1) |
 | `Shortcuts/viewport.fitAllViews` | Shortcut | `Shift+F` | `ViewportViewPanel::addFitAllViewsAction()`: Fit All Views, every viewport on screen ([WORKSPACES.md](WORKSPACES.md) §3.5.7) |
 | `Shortcuts/file.openStage`, `file.openStageWithOptions` | Shortcut | `Ctrl+O`, `Ctrl+Shift+O` | `main.cpp`: File > Open Stage... and Open Stage with Options... ([WORKSPACES.md](WORKSPACES.md) §8) |
 | `Shortcuts/file.saveStage` | Shortcut | `Ctrl+S` | `bindSaveStageShortcut()` (`main.cpp`): the only open stage saved, else a question which one; the Layers panel and Script Editor keep their own while focused ([LAYER_EDITOR.md](LAYER_EDITOR.md) §5) |
 | `Shortcuts/workspace.<id>` | Shortcut | none | `WorkspaceController`: switch to that workspace, one per workspace found ([WORKSPACES.md](WORKSPACES.md) §6) |
 | `Shortcuts/viewport.toggleHud` | Shortcut | none | `ViewportViewPanel::addToggleHudAction()`: the active viewport's HUD on or off |
+| `Navigation/scheme` | Choice: usdcc, Maya, Blender, 3ds Max, Custom | usdcc | `navigation.cpp`: which mouse drags orbit, pan and zoom in every view ([NAVIGATION.md](NAVIGATION.md) §3). A preset writes the five bindings below; changing one makes it Custom |
+| `Navigation/view3d.orbit`, `view3d.pan`, `view3d.zoom`, `editor2d.pan`, `editor2d.zoom` | MouseBinding | Alt+Left, Middle, Alt+Right, Middle, Alt+Right | `navigation.cpp`: the bindings in use, for 3D views and for 2D editors. The left button needs Alt, the right one a key |
+| `Navigation/zoomSpeed`, `invertZoom`, `zoomToCursor` | Float 0.1–5, Bool, Bool | 1, off, off | `navigation.cpp`: the wheel's and a zoom drag's step and direction; the wheel towards the cursor in 3D views |
+| `Navigation/trackpadScroll` | Choice: Zoom, Pan and orbit | Zoom | `navigation.cpp`: what a two-finger scroll does ([NAVIGATION.md](NAVIGATION.md) §4) |
 | `Viewport/showGrid` | Bool | on | `ViewportViewPanel`: the ground grid ([VIEWPORT_GRID.md](VIEWPORT_GRID.md)); a viewport can override it, and the next three |
 | `Viewport/gridSize`, `gridStep` | Float | 20, 1 | `ViewportViewPanel`: the grid's width and line spacing |
 | `Viewport/backgroundColor` | Color | `#1c1c1e` | `ViewportViewPanel`: the Hydra viewport's background |

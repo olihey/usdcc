@@ -9,6 +9,7 @@
 
 #include "uv_layout.h"
 
+#include "usdcc/ui/navigation.h"
 #include "usdcc/usd/primvar_views.h"
 
 #include <QHash>
@@ -71,8 +72,11 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
+    // A pan or zoom from the mouse (docs/NAVIGATION.md).
+    void navigate(const usdcc::ui::NavigationStep& step);
     void drawGrid(QPainter& painter);
     void drawBackground(QPainter& painter);
 
@@ -81,7 +85,8 @@ private:
     QPointF m_origin;      // where UV (0, 0) is
     bool m_fitted = false;  // false: fit() when the next layout comes
     bool m_moved = false;   // panned or zoomed: a new size keeps the view where it is
-    bool m_panning = false;
+    // The drag that pans or zooms: Settings > Navigation's, or a left drag, which pans.
+    usdcc::ui::NavigationInput m_navigation{usdcc::ui::NavigationSpace::Editor2D};
     QPointF m_pressAt, m_lastAt;
 
     friend class UvView;

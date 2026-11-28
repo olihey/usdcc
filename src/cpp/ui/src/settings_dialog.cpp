@@ -3,6 +3,7 @@
 
 #include "usdcc/ui/app_settings.h"
 #include "usdcc/ui/category_section.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/scaled_metrics.h"
 #include "usdcc/ui/settings.h"
 
@@ -21,6 +22,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPixmap>
 #include <QPointer>
@@ -57,7 +59,7 @@ QString qs(const std::string& text) { return QString::fromStdString(text); }
 const QStringList& knownCategoryOrder() {
     static const QStringList order = {QStringLiteral("Appearance"), QStringLiteral("Viewport"), QStringLiteral("Renderers"),
                                       QStringLiteral("Color Management"),
-                                      QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Notifications"),
+                                      QStringLiteral("Tools"), QStringLiteral("Shortcuts"), QStringLiteral("Navigation"), QStringLiteral("Notifications"),
                                       QStringLiteral("Python"), QStringLiteral("USD")};
     return order;
 }
@@ -83,6 +85,102 @@ QStringList shortcutConflicts(const Settings& settings, const SettingDefinition&
     }
     return labels;
 }
+
+// The other MouseBinding settings of `definition`'s group that have its binding: a drag
+// can only do one of them.
+QStringList mouseBindingConflicts(const Settings& settings, const SettingDefinition& definition) {
+    const std::string binding = settings.get<std::string>(definition.key);
+    QStringList labels;
+    if (binding.empty()) return labels;
+    for (const SettingDefinition* other : settings.definitions(definition.category)) {
+        if (other->key != definition.key && other->type == SettingType::MouseBinding &&
+            other->group == definition.group && settings.get<std::string>(other->key) == binding) {
+            labels << qs(other->label.empty() ? other->key : other->label);
+        }
+    }
+    return labels;
+}
+
+// Takes a mouse binding: a click arms it, and the next press on it, with the keys held,
+// is the binding. Escape, or the focus going elsewhere, leaves it as it was; Backspace
+// or Delete binds nothing.
+class MouseBindingEdit : public QPushButton {
+public:
+    explicit MouseBindingEdit(QWidget* parent) : QPushButton(parent) {
+        setObjectName(QStringLiteral("settingMouseBinding"));
+        setFocusPolicy(Qt::StrongFocus);
+        setAutoDefault(false);
+        showBinding();
+    }
+
+    std::function<void(const core::MouseBinding&)> captured;
+
+    void setBinding(const core::MouseBinding& binding) {
+        m_binding = binding;
+        m_armed = false;
+        showBinding();
+    }
+    bool isArmed() const { return m_armed; }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        event->accept();
+        if (!m_armed) {
+            if (event->button() != Qt::LeftButton) return;
+            m_armed = true;
+            setFocus(Qt::MouseFocusReason);
+            showBinding();
+            return;
+        }
+        m_armed = false;
+        showBinding();
+        const core::MouseBinding binding = mouseBinding(event->button(), event->modifiers());
+        if (binding.isSet() && captured) captured(binding);
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override { event->accept(); }
+    void mouseDoubleClickEvent(QMouseEvent* event) override { mousePressEvent(event); }
+    // The right button is one to bind, not a menu's.
+    void contextMenuEvent(QContextMenuEvent* event) override { event->accept(); }
+    void keyPressEvent(QKeyEvent* event) override {
+        if (m_armed && event->key() == Qt::Key_Escape) {
+            m_armed = false;
+            showBinding();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Backspace || event->key() == Qt::Key_Delete) {
+            m_armed = false;
+            showBinding();
+            if (captured) captured(core::MouseBinding{});
+            event->accept();
+            return;
+        }
+        // The modifiers are part of the press to come.
+        if (m_armed) {
+            event->accept();
+            return;
+        }
+        QPushButton::keyPressEvent(event);
+    }
+    void focusOutEvent(QFocusEvent* event) override {
+        m_armed = false;
+        showBinding();
+        QPushButton::focusOutEvent(event);
+    }
+
+private:
+    void showBinding() {
+        if (m_armed) {
+            setText(QObject::tr("Press a mouse button…"));
+        } else {
+            setText(m_binding.isSet() ? mouseBindingLabel(m_binding) : QObject::tr("None"));
+        }
+        setToolTip(QObject::tr("Click, then press the mouse button with the keys to hold. Backspace binds nothing."));
+    }
+
+    core::MouseBinding m_binding;
+    bool m_armed = false;
+};
 
 // A group's section on a page, by the group's name.
 const char* const kGroupProperty = "settingsGroup";
@@ -133,6 +231,9 @@ QIcon swatch(const QColor& color) {
 struct Editor {
     QWidget* widget = nullptr;
     std::function<void()> refresh;
+    // A MouseBinding's: called with why the definition refused what was pressed, and
+    // with nothing once a press is taken. The page sets it, to show the reason.
+    std::shared_ptr<std::function<void(const QString&)>> refused;
 };
 
 Editor makeEditor(Settings& settings, const SettingDefinition& definition, QWidget* parent) {
@@ -380,6 +481,27 @@ Editor makeEditor(Settings& settings, const SettingDefinition& definition, QWidg
                     const QSignalBlocker block(edit);
                     edit->setKeySequence(settingShortcut(key, settings));
                 }};
+    }
+    case SettingType::MouseBinding: {
+        auto* edit = new MouseBindingEdit(parent);
+        scaled::minimumWidth(edit, 140);
+        auto refused = std::make_shared<std::function<void(const QString&)>>();
+        edit->captured = [&settings, key, refused](const core::MouseBinding& binding) {
+            const std::string text = core::mouseBindingText(binding);
+            // The definition as it is now: a plugin may have defined it again.
+            const SettingDefinition* current = settings.definition(key);
+            const std::string why = current && current->refuses && core::SettingValue(text) != current->defaultValue
+                                        ? current->refuses(text)
+                                        : std::string();
+            if (*refused) (*refused)(qs(why));
+            if (why.empty()) settings.setValue(key, text);
+        };
+        return {edit,
+                [&settings, key, edit]() {
+                    edit->setBinding(
+                        core::parseMouseBinding(settings.get<std::string>(key)).value_or(core::MouseBinding{}));
+                },
+                refused};
     }
     case SettingType::Action: {
         auto* button = new QPushButton(parent);
@@ -723,7 +845,7 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
             ++row;
 
             QLabel* conflict = nullptr;
-            if (definition->type == SettingType::Shortcut) {
+            if (definition->type == SettingType::Shortcut || definition->type == SettingType::MouseBinding) {
                 conflict = new QLabel(content);
                 conflict->setObjectName(QStringLiteral("settingConflict"));
                 conflict->setProperty("settingKey", qs(key));
@@ -743,17 +865,33 @@ QWidget* SettingsDialog::buildPage(const std::string& category, QStringList& gro
                 grid->addWidget(nextStart, row++, 1, 1, 2);
             }
 
-            const auto refresh = [this, key, editor, reset, conflict, nextStart]() {
-                editor.refresh();
+            const auto refresh = [this, key, show = editor.refresh, reset, conflict, nextStart]() {
+                show();
                 reset->setVisible(!m_settings.isDefault(key));
                 if (nextStart) nextStart->setVisible(m_settings.isPendingNextStart(key));
                 if (conflict) {
                     const SettingDefinition* current = m_settings.definition(key);
-                    const QStringList others = current ? shortcutConflicts(m_settings, *current) : QStringList();
+                    QStringList others;
+                    if (current && current->type == SettingType::MouseBinding) {
+                        others = mouseBindingConflicts(m_settings, *current);
+                    } else if (current) {
+                        others = shortcutConflicts(m_settings, *current);
+                    }
                     conflict->setText(others.isEmpty() ? QString() : tr("Also used by: %1").arg(others.join(", ")));
                     conflict->setVisible(!others.isEmpty());
                 }
             };
+            // What was pressed and refused, until the next press or change.
+            if (editor.refused && conflict) {
+                *editor.refused = [conflict, refresh](const QString& why) {
+                    if (why.isEmpty()) {
+                        refresh();
+                    } else {
+                        conflict->setText(why);
+                        conflict->setVisible(true);
+                    }
+                };
+            }
             // Shortcut conflicts depend on the other shortcuts too.
             if (conflict) {
                 onSettingsChanged(label, [refresh](const std::string&) { refresh(); }, m_settings);

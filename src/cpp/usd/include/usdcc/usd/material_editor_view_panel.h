@@ -2,6 +2,7 @@
 
 #include "usdcc/core/export.h"
 #include "usdcc/core/signal.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/shade_graph.h"
 #include "usdcc/usd/stage.h"
@@ -142,6 +143,10 @@ private:
     bool pressOnPage(QPoint viewportPoint);
     bool handleKey(QKeyEvent* event, bool run);
     bool handleViewportEvent(QEvent* event);
+    // The graph's pan and zoom from the mouse (docs/NAVIGATION.md), in place of QtNodes'
+    // own wheel: true for an event that was navigation.
+    bool navigateGraph(QEvent* event);
+    void navigate(const usdcc::ui::NavigationStep& step);
     bool clickWithSelectionKeys(QMouseEvent* mouse);
     std::vector<PXR_NS::SdfPath> selectedPrims() const;
     void rebuildBackdropItems();
@@ -194,6 +199,7 @@ private:
     bool m_syncingSelection = false;
     // A Ctrl click on a node, whose move and release go no further than its press.
     bool m_swallowingClick = false;
+    usdcc::ui::NavigationInput m_navigation{usdcc::ui::NavigationSpace::Editor2D};
     // A Shift click on a node, whose release mustn't leave it the only one selected.
     bool m_keepSelectionOnRelease = false;
     usdcc::core::Signal<StageRefPtr, std::vector<PXR_NS::SdfPath>>::Connection m_selectionChanged;

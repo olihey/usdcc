@@ -46,6 +46,9 @@ enum class SettingType {
     // A button that runs the definition's `action`, such as Clear Cache. The default
     // value (std::string) is its text. Nothing is stored and there is nothing to reset.
     Action,
+    // std::string, a mouse button with modifiers as usdcc/core/mouse_binding.h writes it
+    // ("Alt+Left", "Shift+Middle"); "" = none. Stored in that form whatever was given.
+    MouseBinding,
 };
 
 // "bool", "int", "float", "string", "choice", "color", "shortcut", "folder", "folders",
@@ -82,6 +85,10 @@ struct SettingDefinition {
     bool appliesAtNextStart = false;
     // Action: what the button does, on the thread the dialog runs on.
     std::function<void()> action;
+    // Why a value that fits the type is refused all the same, for a rule the type can't
+    // say ("" when it's fine): setValue() then changes nothing, and the dialog shows the
+    // reason. Not asked about the default, which reset() always restores.
+    std::function<std::string(const SettingValue&)> refuses;
 };
 
 // Where setting values are stored. read() returns nothing for a value that
@@ -163,7 +170,8 @@ public:
     // Stores and announces a new value. Accepts an int for a Float setting and
     // a whole double for an Int one; a Color is stored in lower case. False,
     // and nothing changes, for an unknown key or a value that doesn't fit
-    // (wrong type, out of range, not one of the choices, not "#rrggbb").
+    // (wrong type, out of range, not one of the choices, not "#rrggbb", not a mouse
+    // binding, or one its definition refuses).
     USDCC_CORE_API bool setValue(std::string_view key, const SettingValue& value);
     // Back to the default, and removed from the backend so a later change of
     // the default in code applies.

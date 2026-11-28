@@ -13,6 +13,7 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/stage.h"
@@ -65,9 +66,13 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, ScaleLeft, ScaleRight, Box, Pan };
+    enum class Drag { None, Move, ScaleLeft, ScaleRight, Box, Navigate };
+    // A pan or zoom from the mouse (docs/NAVIGATION.md), of the time: the rows scroll
+    // with the tree.
+    void navigate(const usdcc::ui::NavigationStep& step);
     // A key's time as drawn while a move or scale is being dragged.
     double previewTime(double time) const;
     double rowTop(int row) const;
@@ -83,6 +88,7 @@ private:
     double m_factor = 1.0;
     double m_handleTime = 0.0;   // where the dragged handle started
     bool m_additive = false;     // Ctrl or Shift on press: the box adds to what's picked
+    usdcc::ui::NavigationInput m_navigation{usdcc::ui::NavigationSpace::Editor2D};
 };
 
 class USDCC_USD_UI_API DopeSheetViewPanel : public usdcc::ui::ViewPanel {

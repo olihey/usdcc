@@ -4,6 +4,8 @@
 #include "python_test_app.h"
 #include "test_harness.h"
 
+#include "usdcc/ui/navigation.h"
+
 #include "usdcc/core/log.h"
 #include "usdcc/scripting/app_module.h"
 #include "usdcc/scripting/python_runtime.h"
@@ -23,6 +25,7 @@
 #include <QAction>
 #include <QCoreApplication>
 #include <QJsonObject>
+#include <QMouseEvent>
 #include <QUndoStack>
 #include <QStringList>
 #include <QWheelEvent>
@@ -534,6 +537,122 @@ USDCC_TEST(viewport_navigates_by_moves) {
     CHECK(window->cameraState().distance == state.distance && window->cameraState().yaw == state.yaw,
           "panning keeps the distance and the way it looks");
     CHECK(changes >= 3, "each move says the camera changed (%d)", changes);
+}
+
+// The mouse's navigation (docs/NAVIGATION.md): the drags of Settings > Navigation's scheme,
+// the right button's menu unless it was dragged, and the wheel towards the cursor.
+USDCC_TEST(viewport_navigates_by_the_scheme) {
+    pythonTestApp();
+    usdcc::core::Settings& settings = usdcc::core::Settings::instance();
+    usdcc::ui::defineNavigationSettings();
+    settings.resetCategory("Navigation");
+    OpenStage open("scheme", kFitScene);
+    auto viewport = makeViewport(open.stage);
+    HydraViewportWindow* window = viewport->hydraWindow();
+    window->resize(640, 480);
+    const HydraViewportWindow::CameraState start{PXR_NS::GfVec3d(1, 2, 3), 50.0, 30.0, 15.0};
+    window->setCameraState(start);
+    int menus = 0;
+    QObject::connect(window, &HydraViewportWindow::contextMenuRequested, window, [&menus] { ++menus; });
+    const auto send = [window](QEvent::Type type, const QPointF& at, Qt::MouseButton button, Qt::MouseButtons buttons,
+                               Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QMouseEvent event(type, at, at, button, buttons, modifiers);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const auto drag = [&send](const QPointF& from, const QPointF& to, Qt::MouseButton button,
+                              Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        send(QEvent::MouseButtonPress, from, button, button, modifiers);
+        send(QEvent::MouseMove, to, Qt::NoButton, button, modifiers);
+        send(QEvent::MouseButtonRelease, to, button, Qt::NoButton, modifiers);
+    };
+    const QPointF from(300, 200);
+
+    // usdcc's own: Alt+Left orbits, Middle pans, Alt+Right zooms.
+    send(QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton, Qt::AltModifier);
+    CHECK(window->isMouseNavigating(), "an Alt+Left press is the camera's");
+    send(QEvent::MouseMove, from + QPointF(10, -4), Qt::NoButton, Qt::LeftButton, Qt::AltModifier);
+    send(QEvent::MouseButtonRelease, from + QPointF(10, -4), Qt::LeftButton, Qt::NoButton, Qt::AltModifier);
+    HydraViewportWindow::CameraState state = window->cameraState();
+    CHECK(!window->isMouseNavigating() && std::abs(state.yaw - 25.0) < 1e-9 && std::abs(state.pitch - 13.0) < 1e-9,
+          "Alt+Left orbits, half a degree a pixel: yaw %f pitch %f", state.yaw, state.pitch);
+
+    window->setCameraState(start);
+    drag(from, from + QPointF(40, 0), Qt::MiddleButton);
+    state = window->cameraState();
+    CHECK(!closeTo(state.target, start.target) && state.distance == start.distance && state.yaw == start.yaw,
+          "Middle pans: the target moves, the rest stays");
+    const PXR_NS::GfVec3d panned = state.target;
+    window->setCameraState(start);
+    drag(from, from + QPointF(40, 0), Qt::MiddleButton, Qt::AltModifier);
+    CHECK(closeTo(window->cameraState().target, panned), "and with Alt held just the same");
+
+    window->setCameraState(start);
+    drag(from, from + QPointF(24, -24), Qt::RightButton, Qt::AltModifier);
+    state = window->cameraState();
+    CHECK(std::abs(state.distance - 50.0 * 0.81) < 1e-9 && closeTo(state.target, start.target) && menus == 0,
+          "Alt+Right zooms, a step every 24 pixels right or up, and opens no menu: %f", state.distance);
+    send(QEvent::MouseButtonPress, from, Qt::RightButton, Qt::RightButton, Qt::AltModifier);
+    send(QEvent::MouseButtonRelease, from, Qt::RightButton, Qt::NoButton, Qt::AltModifier);
+    CHECK(menus == 1, "without a drag it is the menu's all the same (%d)", menus);
+    send(QEvent::MouseButtonPress, from, Qt::RightButton, Qt::RightButton);
+    send(QEvent::MouseButtonRelease, from, Qt::RightButton, Qt::NoButton);
+    CHECK(menus == 2 && window->cameraState().distance == state.distance, "as the right button alone is (%d)", menus);
+
+    // Another scheme: Blender's middle button orbits, with Shift pans, with Ctrl zooms.
+    settings.setValue("Navigation/scheme", std::string("Blender"));
+    window->setCameraState(start);
+    drag(from, from + QPointF(10, -4), Qt::MiddleButton);
+    state = window->cameraState();
+    CHECK(std::abs(state.yaw - 25.0) < 1e-9 && std::abs(state.pitch - 13.0) < 1e-9 && closeTo(state.target, start.target),
+          "Blender: Middle orbits: yaw %f pitch %f", state.yaw, state.pitch);
+    window->setCameraState(start);
+    drag(from, from + QPointF(40, 0), Qt::MiddleButton, Qt::ShiftModifier);
+    CHECK(closeTo(window->cameraState().target, panned), "Shift+Middle pans");
+    window->setCameraState(start);
+    drag(from, from + QPointF(0, -24), Qt::MiddleButton, Qt::ControlModifier);
+    CHECK(std::abs(window->cameraState().distance - 45.0) < 1e-9, "Ctrl+Middle zooms: %f", window->cameraState().distance);
+    settings.setValue("Navigation/scheme", std::string("usdcc"));
+
+    // The wheel: to the middle of the view, or (Zoom to cursor) along the cursor's ray, so
+    // that what is on it stays under the cursor.
+    const auto wheel = [window](const QPointF& at, int notches) {
+        QWheelEvent event(at, at, QPoint(), QPoint(0, 120 * notches), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(window, &event);
+    };
+    const QPointF cursor(480, 120);
+    const PXR_NS::GfVec2d ndc(2.0 * cursor.x() / 640.0 - 1.0, 1.0 - 2.0 * cursor.y() / 480.0);
+    const auto onScreen = [window](const PXR_NS::GfVec3d& point) {
+        const PXR_NS::GfFrustum frustum = window->frustum();
+        const PXR_NS::GfVec3d projected = (frustum.ComputeViewMatrix() * frustum.ComputeProjectionMatrix()).Transform(point);
+        return PXR_NS::GfVec2d(projected[0], projected[1]);
+    };
+    window->setCameraState(start);
+    const PXR_NS::GfVec3d seen = window->frustum().ComputePickRay(ndc).GetPoint(20.0);
+    CHECK((onScreen(seen) - ndc).GetLength() < 1e-6, "a point on the cursor's ray is under the cursor");
+    wheel(cursor, 1);
+    state = window->cameraState();
+    CHECK(std::abs(state.distance - 45.0) < 1e-9 && closeTo(state.target, start.target) && (onScreen(seen) - ndc).GetLength() > 1e-3,
+          "the wheel goes to the middle of the view, the cursor's point moving off it");
+    settings.setValue("Navigation/zoomToCursor", true);
+    window->setCameraState(start);
+    wheel(cursor, 2);
+    state = window->cameraState();
+    CHECK(std::abs(state.distance - 50.0 * 0.81) < 1e-9 && !closeTo(state.target, start.target), "Zoom to cursor: as far, and sideways");
+    CHECK((onScreen(seen) - ndc).GetLength() < 1e-6, "with the cursor's point still under it: off by %g",
+          (onScreen(seen) - ndc).GetLength());
+    wheel(cursor, -2);
+    CHECK(closeTo(window->cameraState().target, start.target) && std::abs(window->cameraState().distance - 50.0) < 1e-9,
+          "and back out the way it came");
+    settings.setValue("Navigation/zoomSpeed", 2.0);
+    settings.setValue("Navigation/invertZoom", true);
+    settings.setValue("Navigation/zoomToCursor", false);
+    window->setCameraState(start);
+    wheel(cursor, 1);
+    CHECK(std::abs(window->cameraState().distance - 50.0 / 0.81) < 1e-9, "the speed and the direction are the settings': %f",
+          window->cameraState().distance);
+
+    settings.resetCategory("Navigation");
+    viewport.reset();
 }
 
 // Drive and Locked (docs/VIEWPORT_CAMERA.md §2.2, phase 4): a wheel step through the camera

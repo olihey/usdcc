@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QNativeGestureEvent>
 #include <QScreen>
 #include <QWheelEvent>
 #include <algorithm>
@@ -45,7 +46,7 @@ void NavigationCamera::pan(QPointF delta) {
     target += row(matrix, 0) * (-delta.x() * height) + row(matrix, 1) * (delta.y() * height);
 }
 void NavigationCamera::zoom(double steps) {
-    const double factor = std::pow(.9, std::clamp(steps, -100.0, 100.0));
+    const double factor = usdcc::ui::navigationZoomFactor(steps);
     if (view.orthographic) view.orthoWidth = std::max(1e-4, view.orthoWidth * factor);
     else distance = std::max(1e-4, distance * factor);
 }
@@ -91,64 +92,91 @@ QRectF NavigationInput::imageRect() const {
     return QRectF((window->width() - size.width()) / 2.0, (window->height() - size.height()) / 2.0,
                   size.width(), size.height());
 }
+void NavigationInput::navigate(const usdcc::ui::NavigationStep& step) {
+    const double height = std::max(1.0, imageRect().height());
+    switch (step.action) {
+        case usdcc::ui::NavigationAction::Orbit: if (orbit) orbit(step.delta / height); break;
+        case usdcc::ui::NavigationAction::Pan: if (pan) pan(step.delta / height); break;
+        case usdcc::ui::NavigationAction::Zoom: if (step.zoom && zoom) zoom(step.zoom); break;
+        case usdcc::ui::NavigationAction::None: break;
+    }
+}
 bool NavigationInput::eventFilter(QObject*, QEvent* event) {
+    using usdcc::ui::NavigationAction;
     if (event->type() == QEvent::ShortcutOverride) {
         auto* key = static_cast<QKeyEvent*>(event);
-        if (key->modifiers() == Qt::NoModifier && (key->key() == Qt::Key_F || key->key() == Qt::Key_Home)) {
+        if (usdcc::ui::isFrameKey(key) || (key->modifiers() == Qt::NoModifier && key->key() == Qt::Key_Home)) {
             key->accept(); return true;
         }
     }
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouse = static_cast<QMouseEvent*>(event);
-        if ((mouse->button() != Qt::LeftButton && mouse->button() != Qt::MiddleButton) ||
-            !imageRect().contains(mouse->position())) return false;
-        dragging = mouse->button(); previous = mouse->position();
+        if (!imageRect().contains(mouse->position())) return false;
+        // One drag at a time: another button during it isn't another.
+        if (navigation.dragging() != NavigationAction::None) return true;
+        NavigationAction action = navigation.press(mouse);
+        if (action == NavigationAction::None && mouse->button() == Qt::LeftButton) {
+            action = NavigationAction::Orbit;
+            navigation.begin(action, Qt::LeftButton, mouse->position());
+        }
+        if (action == NavigationAction::None) return false;
         window->requestActivate();
         window->setMouseGrabEnabled(true);
-        if (begin) begin(dragging == Qt::LeftButton);
+        if (begin) begin(action == NavigationAction::Orbit);
         return true;
     }
-    if (event->type() == QEvent::MouseMove && dragging != Qt::NoButton) {
+    if (event->type() == QEvent::MouseMove && navigation.dragging() != NavigationAction::None) {
         auto* mouse = static_cast<QMouseEvent*>(event);
-        const auto delta = mouse->position() - previous;
-        previous = mouse->position();
-        const double height = std::max(1.0, imageRect().height());
+        const usdcc::ui::NavigationStep step = navigation.move(mouse);
         const auto screenSize = window->screen() ? window->screen()->geometry().size() : QSize();
-        const bool stale = screenSize.isValid() &&
-                           (std::abs(delta.x()) > screenSize.width() / 2 || std::abs(delta.y()) > screenSize.height() / 2);
-        if (!stale && dragging == Qt::LeftButton && orbit) orbit(delta / height);
-        if (!stale && dragging == Qt::MiddleButton && pan) pan(delta / height);
+        const bool stale = screenSize.isValid() && (std::abs(step.delta.x()) > screenSize.width() / 2 ||
+                                                    std::abs(step.delta.y()) > screenSize.height() / 2);
+        if (!stale) navigate(step);
         if (auto* screen = window->screen()) {
             auto rect = screen->geometry();
             auto p = mouse->globalPosition().toPoint();
             if (auto wrapped = wrapCursorAtEdges(p.x(), p.y(), rect.left(), rect.top(), rect.right(), rect.bottom())) {
                 const QPoint to(wrapped->x, wrapped->y);
-                QCursor::setPos(to); previous = window->mapFromGlobal(to);
+                QCursor::setPos(to); navigation.setPosition(QPointF(window->mapFromGlobal(to)));
             }
         }
         return true;
     }
-    if (event->type() == QEvent::MouseButtonRelease && dragging != Qt::NoButton) {
+    if (event->type() == QEvent::MouseButtonRelease && navigation.dragging() != NavigationAction::None) {
         auto* mouse = static_cast<QMouseEvent*>(event);
-        if (mouse->button() == dragging) { dragging = Qt::NoButton; window->setMouseGrabEnabled(false); return true; }
+        if (navigation.release(mouse)) {
+            window->setMouseGrabEnabled(false);
+            return true;
+        }
     }
     if (event->type() == QEvent::Hide || event->type() == QEvent::FocusOut) {
-        dragging = Qt::NoButton; window->setMouseGrabEnabled(false);
+        navigation.cancel(); window->setMouseGrabEnabled(false);
     }
     if (event->type() == QEvent::Wheel) {
         auto* wheel = static_cast<QWheelEvent*>(event);
         if (!imageRect().contains(wheel->position())) return false;
-        const double steps = wheel->angleDelta().isNull() ? wheel->pixelDelta().y() / 120.0
-                                                        : wheel->angleDelta().y() / 120.0;
-        if (steps && zoom) { if (begin) begin(false); zoom(steps); }
+        if (const usdcc::ui::NavigationStep step = navigation.wheel(wheel)) {
+            if (begin) begin(step.action == NavigationAction::Orbit);
+            navigate(step);
+        }
         return true;
+    }
+    if (event->type() == QEvent::NativeGesture) {
+        // A pinch zooms, as the wheel does.
+        if (const usdcc::ui::NavigationStep step = navigation.gesture(event)) {
+            if (begin) begin(false);
+            navigate(step);
+            return true;
+        }
     }
     if (event->type() == QEvent::KeyPress) {
         auto* key = static_cast<QKeyEvent*>(event);
-        if (key->modifiers() == Qt::NoModifier && key->key() == Qt::Key_F && fit) { fit(); return true; }
+        if (usdcc::ui::isFrameKey(key) && fit) { fit(); return true; }
         if (key->modifiers() == Qt::NoModifier && key->key() == Qt::Key_Home && reset) { reset(); return true; }
     }
     if (event->type() == QEvent::ContextMenu) {
+        // Not for a right button that navigates (Alt+Right zooms in the usdcc scheme).
+        if (navigation.takeContextMenu(event)) return true;
         QMenu menu;
         menu.addAction(tr("Fit to View"), this, [this] { if (fit) fit(); });
         menu.addAction(tr("Reset Camera"), this, [this] { if (reset) reset(); });

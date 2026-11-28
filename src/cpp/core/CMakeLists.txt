@@ -12,6 +12,7 @@ add_library(usdcc_core SHARED
     include/usdcc/core/file_log_sink.h
     include/usdcc/core/install_paths.h
     include/usdcc/core/log.h
+    include/usdcc/core/mouse_binding.h
     include/usdcc/core/native_stream_capture.h
     include/usdcc/core/settings.h
     include/usdcc/core/signal.h
@@ -22,6 +23,7 @@ add_library(usdcc_core SHARED
     src/file_log_sink.cpp
     src/install_paths.cpp
     src/log.cpp
+    src/mouse_binding.cpp
     src/native_stream_capture.cpp
     src/settings.cpp
 )

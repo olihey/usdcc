@@ -12,6 +12,7 @@
 #include "usdcc/core/export.h"
 
 #include "usdcc/core/signal.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/view_panel.h"
 #include "usdcc/usd/anim_edit.h"
 #include "usdcc/usd/stage.h"
@@ -80,9 +81,13 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, Tangent, Box, Pan };
+    enum class Drag { None, Move, Tangent, Box, Navigate };
+    // A pan or zoom from the mouse (docs/NAVIGATION.md): sideways it's the time's, up
+    // and down the values'.
+    void navigate(const usdcc::ui::NavigationStep& step);
     // The spline drawn for a curve while a drag is previewed.
     std::optional<PXR_NS::TsSpline> previewSpline(int curve) const;
 
@@ -97,6 +102,7 @@ private:
     double m_delta = 0.0;   // and in value
     Handle m_handle;
     bool m_additive = false;
+    usdcc::ui::NavigationInput m_navigation{usdcc::ui::NavigationSpace::Editor2D};
 };
 
 class USDCC_USD_UI_API CurveEditorViewPanel : public usdcc::ui::ViewPanel {
