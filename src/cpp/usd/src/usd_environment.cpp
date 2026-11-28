@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <map>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace usdcc::usd {
@@ -38,6 +39,19 @@ constexpr PathVariable kPathVariables[] = {
 std::map<std::string, std::string, std::less<>>& sources() {
     static std::map<std::string, std::string, std::less<>> map;
     return map;
+}
+
+// Settings > Renderers' Arnold folder, where applyUsdEnvironmentSettings() found no
+// Arnold plugins beside OpenUSD's own, and what it would have logged: kept for
+// enableArnoldPack(), which may have them in a pack usdcc downloaded.
+struct WaitingArnold {
+    std::string folder;
+    std::string message;
+    bool noFolder = false;  // Settings names no Arnold folder: Arnold is off
+};
+WaitingArnold& waitingArnold() {
+    static WaitingArnold waiting;
+    return waiting;
 }
 
 std::vector<std::string> split(std::string_view text, char separator) {
@@ -224,13 +238,40 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
 #endif
 
     // After the thread limit, which wants nothing to have started threads yet.
-    const ArnoldStatus arnold = enableArnold(settings.get<std::string>(kUsdArnoldFolderKey));
+    const std::string arnoldFolder = settings.get<std::string>(kUsdArnoldFolderKey);
+    const ArnoldStatus arnold = enableArnold(arnoldFolder);
+    waitingArnold() = {};
+    waitingArnold().noFolder = arnoldFolder.empty();
+    if (arnold.enabled) {
+        USDCC_LOG_INFO("usdcc.usd", "{}", arnold.message);
+    } else if (arnold.noPlugins) {
+        // Not said yet: a pack usdcc downloaded may have them (enableArnoldPack()).
+        waitingArnold() = {arnoldFolder, arnold.message, false};
+    } else if (!arnold.message.empty()) {
+        USDCC_LOG_WARNING("usdcc.usd", "{}", arnold.message);
+    }
+    enableMoonray();
+}
+
+bool enableArnoldPack(const std::string& packFolder) {
+    const WaitingArnold waiting = std::exchange(waitingArnold(), {});
+    if (waiting.noFolder && !packFolder.empty()) {
+        // Why an installed pack shows no Arnold: it has the plugins, not Arnold itself.
+        USDCC_LOG_INFO("usdcc.usd", "The Arnold pack is installed, and Arnold is off: name your Arnold in Settings > "
+                                    "Renderers > Arnold folder to render with it");
+    }
+    if (waiting.folder.empty()) return false;  // no Arnold folder, or Arnold is on or failed already
+    if (packFolder.empty()) {
+        USDCC_LOG_WARNING("usdcc.usd", "{}", waiting.message);
+        return false;
+    }
+    const ArnoldStatus arnold = enableArnold(waiting.folder, packFolder);
     if (arnold.enabled) {
         USDCC_LOG_INFO("usdcc.usd", "{}", arnold.message);
     } else if (!arnold.message.empty()) {
         USDCC_LOG_WARNING("usdcc.usd", "{}", arnold.message);
     }
-    enableMoonray();
+    return arnold.enabled;
 }
 
 void setUsdEnvironmentVariable(const std::string& variable, const std::string& value, std::string source) {

@@ -73,6 +73,12 @@ deploy is. On macOS DIR/<pack>/<destination's name>/ has a whole usdcc.app with 
 pack in it instead, checked and signed as one, so each of the pack's binaries has
 its own signature when --pack-folders takes them from it.
 
+--pack-folders DIR: each of those packs also as the folder usdcc installs when it
+downloads one, DIR/<pack>/ (docs/USD_PLUGINS.md section 10). And the packs of the local
+set whose pin says "publish": true (Arnold): plugins built against an SDK that isn't
+theirs to ship, which load only once the user names their own copy of it. Those too
+are a download in the app and nothing else, made as the optional set's are.
+
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
     python tools/deploy.py D:\\dist\\usdcc --clean
@@ -302,6 +308,33 @@ def _shipped_packs(usd_packs, gpl_configuration):
     return {pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "standard"}
 
 
+def _pack_pin(pack):
+    """deps/usd-plugins/<pack>.json, or {} for a pack this checkout doesn't pin."""
+    file = REPO / "deps/usd-plugins" / f"{pack}.json"
+    return json.loads(file.read_text(encoding="utf-8-sig")) if file.is_file() else {}
+
+
+def _app_only(pack, manifest):
+    """Whether the pack is one of the local set that a release offers all the same: its pin
+    says "publish": true. Its plugins need an SDK usdcc can't ship (Arnold's core), so it is
+    built where that SDK is, never loads in a deploy by itself, and ships only as a download
+    in the app (docs/USD_PLUGINS.md sections 5 and 10)."""
+    return manifest.get("set") == "local" and _pack_pin(pack).get("publish") is True
+
+
+def _download_packs(usd_packs, app_only):
+    """The packs a release has as downloads of their own: the optional set and, with
+    `app_only`, the published ones of the local set."""
+    return {pack: manifest for pack, manifest in usd_packs.items()
+            if manifest.get("set") == "optional" or (app_only and _app_only(pack, manifest))}
+
+
+def _sdk_libraries(pack, platform):
+    """The names of the libraries the user's own SDK brings and usdcc loads before the
+    pack's plugins (the pin's check.preload: Arnold's core). No deploy has them."""
+    return sorted(Path(entry).name for entry in _pack_pin(pack).get("check", {}).get("preload", {}).get(platform, []))
+
+
 def _pack_dlls(packs):
     """The names of the packs' DLLs (.so files on Linux) among OpenUSD's own, in its
     bin and lib."""
@@ -361,8 +394,11 @@ def _pack_folder(pack, source_root, names, target, version, windows):
         fail(f"The {pack} pack has files in lib/, where an installed pack has the link to usdcc's own libraries: "
              f"{', '.join(in_lib[:5])}. Its build has to keep them under plugin/usd/ (deps/usd-plugins/{pack}.*), "
              "as MoonRay's does (docs/USD_PLUGINS.md section 10).")
-    if not any(name.startswith("plugin/usd/") for name in names):
-        fail(f"The {pack} pack has nothing in plugin/usd/, which is the folder usdcc registers.")
+    # plugin/usd is what usdcc registers at its start. A pack that keeps its plugins in a
+    # folder of its own (plugin/arnold) has usdcc register them itself, when it can.
+    usd_folders = ["plugin/usd"] if any(name.startswith("plugin/usd/") for name in names) else []
+    if not any(name.startswith("plugin/") for name in names):
+        fail(f"The {pack} pack has nothing in plugin/, where a pack's plugins are.")
     for name in names:
         if name.split("/")[0] not in ("bin", "plugin", "licenses", USD_PACKS_DIR):
             fail(f"The {pack} pack has a file an installed pack has no place for: {name}")
@@ -373,12 +409,12 @@ def _pack_folder(pack, source_root, names, target, version, windows):
             copy_file(source_root / name, (target / name).parent)
     # OpenUSD's own plugin/usd has this file; a folder of its own needs one too.
     plug_info = target / "plugin/usd/plugInfo.json"
-    if not plug_info.exists():
+    if usd_folders and not plug_info.exists():
         plug_info.write_text('{\n    "Includes": [ "*/resources/" ]\n}\n', encoding="utf-8", newline="\n")
     catalog = REPO / "deps/packs.json"
     shown = json.loads(catalog.read_text(encoding="utf-8")).get(pack, {}) if catalog.is_file() else {}
     manifest = {"id": f"org.usdcc.pack.{pack}", "name": shown.get("title", pack), "version": version or "0",
-                "description": shown.get("description", ""), "api": 1, "usd": ["plugin/usd"]}
+                "description": shown.get("description", ""), "api": 1, "usd": usd_folders}
     (target / "usdcc-plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
     print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), as usdcc installs it")
@@ -427,9 +463,10 @@ def main(argv=None):
                              "its checked files, on macOS a usdcc.app with it, signed; neither is shipped, "
                              "--pack-folders takes the packs from them (docs/USD_PLUGINS.md section 5)")
     parser.add_argument("--pack-folders", metavar="DIR",
-                        help="also write the optional set's packs as usdcc installs one it downloads, DIR/<pack>/, for "
-                             "tools/ci/pack_index.py (docs/USD_PLUGINS.md section 10); on Linux and macOS with "
-                             "--optional-packs, whose checked files they are")
+                        help="also write the optional set's packs, and the published ones of the local set (Arnold), "
+                             "as usdcc installs one it downloads, DIR/<pack>/, for tools/ci/pack_index.py "
+                             "(docs/USD_PLUGINS.md section 10); on Linux and macOS with --optional-packs, whose "
+                             "checked files they are")
     parser.add_argument("--with-blender-mesh-tools", action="store_true",
                         help="include the GPL-linked mesh tools configuration; excludes proprietary renderer integrations")
     parser.add_argument("--blender-source-bundle", metavar="FILE",
@@ -753,8 +790,7 @@ def main(argv=None):
     # The optional set, as folders usdcc installs when it downloads one: not in the deploy.
     # Laid out first as a deploy has them, in a folder of their own, by the same function.
     pack_folders = Path(_full(args.pack_folders)) if args.pack_folders else None
-    optional_packs = {} if not pack_folders or args.with_blender_mesh_tools else {
-        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "optional"}
+    optional_packs = {} if not pack_folders or args.with_blender_mesh_tools else _download_packs(usd_packs, app_only=True)
     for pack, manifest in optional_packs.items():
         print(f"  USD plugin pack, a download of its own: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         staging = pack_folders / ".staging" / pack
@@ -1135,8 +1171,8 @@ def deploy_linux(args):
     for pack, manifest in shipped_packs.items():
         print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _deploy_usd_pack(pack, manifest, usd_install, deploy_dir, pack_sources, libraries="lib")
-    optional_packs = {} if not optional_dir or args.with_blender_mesh_tools else {
-        pack: manifest for pack, manifest in usd_packs.items() if manifest.get("set") == "optional"}
+    optional_packs = {} if not optional_dir or args.with_blender_mesh_tools else _download_packs(
+        usd_packs, app_only=bool(args.pack_folders))
     for pack in sorted(set(usd_packs) - set(shipped_packs) - set(optional_packs)):
         print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 
@@ -1436,9 +1472,11 @@ def _macos_own_names(files, lib_dir):
                             if name.startswith("@rpath/") and own_names.get(Path(name).name, Path(name).name) != Path(name).name})
 
 
-def _macos_problems(contents, files):
+def _macos_problems(contents, files, provided=()):
     """What a bundle's Mach-O files link that the bundle (through their rpaths) and the
-    system don't have, or have in an older version than they were linked with."""
+    system don't have, or have in an older version than they were linked with. `provided`
+    names libraries that are loaded before these files are, from outside the bundle
+    (_sdk_libraries())."""
     from _macho import install_id, is_system, library_versions, rpaths
     problems = []
     for file in files:
@@ -1448,7 +1486,7 @@ def _macos_problems(contents, files):
             if contents not in folder.parents:
                 problems.append(f"{file.relative_to(contents)}: rpath {folder}")
         for name, version in library_versions(file).items():
-            if name == own or is_system(name):
+            if name == own or is_system(name) or Path(name).name in provided:
                 continue
             if not name.startswith("@rpath/"):
                 problems.append(f"{file.relative_to(contents)}: links {name}")
@@ -1469,7 +1507,8 @@ def _macos_problems(contents, files):
 def _macos_optional_pack(pack, manifest, usd_install, app, target, identity):
     """A copy of the signed `app`, as `target`, with an optional pack in it: where the pack
     is checked and each of its binaries signed, for the folder usdcc installs
-    (_pack_folder). The copy itself isn't shipped."""
+    (_pack_folder). The copy itself isn't shipped. A published pack of the local set is
+    put into one too: its binaries are checked and signed there, as the others'."""
     from _macho import ENTITLEMENTS, is_macho, sign, sign_app
     if target.parent.exists():
         remove_tree(target.parent)
@@ -1485,7 +1524,7 @@ def _macos_optional_pack(pack, manifest, usd_install, app, target, identity):
     # Their rpaths are relative to the install's lib/, which is the bundle's (as on Linux).
     files = [root / name for name in record["files"] if is_macho(root / name)]
     _macos_own_names(files, root / "lib")
-    problems = _macos_problems(contents, files)
+    problems = _macos_problems(contents, files, provided=_sdk_libraries(pack, "macos-arm64"))
     if problems:
         fail(f"Libraries the {pack} pack doesn't load from the deploy or the system:\n  "
              + "\n  ".join(sorted(set(problems))[:40]))
@@ -1600,8 +1639,7 @@ def deploy_macos(args):
     for pack, manifest in shipped_packs.items():
         print(f"  USD plugin pack: {pack} {manifest.get('version', '')}".rstrip(), flush=True)
         _deploy_usd_pack(pack, manifest, usd_install, root, pack_sources, libraries="lib")
-    optional_packs = {pack: manifest for pack, manifest in usd_packs.items()
-                      if optional_dir and manifest.get("set") == "optional"}
+    optional_packs = _download_packs(usd_packs, app_only=bool(args.pack_folders)) if optional_dir else {}
     for pack in sorted(set(usd_packs) - set(shipped_packs) - set(optional_packs)):
         print(f"  USD plugin pack left out: {pack} (set: {usd_packs[pack].get('set')})", flush=True)
 

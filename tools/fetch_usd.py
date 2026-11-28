@@ -17,7 +17,10 @@ that is out of date is refused, since nothing lists its files; pass a new folder
 (build.yml and release.yml unzip it themselves). A pack that isn't published is
 a warning, as deps-usd-plugins.yml may still be building it, and an error with
 --require-packs. --optional also puts the published packs of the optional set
-over it, which release.yml ships as downloads of their own. --zips names a folder to look for the zips in before
+over it, which release.yml ships as downloads of their own, and those of the local
+set whose pin says "publish": true (Arnold): built where their SDK is, not by
+deps-usd-plugins.yml, and attached to the same release from there
+(docs/ARNOLD_CI.md). --zips names a folder to look for the zips in before
 downloading, such as one a local tools/build_usd_plugin.py build was zipped into.
 
 They are release assets of a public repository, so this needs no login.
@@ -48,15 +51,25 @@ MANIFEST_DIR = "usd-plugins"
 USD_MARKER = "usd-asset.txt"
 
 
+def published(spec):
+    """Whether the pin's pack is attached to the OpenUSD release. The optional set's is
+    unless its pin says no; the local set's only when its pin says yes: nothing of an SDK
+    is published by default."""
+    if spec["set"] == "local":
+        return spec.get("publish") is True
+    return bool(spec.get("publish", True))
+
+
 def standard_packs(optional=False):
     """The packs a usdcc release ships on this platform; with `optional`, also the
-    published packs of the optional set, which a release attaches as downloads of their own."""
+    published packs of the optional and the local set, which a release attaches as
+    downloads of their own."""
     packs = []
     for file in sorted(usd_plugin_asset.PINS.glob("*.json")):
         spec = usd_plugin_asset.load(file.stem)
         if ASSET_PLATFORM not in spec["platforms"]:
             continue
-        if spec["set"] == "standard" or (optional and spec["set"] == "optional" and spec.get("publish", True)):
+        if spec["set"] == "standard" or (optional and spec["set"] in ("optional", "local") and published(spec)):
             packs.append(file.stem)
     return packs
 
@@ -163,8 +176,14 @@ def fetch_packs(folder, repository, zips, work, required, optional=False):
         zip_file = obtain(asset["zip"], asset["tag"], repository, zips, work)
         if not zip_file:
             missing.append(pack)
-            message = (f"No {asset['zip']} in release {asset['tag']} of {repository}. Run the USD plugins workflow "
-                       "(deps-usd-plugins.yml) for the current pins.")
+            if asset["set"] == "local":
+                # Built where its SDK is, and attached from there (docs/ARNOLD_CI.md).
+                message = (f"No {asset['zip']} in release {asset['tag']} of {repository}. Its SDK isn't here to build "
+                           f"it with: run the pack's own workflow for the current pin (docs/ARNOLD_CI.md), which "
+                           "attaches it.")
+            else:
+                message = (f"No {asset['zip']} in release {asset['tag']} of {repository}. Run the USD plugins workflow "
+                           "(deps-usd-plugins.yml) for the current pins.")
             if required:
                 fail(message)
             had = f" {folder} keeps the older {installed.get('asset')}." if installed else ""
@@ -187,8 +206,9 @@ def main(argv=None):
     parser.add_argument("--require-packs", action="store_true",
                         help="a pack that isn't published is an error, not a warning")
     parser.add_argument("--optional", action="store_true",
-                        help="also the published packs of the optional set (MoonRay), which a release ships as "
-                             "downloads usdcc installs itself (tools/deploy.py --optional-packs and --pack-folders)")
+                        help="also the published packs of the optional set (MoonRay, Cycles) and of the local one "
+                             "(Arnold), which a release ships as downloads usdcc installs itself (tools/deploy.py "
+                             "--optional-packs and --pack-folders)")
     parser.add_argument("--zips", type=Path, help="look for the zips in this folder before downloading")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY") or DEFAULT_REPOSITORY,
                         help=f"the GitHub repository whose releases hold them (default: {DEFAULT_REPOSITORY})")

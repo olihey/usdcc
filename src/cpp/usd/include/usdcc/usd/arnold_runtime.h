@@ -3,15 +3,18 @@
 // Arnold in usdcc (docs/USD_PLUGINS.md §3): off unless Settings > Renderers >
 // Arnold names an Arnold folder. The Arnold pack is in plugin/arnold, beside OpenUSD's
 // plugin/usd but not on its plugin path, as its shader registry plugin starts
-// the Arnold core when OpenUSD's shader registry is first used.
+// the Arnold core when OpenUSD's shader registry is first used. A pack usdcc
+// downloaded (View > Plugins > Packs, §10) has the same plugin/arnold in its own
+// folder, and is used when there is none beside OpenUSD's.
 //
 // With a folder set, enableArnold() checks that its Arnold core is one the pack
 // can run on, loads it by its full path (so neither its folder, which has Qt
 // DLLs of its own, nor anything else goes on PATH) and registers the pack's
 // plugins with OpenUSD. Not through PXR_PLUGINPATH_NAME, which OpenUSD reads
 // when its libraries load, before main(). applyUsdEnvironmentSettings() calls
-// it at start-up, before anything makes a stage or asks for a renderer.
-// Windows only for now; Qt-free.
+// it at start-up, before anything makes a stage or asks for a renderer, and
+// enableArnoldPack() (usd_environment.h) with a downloaded pack after it.
+// Qt-free.
 
 #include <string>
 #include <string_view>
@@ -24,6 +27,7 @@ struct ArnoldStatus {
     std::string arnoldVersion;  // the Arnold core's, as "7.5.4.0"; "" if it wasn't loaded
     std::string packVersion;    // the Arnold the pack was built against
     std::string pluginFolder;   // the pack's, whose plugins it registers
+    bool noPlugins = false;     // there is no pack under the root that was looked in
     std::string message;        // what was done, or why not: a line for the log
 };
 

@@ -35,6 +35,15 @@ void defineUsdEnvironmentSettings(core::Settings& settings = core::Settings::ins
 // Once, at start-up, after defineUsdEnvironmentSettings().
 void applyUsdEnvironmentSettings(const core::Settings& settings = core::Settings::instance());
 
+// Arnold from the pack usdcc downloaded (docs/USD_PLUGINS.md §10), whose folder is
+// `packFolder`: used when Settings > Renderers names an Arnold folder and
+// applyUsdEnvironmentSettings() found no Arnold plugins beside OpenUSD's own. Called
+// once at start-up after it, when the downloaded packs are made loadable and before
+// anything makes a stage; with "" where there is no such pack, as it is also what
+// says, then, that the Arnold folder has no plugins to go with. True when Arnold is on
+// from the pack.
+bool enableArnoldPack(const std::string& packFolder);
+
 // A path list variable's value with the setting's folders (separated by ';')
 // after the environment's own (separated by the platform's list separator),
 // leaving out folders already there. Empty when both are.

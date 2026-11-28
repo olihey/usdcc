@@ -11,6 +11,12 @@
     "homepage": "https://www.cycles-renderer.org",
     "renderers": ["Cycles"]
   },
+  "arnold": {
+    "title": "Arnold",
+    "description": "Autodesk's Arnold as a renderer for the viewport and for final renders. The plugins only, without Arnold itself: name your own Arnold of this version, or a later one of the same 7.x, in Settings > Renderers > Arnold folder. Without an Arnold licence, renders have a watermark.",
+    "homepage": "https://github.com/Autodesk/arnold-usd",
+    "renderers": ["Arnold"]
+  },
   "gatling": {
     "title": "Gatling",
     "description": "A GPU path tracer with MDL materials. Needs a GPU with Vulkan ray tracing.",

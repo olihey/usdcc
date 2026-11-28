@@ -14,9 +14,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ci"))
+import check_pack_install
 import deploy
+import fetch_usd
 import make_test_pack
 import pack_index
+import usd_plugin_asset
 
 
 def write(file, text="x"):
@@ -192,6 +195,69 @@ class PackFolderTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 quiet(deploy._pack_folder, "stray", source, ["plugin/usd/a/resources/plugInfo.json", "include/a.h"],
                       Path(temporary) / "to/stray", "1", True)
+
+    def test_a_pack_with_a_plugin_folder_of_its_own_has_no_usd_folder_for_usdcc_to_register(self):
+        # Arnold's, in plugin/arnold: its plugins start Arnold's core, so usdcc registers
+        # them itself, once Settings names an Arnold (docs/USD_PLUGINS.md section 3).
+        for windows in (True, False):
+            with tempfile.TemporaryDirectory() as temporary:
+                source = Path(temporary) / "from"
+                names = ["plugin/arnold/plugInfo.json", "plugin/arnold/hdArnold.so", "plugin/arnold/hdArnold/resources/plugInfo.json",
+                         "licenses/OpenUSD-plugins/arnold/arnold/LICENSE.md", "usd-plugins/arnold.json"]
+                for name in names:
+                    write(source / name)
+                write(source / "usd-plugins/arnold.json", json.dumps({"pack": "arnold", "version": "7.5.4.2", "license": "Apache-2.0"}))
+                target = quiet(deploy._pack_folder, "arnold", source, names, Path(temporary) / "to/arnold", "7.5.4.2", windows)
+                manifest = json.loads((target / "usdcc-plugin.json").read_text(encoding="utf-8"))
+                self.assertEqual((manifest["id"], manifest["name"], manifest["version"], manifest["usd"]),
+                                 ("org.usdcc.pack.arnold", "Arnold", "7.5.4.2", []))
+                self.assertFalse((target / "plugin/usd").exists())
+                # What usdcc's enableArnold() looks for under the pack's folder.
+                self.assertTrue((target / "plugin/arnold/plugInfo.json").is_file())
+                self.assertTrue((target / "usd-plugins/arnold.json").is_file())
+                entry = pack_index.entry(target, target / "usdcc-plugin.json")
+                self.assertEqual((entry["title"], entry["version"], entry["license"], entry["renderers"]),
+                                 ("Arnold", "7.5.4.2", "Apache-2.0", ["Arnold"]))
+
+
+class LocalPackTests(unittest.TestCase):
+    """A pack of the local set whose pin says "publish": true (Arnold): built where its SDK
+    is, attached to the OpenUSD release from there, and a download in the app only."""
+
+    def test_arnold_is_published_and_not_built_here(self):
+        spec = usd_plugin_asset.load("arnold")
+        self.assertEqual((spec["set"], spec["publish"]), ("local", True))
+        self.assertTrue(fetch_usd.published(spec))
+        for platform in spec["platforms"]:
+            self.assertNotIn("arnold", usd_plugin_asset.ci_packs(platform))
+        # Nothing of the SDK's is asked into the pack: not its EULA either.
+        self.assertNotIn("licenses", spec)
+
+    def test_the_local_set_is_published_only_when_its_pin_says_so(self):
+        self.assertFalse(fetch_usd.published({"set": "local"}))
+        self.assertFalse(fetch_usd.published({"set": "local", "publish": False}))
+        self.assertTrue(fetch_usd.published({"set": "local", "publish": True}))
+        self.assertTrue(fetch_usd.published({"set": "optional"}))
+        self.assertFalse(fetch_usd.published({"set": "optional", "publish": False}))
+
+    def test_a_release_takes_it_as_a_download_in_the_app_only(self):
+        packs = {"arnold": {"set": "local"}, "cycles": {"set": "optional"}, "adobe-fileformats": {"set": "standard"},
+                 "usdfbx": {"set": "local"}}
+        self.assertTrue(deploy._app_only("arnold", packs["arnold"]))
+        self.assertFalse(deploy._app_only("cycles", packs["cycles"]))
+        self.assertFalse(deploy._app_only("usdfbx", packs["usdfbx"]))  # no pin, so nothing says to publish it
+        self.assertEqual(sorted(deploy._download_packs(packs, app_only=True)), ["arnold", "cycles"])
+        # Without --pack-folders there is nowhere for it to go.
+        self.assertEqual(sorted(deploy._download_packs(packs, app_only=False)), ["cycles"])
+
+    def test_the_users_own_arnold_brings_its_core(self):
+        self.assertEqual(deploy._sdk_libraries("arnold", "macos-arm64"), ["libai.dylib"])
+        self.assertEqual(deploy._sdk_libraries("arnold", "linux-x64"), ["libai.so"])
+        self.assertEqual(deploy._sdk_libraries("arnold", "win64"), ["ai.dll"])
+        self.assertEqual(deploy._sdk_libraries("cycles", "macos-arm64"), [])
+
+    def test_the_install_check_runs_inside_usdcc(self):
+        compile("RESULT = 'r'\nPACKS = {}\n" + check_pack_install.CHECK, "check.py", "exec")
 
 
 if __name__ == "__main__":

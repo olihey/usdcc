@@ -69,7 +69,8 @@ std::vector<std::filesystem::path> pluginFolders(const QStringList& values);
 // --plugin-path folders first, and the downloaded packs of this version
 // (docs/USD_PLUGINS.md §10) made loadable by `packs` before anything is scanned. `packs`
 // holds them in use from here on, so it is declared before the plugin manager. Not
-// `enabled` (--no-plugins): no pack is touched or loaded either.
+// `enabled` (--no-plugins): no pack is touched or loaded either. Also turns Arnold on
+// from its pack, where Settings names an Arnold folder (usd::enableArnoldPack()).
 usdcc::scripting::PluginManager::Options pluginOptions(const QStringList& pluginPaths, bool enabled,
                                                        usdcc::scripting::PackStore& packs);
 

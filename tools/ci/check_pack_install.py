@@ -14,6 +14,11 @@ test profile, so nothing of the machine's own is touched, the deploy's usdcc:
      library they need, and the renderers it names are listed;
   3. removes them again (usdcc --remove-packs), and nothing is left.
 
+A pack whose plugins need an SDK the machine doesn't have (its pin's check.preload:
+Arnold's core) can't load here. For it, 2 is that its folder is in the store, complete,
+and that OpenUSD registered nothing from it: usdcc registers its plugins only once
+Settings names the SDK, and a plugin registered without it would start it and fail.
+
 An index without packs passes: a platform may have none. `--usdcc <program>` takes a
 program other than a deploy's, with the environment as it is (a development build).
 """
@@ -50,7 +55,13 @@ try:
     everything = registry.GetAllPlugins()
     renderers = sorted(t.typeName for t in Plug.Registry.GetAllDerivedTypes(Tf.Type.FindByName("HdRendererPlugin")))
     for pack, wanted in PACKS.items():
-        found = {"folder": None, "registered": [], "plugins": {}, "renderers": {}}
+        found = {"folder": None, "registered": [], "plugins": {}, "renderers": {}, "complete": False}
+        # <store>/<version>-<platform>/<pack>/, whether or not anything was registered from it.
+        for version in sorted(os.listdir(store)) if os.path.isdir(store) else []:
+            folder = os.path.join(store, version, pack)
+            if not version.startswith(".") and os.path.isdir(folder):
+                found["folder"] = folder
+                found["complete"] = all(os.path.isfile(os.path.join(folder, name)) for name in ("pack.json", "usdcc-plugin.json"))
         for plugin in everything:
             for path in (plugin.path, plugin.resourcePath):
                 real = os.path.realpath(path)
@@ -62,6 +73,9 @@ try:
                     found["folder"] = os.path.join(store, parts[0], pack)
                     if plugin.name not in found["registered"]:
                         found["registered"].append(plugin.name)
+        if wanted["needs_sdk"]:
+            result["packs"][pack] = found
+            continue
         for name in wanted["plugins"]:
             plugin = registry.GetPluginWithName(name)
             if plugin is None:
@@ -150,7 +164,8 @@ def main(argv=None):
     wanted = {}
     for name in names:
         check = usd_plugin_asset.load(name).get("check", {}) if usd_plugin_asset.pin_file(name).is_file() else {}
-        wanted[name] = {"plugins": check.get("plugins", []), "renderers": check.get("renderers", [])}
+        wanted[name] = {"plugins": check.get("plugins", []), "renderers": check.get("renderers", []),
+                        "needs_sdk": bool(check.get("preload"))}
     with tempfile.TemporaryDirectory(prefix="usdcc-pack-install-") as work:
         result = Path(work) / "result.json"
         script = Path(work) / "check.py"
@@ -163,6 +178,18 @@ def main(argv=None):
     folders = []
     for name in names:
         found = checked["packs"].get(name, {})
+        if wanted[name]["needs_sdk"]:
+            if not found.get("folder") or not found.get("complete"):
+                problems.append(f"{name}: no complete pack in the store")
+                continue
+            folders.append(found["folder"])
+            if found.get("registered"):
+                problems.append(f"{name}: OpenUSD registered {', '.join(found['registered'])} from it, without the SDK "
+                                "its plugins need")
+            else:
+                print(f"{name}: installed in {found['folder']}; nothing registered, as its plugins need an SDK "
+                      "Settings doesn't name")
+            continue
         if not found.get("registered"):
             problems.append(f"{name}: OpenUSD registered no plugin from its folder")
             continue
