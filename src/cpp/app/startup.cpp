@@ -148,10 +148,15 @@ usdcc::scripting::PluginManager::Options pluginOptions(const QStringList& plugin
             }
         }
     }
-    // The Arnold pack's plugins aren't in a folder OpenUSD is given at the scan, as the
-    // others' are: they start Arnold's core, so they are registered here, and only when
-    // Settings > Renderers names an Arnold folder (docs/USD_PLUGINS.md §3). Without a
-    // pack too, as this is also what says that the folder has no plugins to go with.
+    // Other packs keep their plugins in plugin/usd, which the plugin manager registers with
+    // OpenUSD when it scans. The Arnold pack keeps them in plugin/arnold, which it doesn't:
+    // the first use of OpenUSD's shader registry would start Arnold's core through them, and
+    // a user without an Arnold would get errors. So they are registered here instead, and
+    // only when Settings > Renderers names an Arnold folder (docs/USD_PLUGINS.md §3).
+    //
+    // Called even when no Arnold pack is installed (arnoldPack is ""): if Settings names an
+    // Arnold folder and there are no Arnold plugins anywhere, this is where the warning
+    // saying so is logged.
     usdcc::usd::enableArnoldPack(arnoldPack);
     return options;
 }
