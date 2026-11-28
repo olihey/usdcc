@@ -59,9 +59,17 @@ $PY tools/run.py --scene test_data/cube_and_sphere.usda
   from a staging folder, and while that is read, as when Qt is packed into the binary cache,
   macOS takes the running `moc` to be there, with no libraries beside it. Reading the staged
   `moc` in a loop made the installed one fail 4 times in 10, and 3 in 10 right after.
-- **Qt is patched** (, an overlay port of macOS' alone): Qt 6.11.1 frees the
+- **Qt is patched** (`cmake/ports-macos/qtbase`, an overlay port of macOS' alone): Qt 6.11.1 frees the
   color space of an image with a color profile before using it. Its move, wait and busy mouse cursors
   are such images, and setting one crashed. Copy the port again when vcpkg's baseline moves.
+- **A configure fails when the installed Qt lacks one of that port's patches**
+  (`cmake/modules/UsdccOverlayPorts.cmake`). A build that shares another checkout's packages
+  (`VCPKG_MANIFEST_INSTALL=OFF`, `VCPKG_INSTALLED_DIR` at its `build/vcpkg_installed`), as a
+  worktree's, never runs vcpkg, and one linked a Qt from before the patch for five days of the
+  same crash. Each `*.patch` and `*.diff` in the port's folder has to be in the installed Qt's
+  `share/qtbase/vcpkg_abi_info.txt`, with its hash. To fix it, configure the checkout the
+  packages belong to, with manifest install on, so that vcpkg builds Qt again.
+  `-DUSDCC_ALLOW_UNPATCHED_PORTS=ON` makes it a warning.
 
 ## 3. What is different
 
