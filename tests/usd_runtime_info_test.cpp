@@ -283,13 +283,18 @@ USDCC_TEST(arnold_runtime) {
     // A pack usdcc downloaded is laid out the same, in its own folder (docs/USD_PLUGINS.md §10):
     // it gets its turn only when the settings named an Arnold folder and OpenUSD's own
     // root had no plugins for it.
-    CHECK(!enableArnoldPack(fakeRoot), "no pack is tried when the settings weren't applied with an Arnold folder");
-    usdcc::core::Settings packSettings;
-    defineUsdEnvironmentSettings(packSettings);
-    packSettings.setValue(kUsdArnoldFolderKey, (fake / "arnold").generic_string());
     const auto sink = std::make_shared<Collect>();
     Collect& captured = *sink;
     usdcc::core::LogHub::instance().addSink(sink, false);
+    usdcc::core::Settings packSettings;
+    defineUsdEnvironmentSettings(packSettings);
+    applyUsdEnvironmentSettings(packSettings);
+    CHECK(!enableArnoldPack(""), "no Arnold folder and no pack: nothing to do");
+    CHECK(captured.count("Arnold") == 0, "and nothing to say");
+    applyUsdEnvironmentSettings(packSettings);
+    CHECK(!enableArnoldPack(fakeRoot), "no Arnold folder: the pack isn't tried");
+    CHECK(captured.count("The Arnold pack is installed, and Arnold is off") == 1, "but the log says what it waits for");
+    packSettings.setValue(kUsdArnoldFolderKey, (fake / "arnold").generic_string());
     applyUsdEnvironmentSettings(packSettings);
     if (std::filesystem::is_regular_file(root / "plugin" / "arnold" / "plugInfo.json")) {
         // This OpenUSD has an Arnold pack of its own (a local build): that one is used.

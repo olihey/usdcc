@@ -47,6 +47,7 @@ std::map<std::string, std::string, std::less<>>& sources() {
 struct WaitingArnold {
     std::string folder;
     std::string message;
+    bool noFolder = false;  // Settings names no Arnold folder: Arnold is off
 };
 WaitingArnold& waitingArnold() {
     static WaitingArnold waiting;
@@ -240,11 +241,12 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
     const std::string arnoldFolder = settings.get<std::string>(kUsdArnoldFolderKey);
     const ArnoldStatus arnold = enableArnold(arnoldFolder);
     waitingArnold() = {};
+    waitingArnold().noFolder = arnoldFolder.empty();
     if (arnold.enabled) {
         USDCC_LOG_INFO("usdcc.usd", "{}", arnold.message);
     } else if (arnold.noPlugins) {
         // Not said yet: a pack usdcc downloaded may have them (enableArnoldPack()).
-        waitingArnold() = {arnoldFolder, arnold.message};
+        waitingArnold() = {arnoldFolder, arnold.message, false};
     } else if (!arnold.message.empty()) {
         USDCC_LOG_WARNING("usdcc.usd", "{}", arnold.message);
     }
@@ -253,6 +255,11 @@ void applyUsdEnvironmentSettings(const core::Settings& settings) {
 
 bool enableArnoldPack(const std::string& packFolder) {
     const WaitingArnold waiting = std::exchange(waitingArnold(), {});
+    if (waiting.noFolder && !packFolder.empty()) {
+        // Why an installed pack shows no Arnold: it has the plugins, not Arnold itself.
+        USDCC_LOG_INFO("usdcc.usd", "The Arnold pack is installed, and Arnold is off: name your Arnold in Settings > "
+                                    "Renderers > Arnold folder to render with it");
+    }
     if (waiting.folder.empty()) return false;  // no Arnold folder, or Arnold is on or failed already
     if (packFolder.empty()) {
         USDCC_LOG_WARNING("usdcc.usd", "{}", waiting.message);
