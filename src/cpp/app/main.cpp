@@ -23,6 +23,7 @@
 #include "usdcc/ui/current_stage_tracker.h"
 #include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/peer_rooms_debug_dialog.h"
 #include "usdcc/ui/peers_controller.h"
 #include "usdcc/ui/peers_side_panel.h"
@@ -283,6 +284,8 @@ int main(int argc, char** argv) {
     // Settings > Viewport's grid and background, there before any viewport opens.
     usdcc::usd::defineViewportDisplaySettings();
     usdcc::usd::defineMaterialPreviewSettings();
+    // Settings > Navigation: the mouse scheme every view goes by (docs/NAVIGATION.md).
+    usdcc::ui::defineNavigationSettings();
 
     // Reads the plugins' manifests and registers their USD files, running none
     // of their code. Before anything can make a stage: USD's schema registry

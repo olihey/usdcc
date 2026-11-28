@@ -129,6 +129,7 @@ add_executable(usdcc_ui_tests
     dependencies_panel_test.cpp
     dope_sheet_test.cpp
     curve_editor_test.cpp
+    navigation_test.cpp
     playblast_test.cpp
     validation_panel_test.cpp
     validation_fix_test.cpp

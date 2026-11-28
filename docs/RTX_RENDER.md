@@ -70,11 +70,11 @@ menu (☰), as [RENDER_VIEW_PANEL.md](RENDER_VIEW_PANEL.md) §1 describes.
 | Mode | Options | Real-Time, Path Tracing or Minimal; a change reloads |
 | View Transform | Options | The OCIO view the linear `HdrColor` frame is shown with (the app's; [COLOR_MANAGEMENT.md](COLOR_MANAGEMENT.md) §5) |
 | RTX Tonemap | Options | Show ovrtx's own tonemapped `LdrColor` instead, as Omniverse does; a change reloads. Off by default |
-| Fit to View | Options, or F over the image | Frame the whole scene |
+| Fit to View | Options, or the Fit to view shortcut (F) over the image | Frame the whole scene |
 | Reset Camera | Options, or Home over the image | Restore the default orbit pose |
-| Orbit | Left / Alt+left drag | |
-| Pan | Middle drag | |
-| Zoom | Wheel | |
+| Orbit | Left drag, or the navigation scheme's (Alt+left) | [NAVIGATION.md](NAVIGATION.md): Settings > Navigation's scheme, as in the viewport |
+| Pan | The scheme's (middle drag) | |
+| Zoom | Wheel, a pinch, or the scheme's (Alt+right drag) | |
 
 Navigation switches to Free Camera. It never edits authored cameras, moves the
 followed viewport, changes selection or creates undo entries. Duplicate panels

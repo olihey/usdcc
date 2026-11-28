@@ -51,6 +51,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPlainTextEdit>
 #include <QSlider>
 #include <QSplitter>
@@ -596,6 +597,61 @@ USDCC_TEST(material_editor_pulling_a_line_off_is_one_step) {
     history->undo();
     settle();
     CHECK(sourceOf(f, "/World/Looks/Wood/Surface.inputs:diffuseColor") == SdfPath("/World/Looks/Wood/Maps.outputs:color"), "and undo puts it back");
+}
+
+// Moving the graph (docs/NAVIGATION.md): the scheme's drags and the wheel, in every view the
+// same, in place of QtNodes' own wheel.
+USDCC_TEST(material_editor_navigates) {
+    Fixture f;
+    QtNodes::GraphicsView* view = f.panel->view();
+    QWidget* viewport = view->viewport();
+    const auto send = [viewport](QEvent::Type type, const QPoint& p, Qt::MouseButton button, Qt::MouseButtons buttons,
+                                 Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QMouseEvent event(type, QPointF(p), QPointF(viewport->mapToGlobal(p)), button, buttons, modifiers);
+        QApplication::sendEvent(viewport, &event);
+    };
+    const auto isAt = [](const QPointF& a, const QPointF& b, double within) { return (a - b).manhattanLength() < within; };
+
+    // The middle button pans: what was under the cursor still is.
+    const QPoint from(300, 300);
+    const QPoint to(360, 270);
+    const QPointF grabbed = view->mapToScene(from);
+    send(QEvent::MouseButtonPress, from, Qt::MiddleButton, Qt::MiddleButton);
+    send(QEvent::MouseMove, to, Qt::NoButton, Qt::MiddleButton);
+    send(QEvent::MouseButtonRelease, to, Qt::MiddleButton, Qt::NoButton);
+    const double scale = view->transform().m11();
+    CHECK(isAt(view->mapToScene(to), grabbed, 2.0 / scale), "a middle drag carries the graph along: %g, %g",
+          view->mapToScene(to).x() - grabbed.x(), view->mapToScene(to).y() - grabbed.y());
+
+    // The wheel: a tenth a notch, about the cursor, whatever QtNodes' own step.
+    view->setupScale(1.0);
+    const QPoint cursor(250, 200);
+    const QPointF under = view->mapToScene(cursor);
+    QWheelEvent out(QPointF(cursor), QPointF(viewport->mapToGlobal(cursor)), QPoint(), QPoint(0, -120), Qt::NoButton, Qt::NoModifier,
+                    Qt::NoScrollPhase, false);
+    QApplication::sendEvent(viewport, &out);
+    CHECK(std::abs(view->transform().m11() - 0.9) < 1e-6, "a notch back is nine tenths the size: %g", view->transform().m11());
+    CHECK(isAt(view->mapToScene(cursor), under, 3.0), "about the cursor: %g, %g", view->mapToScene(cursor).x() - under.x(),
+          view->mapToScene(cursor).y() - under.y());
+    QWheelEvent half(QPointF(cursor), QPointF(viewport->mapToGlobal(cursor)), QPoint(), QPoint(0, 60), Qt::NoButton, Qt::NoModifier,
+                     Qt::NoScrollPhase, false);
+    QApplication::sendEvent(viewport, &half);
+    CHECK(std::abs(view->transform().m11() - 0.9 / std::sqrt(0.9)) < 1e-6, "half a notch is half a step: %g", view->transform().m11());
+
+    // Alt+Right drags it bigger.
+    const double before = view->transform().m11();
+    send(QEvent::MouseButtonPress, cursor, Qt::RightButton, Qt::RightButton, Qt::AltModifier);
+    send(QEvent::MouseMove, cursor + QPoint(24, 0), Qt::NoButton, Qt::RightButton, Qt::AltModifier);
+    send(QEvent::MouseButtonRelease, cursor + QPoint(24, 0), Qt::RightButton, Qt::NoButton, Qt::AltModifier);
+    CHECK(std::abs(view->transform().m11() / before - 1.0 / 0.9) < 1e-6, "an Alt+Right drag to the right zooms in: %g",
+          view->transform().m11() / before);
+
+    // The key that frames is the shortcut's.
+    view->setupScale(2.0);
+    view->setFocus();
+    QTest::keyClick(view, Qt::Key_F);
+    settle();
+    CHECK(view->transform().m11() <= 1.0, "F frames the graph: %g", view->transform().m11());
 }
 
 USDCC_TEST(material_editor_keys) {

@@ -23,6 +23,7 @@
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTemporaryDir>
+#include <QWheelEvent>
 
 #include <functional>
 #include <memory>
@@ -265,4 +266,44 @@ USDCC_TEST(uv_view_hover_and_pick) {
     QEvent leave(QEvent::Leave);
     QApplication::sendEvent(view->canvas(), &leave);
     CHECK(fixture.stage->primvarElementHover().empty(), "leaving drops the hover");
+
+    // Moving the view (docs/NAVIGATION.md): the scheme's drags, the wheel, and a left drag.
+    usdcc::uv::UvCanvas* canvas = view->canvas();
+    canvas->fit();
+    const auto send = [canvas](QEvent::Type type, const QPointF& p, Qt::MouseButton button, Qt::MouseButtons buttons,
+                               Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QMouseEvent event(type, p, canvas->mapToGlobal(p), button, buttons, modifiers);
+        QApplication::sendEvent(canvas, &event);
+    };
+    const auto isAt = [](const QPointF& a, const QPointF& b) { return (a - b).manhattanLength() < 1e-3; };
+    const GfVec2f corner(0.25f, 0.25f);
+    QPointF was = canvas->toScreen(corner);
+    send(QEvent::MouseButtonPress, {200, 200}, Qt::MiddleButton, Qt::MiddleButton);
+    send(QEvent::MouseMove, {230, 180}, Qt::NoButton, Qt::MiddleButton);
+    send(QEvent::MouseButtonRelease, {230, 180}, Qt::MiddleButton, Qt::NoButton);
+    CHECK(isAt(canvas->toScreen(corner), was + QPointF(30, -20)), "a middle drag pans");
+
+    const double scale = canvas->scale();
+    const QPointF cursor(120, 90);
+    const GfVec2f under = canvas->toUv(cursor);
+    QWheelEvent notch(cursor, canvas->mapToGlobal(cursor), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(canvas, &notch);
+    CHECK(std::abs(canvas->scale() / scale - 1.0 / 0.9) < 1e-6 && isAt(canvas->toScreen(under), cursor),
+          "a notch of the wheel is a ninth bigger, about the cursor: %g", canvas->scale() / scale);
+
+    const double zoomed = canvas->scale();
+    send(QEvent::MouseButtonPress, cursor, Qt::RightButton, Qt::RightButton, Qt::AltModifier);
+    send(QEvent::MouseMove, cursor + QPointF(-24, 0), Qt::NoButton, Qt::RightButton, Qt::AltModifier);
+    send(QEvent::MouseButtonRelease, cursor + QPointF(-24, 0), Qt::RightButton, Qt::NoButton, Qt::AltModifier);
+    CHECK(std::abs(canvas->scale() / zoomed - 0.9) < 1e-6 && isAt(canvas->toScreen(under), cursor),
+          "an Alt+Right drag to the left zooms out, about where it began: %g", canvas->scale() / zoomed);
+
+    const PrimvarElements picked = fixture.stage->primvarElements();
+    was = canvas->toScreen(corner);
+    const QPointF onFace = canvas->toScreen(GfVec2f(1.5f, 0.5f));
+    send(QEvent::MouseButtonPress, onFace, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, onFace + QPointF(20, 0), Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, onFace + QPointF(20, 0), Qt::LeftButton, Qt::NoButton);
+    CHECK(isAt(canvas->toScreen(corner), was + QPointF(20, 0)) && fixture.stage->primvarElements() == picked,
+          "a left drag pans too, and picks nothing");
 }

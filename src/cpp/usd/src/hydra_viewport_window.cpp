@@ -5,6 +5,7 @@
 #include "primvar_color_filter.h"
 #include "viewport_overlay_renderer.h"
 #include "usdcc/ui/app_settings.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/usd/color_management.h"
 #include "usdcc/usd/share/live_layers.h"
@@ -1593,6 +1594,13 @@ bool HydraViewportWindow::event(QEvent* ev) {
     if (ev->type() == QEvent::ParentWindowChange) {
         watchTopLevel();  // docked, floated, or moved to another window
     }
+    // A pinch zooms, as the wheel does.
+    if (ev->type() == QEvent::NativeGesture) {
+        if (const usdcc::ui::NavigationStep step = m_navigation.gesture(ev)) {
+            navigateOnce(step);
+            return true;
+        }
+    }
     if (ev->type() == QEvent::Leave) {
         m_rolloverTimer->stop();
         const bool shown = m_hudHover != HudItem::None || !m_rollover.isEmpty();
@@ -1859,7 +1867,7 @@ void HydraViewportWindow::keyPressEvent(QKeyEvent* event) {
 }
 
 void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
-    m_lastMousePos = event->pos();
+    using usdcc::ui::NavigationAction;
     m_cursorPos = event->position();
     // The keyboard (Delete): a native child window doesn't take it on a click by itself.
     // Window shortcuts (Undo) still work: Qt counts the main window active.
@@ -1886,15 +1894,18 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
         }
     }
 
-    if (event->button() == Qt::LeftButton) {
-        // Alt+drag is the camera-navigation override: it must always orbit,
-        // never reach the active tool. Without this, a tool's mousePress()
-        // would always claim the click (SelectTool reports handled=true even
-        // on empty space, since a click always resolves to "select this" or
-        // "select nothing", and Move/Rotate/Scale are SelectTools that fall
-        // back to that when no gizmo handle is under the cursor), so
-        // m_dragging would latch and the view could never be orbited.
-        if (!(event->modifiers() & Qt::AltModifier) && !m_previewMode) {
+    // One drag at a time: another button during it isn't another.
+    if (m_dragging || m_navigation.dragging() != NavigationAction::None) return;
+
+    // What the navigation scheme binds (docs/NAVIGATION.md §3) comes before the active
+    // tool: it must always move the camera, never reach the tool. A tool's mousePress()
+    // would always claim the click (SelectTool reports handled=true even on empty space,
+    // since a click always resolves to "select this" or "select nothing", and
+    // Move/Rotate/Scale are SelectTools that fall back to that when no gizmo handle is
+    // under the cursor), so m_dragging would latch and the view could never be moved.
+    NavigationAction action = m_navigation.press(event);
+    if (action == NavigationAction::None && event->button() == Qt::LeftButton) {
+        if (!m_previewMode) {
             if (usdcc::tools::Tool* tool = activeToolInstance()) {
                 usdcc::tools::ToolContext ctx = buildToolContext();
                 ctx.shift = event->modifiers().testFlag(Qt::ShiftModifier);
@@ -1914,33 +1925,39 @@ void HydraViewportWindow::mousePressEvent(QMouseEvent* event) {
                 }
             }
         }
-        // Through a stage camera, the drag goes on with the orbit camera from there, or
-        // drives the camera, or (Locked) does nothing (docs/VIEWPORT_CAMERA.md §2).
-        if (!startNavigation()) {
-            m_navigationBlocked = true;
-            return;
-        }
+        // A left drag no tool takes orbits, whatever the scheme.
+        action = NavigationAction::Orbit;
+        m_navigation.begin(action, Qt::LeftButton, event->position());
+    }
+    if (action == NavigationAction::None) return;  // the right button's menu, on its release
+
+    // What the cursor is on now stays under it for a whole pan. Its depth comes from the
+    // frame on screen, so it's read before a stage camera is left for the orbit camera,
+    // which then sees the same.
+    const std::optional<double> drawn =
+        action == NavigationAction::Pan ? drawnDepthAt(event->position()) : std::nullopt;
+    // Through a stage camera, the drag goes on with the orbit camera from there, or
+    // drives the camera, or (Locked) does nothing (docs/VIEWPORT_CAMERA.md §2).
+    if (!startNavigation()) {
+        m_navigationBlocked = true;
+        return;
+    }
+    beginNavigation(action, event->position(), drawn);
+}
+
+void HydraViewportWindow::beginNavigation(usdcc::ui::NavigationAction action, const QPointF& position,
+                                          const std::optional<double>& drawnDepth) {
+    if (action == usdcc::ui::NavigationAction::Orbit) {
         // An orthographic axis view doesn't tumble: a Top view stays a Top view (§3.5.3).
-        m_orbiting = cameraViewTumbles(m_view, m_orthographic);
+        m_orbitTumbles = cameraViewTumbles(m_view, m_orthographic);
         // For the whole drag, so that crossing a pole during it doesn't reverse it.
         m_orbitReversed = orbitIsUpsideDown(m_pitch);
-    } else if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        // What the cursor is on now stays under it for the whole drag. Its depth comes from
-        // the frame on screen, so it's read before a stage camera is left for the orbit
-        // camera, which then sees the same.
-        const std::optional<double> drawn = drawnDepthAt(event->position());
-        if (!startNavigation()) {
-            m_navigationBlocked = true;
-            return;
-        }
-        if (!m_orthographic) m_panDepth = drawn ? *drawn : panDepthAt(event->position());
+    } else if (action == usdcc::ui::NavigationAction::Pan) {
+        if (!m_orthographic) m_panDepth = drawnDepth ? *drawnDepth : panDepthAt(position);
     }
 }
 
 void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
-    const QPoint delta = event->pos() - m_lastMousePos;
-    m_lastMousePos = event->pos();
     m_cursorPos = event->position();
 
     if (event->buttons() == Qt::NoButton) {
@@ -1965,69 +1982,99 @@ void HydraViewportWindow::mouseMoveEvent(QMouseEvent* event) {
             applyToolResult(tool->mouseMove(ctx, ndc, ray));
         }
         renderNow();
-    } else if (m_orbiting) {
+    } else if (m_navigation.dragging() != usdcc::ui::NavigationAction::None) {
+        const usdcc::ui::NavigationStep step = m_navigation.move(event);
+        if (m_navigationBlocked) return;
         // Moving the cursor can leave an event from before it behind, which isn't the
         // mouse moving half a screen.
         const QScreen* onScreen = screen();
         const QRect bounds = onScreen ? onScreen->geometry() : QRect();
-        const bool stale = onScreen && (std::abs(delta.x()) > bounds.width() / 2 || std::abs(delta.y()) > bounds.height() / 2);
-        if (!stale) orbitStep(delta.x(), delta.y(), m_orbitReversed);
-        // At the screen's edge, on from the other side, so a drag never runs out.
-        if (onScreen) {
+        const bool stale = onScreen && (std::abs(step.delta.x()) > bounds.width() / 2 ||
+                                        std::abs(step.delta.y()) > bounds.height() / 2);
+        if (!stale) navigate(step);
+        // At the screen's edge, on from the other side, so a drag never runs out. Not a
+        // pan's: there the cursor stays on what it took hold of.
+        if (onScreen && step.action != usdcc::ui::NavigationAction::Pan) {
             const QPoint global = event->globalPosition().toPoint();
             if (const auto wrapped = wrapCursorAtEdges(global.x(), global.y(), bounds.left(), bounds.top(), bounds.right(), bounds.bottom())) {
                 const QPoint to(wrapped->x, wrapped->y);
                 QCursor::setPos(screen(), to);
-                m_lastMousePos = mapFromGlobal(to);
+                m_navigation.setPosition(QPointF(mapFromGlobal(to)));
             }
         }
-        cameraMoved();
-    } else if (m_panning) {
-        // The scene follows the cursor exactly: orthographic all of it, in perspective
-        // what's as far away as the point the drag began on.
-        const double viewHeight = std::max(1, height());
-        const double unitsPerPixel =
-            m_orthographic ? m_orthoSize / viewHeight : panUnitsPerPixel(m_panDepth, m_fovY, viewHeight);
-        m_target = panOrbitTarget(m_target, orbitAxes(m_distance), delta.x(), delta.y(), unitsPerPixel);
         cameraMoved();
     }
 }
 
 void HydraViewportWindow::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton) {
-        m_orbiting = false;
-        if (m_dragging) {
-            if (usdcc::tools::Tool* tool = activeToolInstance()) {
-                tool->mouseRelease();
-            }
-            m_dragging = false;
-            finishToolEdit();
-            renderNow();
+    if (event->button() == Qt::LeftButton && m_dragging) {
+        if (usdcc::tools::Tool* tool = activeToolInstance()) {
+            tool->mouseRelease();
         }
+        m_dragging = false;
+        finishToolEdit();
+        renderNow();
     }
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = false;
-    }
-    if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
+    const bool navigated = m_navigation.release(event);
+    if (navigated) {
         m_navigationBlocked = false;
-        if (!m_orbiting && !m_panning) finishNavigation();
+        finishNavigation();
     }
-    // Nothing else uses the right button.
-    if (event->button() == Qt::RightButton) Q_EMIT contextMenuRequested(event->globalPosition().toPoint());
+    // The right button's menu, unless a drag with it moved the camera (Alt+Right zooms
+    // in the usdcc scheme).
+    if (event->button() == Qt::RightButton && !(navigated && m_navigation.moved())) {
+        Q_EMIT contextMenuRequested(event->globalPosition().toPoint());
+    }
 }
 
 void HydraViewportWindow::wheelEvent(QWheelEvent* event) {
-    if (!startNavigation()) {  // as a drag does
-        event->accept();
-        return;
-    }
+    event->accept();
+    navigateOnce(m_navigation.wheel(event));
+}
+
+void HydraViewportWindow::navigateOnce(const usdcc::ui::NavigationStep& step) {
+    using usdcc::ui::NavigationAction;
+    if (!step) return;
+    // A trackpad's scroll that orbits or pans, during a drag: the drag's.
+    const bool dragging = m_dragging || m_navigation.dragging() != NavigationAction::None;
+    if (dragging && step.action != NavigationAction::Zoom) return;
+    const std::optional<double> drawn = step.action == NavigationAction::Pan ? drawnDepthAt(step.anchor) : std::nullopt;
+    if (!startNavigation()) return;  // as a drag does
     // A wheel step is one undo step of its own while driving.
     struct EndDrive {
         HydraViewportWindow* window;
         ~EndDrive() { window->finishNavigation(); }
     } endDrive{this};
-    zoomStep(event->angleDelta().y() / 120.0);
+    beginNavigation(step.action, step.anchor, drawn);
+    navigate(step);
     cameraMoved();
+}
+
+void HydraViewportWindow::navigate(const usdcc::ui::NavigationStep& step) {
+    using usdcc::ui::NavigationAction;
+    switch (step.action) {
+        case NavigationAction::Orbit:
+            if (m_orbitTumbles) orbitStep(step.delta.x(), step.delta.y(), m_orbitReversed);
+            break;
+        case NavigationAction::Pan: {
+            // The scene follows the cursor exactly: orthographic all of it, in perspective
+            // what's as far away as the point the drag began on.
+            const double viewHeight = std::max(1, height());
+            const double unitsPerPixel =
+                m_orthographic ? m_orthoSize / viewHeight : panUnitsPerPixel(m_panDepth, m_fovY, viewHeight);
+            m_target = panOrbitTarget(m_target, orbitAxes(m_distance), step.delta.x(), step.delta.y(), unitsPerPixel);
+            break;
+        }
+        case NavigationAction::Zoom:
+            // Settings > Navigation > Zoom to cursor: the wheel's and a pinch's, not a drag's.
+            if (!step.drag && usdcc::ui::navigationOptions().zoomToCursor) {
+                zoomStepAt(step.zoom, step.anchor);
+            } else {
+                zoomStep(step.zoom);
+            }
+            break;
+        case NavigationAction::None: break;
+    }
 }
 
 void HydraViewportWindow::orbitStep(double dx, double dy, bool reversed) {
@@ -2037,12 +2084,26 @@ void HydraViewportWindow::orbitStep(double dx, double dy, bool reversed) {
 }
 
 void HydraViewportWindow::zoomStep(double steps) {
-    const double factor = std::pow(0.9, steps);
+    const double factor = usdcc::ui::navigationZoomFactor(steps);
     if (m_orthographic) {
         m_orthoSize = std::max(kMinDistance, m_orthoSize * factor);
     } else {
         m_distance = std::max(kMinDistance, m_distance * factor);
     }
+}
+
+void HydraViewportWindow::zoomStepAt(double steps, const QPointF& position) {
+    // The camera goes along the cursor's ray, not along its own: whatever is on that ray
+    // stays under the cursor. So it moves sideways too, by what the cursor is off the
+    // middle at the depth it went.
+    const double viewHeight = std::max(1, height());
+    const QPointF offset = position - QPointF(width() / 2.0, height() / 2.0);
+    const OrbitCameraAxes axes = orbitAxes(m_distance);
+    const double before = m_orthographic ? m_orthoSize : m_distance;
+    zoomStep(steps);
+    const double moved = before - (m_orthographic ? m_orthoSize : m_distance);
+    const double unitsPerPixel = m_orthographic ? moved / viewHeight : panUnitsPerPixel(moved, m_fovY, viewHeight);
+    m_target = panOrbitTarget(m_target, axes, -offset.x(), -offset.y(), unitsPerPixel);
 }
 
 void HydraViewportWindow::orbitBy(double dx, double dy) {

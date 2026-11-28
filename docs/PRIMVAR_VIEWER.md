@@ -708,7 +708,8 @@ Linux, other renderers, native instances and point instancers, curves and points
 - **Drawn** with `QPainter`: a grid that thins as it zooms, the 0-1 square in amber, every tile used with its
   number, the faces' edges in one call, seams in cyan, flipped faces filled red, degenerate ones circled in
   orange. Behind it: **nothing, a checker** (the default: a dot in each square whose red grows with u and
-  green with v) **or a texture**. Pan with a drag (or the middle button, or Alt), zoom with the wheel, **F**
+  green with v) **or a texture**. Pan with a drag or the navigation scheme's pan (the middle button), zoom with the wheel
+  or the scheme's zoom drag ([NAVIGATION.md](NAVIGATION.md)), **F**
   or Fit to fit; it stays fitted as the panel's size changes until it's panned or zoomed. A line under it
   says what's there: "Tiles · st, faceVarying · 3 faces · UDIM tiles 1001, 1002, 1011 · 1 flipped · 2 seam
   edges".

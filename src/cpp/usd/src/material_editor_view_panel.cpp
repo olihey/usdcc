@@ -54,7 +54,9 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QShortcut>
+#include <QWheelEvent>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTimer>
@@ -292,10 +294,6 @@ MaterialEditorViewPanel::MaterialEditorViewPanel(StageManager* stageManager, Sta
     connect(m_palette, &ShaderNodePalette::nodeChosen, this, [this](const QString& identifier) {
         addNode(identifier, m_view->mapToScene(m_view->viewport()->rect().center()));
     });
-
-    auto* frame = new QShortcut(QKeySequence(Qt::Key_F), m_view);
-    frame->setContext(Qt::WidgetWithChildrenShortcut);
-    connect(frame, &QShortcut::activated, this, [this]() { fitGraph(kSmallestToFrame); });
 
     m_selectionChanged = this->stageManager()->selectionChanged.connect([this](StageRefPtr changed, std::vector<SdfPath> paths) {
         if (changed != currentStage()) return;
@@ -1120,6 +1118,8 @@ bool MaterialEditorViewPanel::handleKey(QKeyEvent* event, bool run) {
     };
     const Qt::KeyboardModifiers modifiers = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier);
     const int key = event->key();
+    // Shortcuts > Fit to view (F): the graph's while it has the focus.
+    if (usdcc::ui::isFrameKey(event)) return when([this]() { fitGraph(kSmallestToFrame); });
     if (modifiers == Qt::NoModifier) {
         if (key == Qt::Key_Delete || key == Qt::Key_Backspace) return when([this]() { deleteSelected(); });
         if (key == Qt::Key_F2) return when([this]() { startRename(); });
@@ -1168,7 +1168,61 @@ bool MaterialEditorViewPanel::clickWithSelectionKeys(QMouseEvent* mouse) {
     return false;
 }
 
+bool MaterialEditorViewPanel::navigateGraph(QEvent* event) {
+    using usdcc::ui::NavigationAction;
+    switch (event->type()) {
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonDblClick: {
+            // One drag at a time: another button during it isn't another.
+            if (m_navigation.dragging() != NavigationAction::None) return true;
+            return m_navigation.press(static_cast<QMouseEvent*>(event)) != NavigationAction::None;
+        }
+        case QEvent::MouseMove:
+            if (m_navigation.dragging() == NavigationAction::None) return false;
+            navigate(m_navigation.move(static_cast<QMouseEvent*>(event)));
+            return true;
+        case QEvent::MouseButtonRelease:
+            if (m_navigation.dragging() == NavigationAction::None) return false;
+            m_navigation.release(static_cast<QMouseEvent*>(event));
+            return true;
+        case QEvent::Wheel:
+            // Always: QtNodes' own wheel is a fifth a turn whatever its size.
+            navigate(m_navigation.wheel(static_cast<QWheelEvent*>(event)));
+            return true;
+        case QEvent::NativeGesture:
+            if (const usdcc::ui::NavigationStep step = m_navigation.gesture(event)) {
+                navigate(step);
+                return true;
+            }
+            return false;
+        case QEvent::ContextMenu:
+            // No menu for a right button that navigates (Alt+Right zooms in the usdcc scheme).
+            return m_navigation.takeContextMenu(event);
+        default: return false;
+    }
+}
+
+void MaterialEditorViewPanel::navigate(const usdcc::ui::NavigationStep& step) {
+    // The view's scroll bars are hidden, and they are what moves it: over a scene far
+    // bigger than any graph, so they never run out.
+    const auto scrollBy = [this](const QPointF& pixels) {
+        m_view->horizontalScrollBar()->setValue(m_view->horizontalScrollBar()->value() + qRound(pixels.x()));
+        m_view->verticalScrollBar()->setValue(m_view->verticalScrollBar()->value() + qRound(pixels.y()));
+    };
+    if (step.action == usdcc::ui::NavigationAction::Pan) {
+        scrollBy(-step.delta);
+    } else if (step.action == usdcc::ui::NavigationAction::Zoom && step.zoom != 0.0) {
+        // What is under the cursor, or where the drag began, stays there.
+        const QPoint at = step.anchor.toPoint();
+        const QPointF anchored = m_view->mapToScene(at);
+        m_view->setupScale(m_view->transform().m11() / usdcc::ui::navigationZoomFactor(step.zoom));  // within the view's range
+        scrollBy(QPointF(m_view->mapFromScene(anchored) - at));
+    }
+}
+
 bool MaterialEditorViewPanel::handleViewportEvent(QEvent* event) {
+    // What Settings > Navigation binds, and the wheel, before the graph sees them.
+    if (navigateGraph(event)) return true;
     if (m_swallowingClick && (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)) {
         if (event->type() == QEvent::MouseButtonRelease && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) m_swallowingClick = false;
         return true;

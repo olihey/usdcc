@@ -1,4 +1,5 @@
 #pragma once
+#include "usdcc/ui/navigation.h"
 #include "usdcc/usd/render_view_panel.h"
 #include "usdcc/usd/orbit_camera.h"
 #include <QObject>
@@ -31,6 +32,8 @@ private:
 
 // Input in logical coordinates normalized by the displayed image's height.
 // Letterbox clicks do nothing; no gesture picks or changes scene selection.
+// Which drag orbits, pans and zooms is Settings > Navigation's (docs/NAVIGATION.md); a
+// left drag orbits whatever the scheme, as this view has no tools.
 class NavigationInput final : public QObject {
 public:
     NavigationInput(QWindow* window, QObject* owner);
@@ -43,8 +46,9 @@ protected:
     bool eventFilter(QObject*, QEvent*) override;
 private:
     QRectF imageRect() const;
+    // One step of the scheme's, from a drag, the wheel or a pinch.
+    void navigate(const usdcc::ui::NavigationStep& step);
     QWindow* window;
-    QPointF previous;
-    Qt::MouseButton dragging = Qt::NoButton;
+    usdcc::ui::NavigationInput navigation{usdcc::ui::NavigationSpace::View3D};
 };
 }  // namespace usdcc::rtx

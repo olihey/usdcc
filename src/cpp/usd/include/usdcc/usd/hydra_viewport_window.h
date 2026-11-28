@@ -4,6 +4,7 @@
 
 #include "usdcc/core/signal.h"
 #include "usdcc/tools/tool_set.h"
+#include "usdcc/ui/navigation.h"
 #include "usdcc/usd/camera_framing.h"
 #include "usdcc/usd/orbit_camera.h"
 #include "usdcc/usd/primvar_colors.h"
@@ -224,7 +225,7 @@ public:
     void zoomBy(double steps);
     // A mouse button is down on the window for the camera or a tool: the host's own hand,
     // which a watcher's moves wait for (§2.1, "the host always wins").
-    bool isMouseNavigating() const { return m_orbiting || m_panning || m_dragging; }
+    bool isMouseNavigating() const { return m_dragging || m_navigation.dragging() != usdcc::ui::NavigationAction::None; }
 
     // The camera this viewport renders with, as a frustum: position and
     // orientation (ComputeViewInverse() is the camera-to-world matrix), the
@@ -500,6 +501,16 @@ private:
     // The orbit and the zoom both the mouse and orbitBy()/zoomBy() do.
     void orbitStep(double dx, double dy, bool reversed);
     void zoomStep(double steps);
+    // The zoom towards what is at `position` (Settings > Navigation > Zoom to cursor).
+    void zoomStepAt(double steps, const QPointF& position);
+    // The mouse's navigation (docs/NAVIGATION.md): what a drag of `action` beginning at
+    // `position` goes by, a step of it carried out, and a step that is no drag (the
+    // wheel, a pinch, a trackpad's scroll) from startNavigation() to finishNavigation().
+    // `drawnDepth` is drawnDepthAt(position), read before the stage camera was left.
+    void beginNavigation(usdcc::ui::NavigationAction action, const QPointF& position,
+                         const std::optional<double>& drawnDepth);
+    void navigate(const usdcc::ui::NavigationStep& step);
+    void navigateOnce(const usdcc::ui::NavigationStep& step);
     PXR_NS::GfVec3d cameraPosition() const;
     // The up axis the camera orbits about: the stage's. A preview's stays Y, as its
     // shapes are turned to (docs/MATERIAL_EDITOR.md §7.3), but on a prim of the scene.
@@ -615,10 +626,10 @@ private:
     // the camera goes.
     PXR_NS::GfFrustum m_lastStageFrustum;
 
-    QPoint m_lastMousePos;
-    bool m_orbiting = false;
+    // The drag that moves the camera, by Settings > Navigation's scheme.
+    usdcc::ui::NavigationInput m_navigation{usdcc::ui::NavigationSpace::View3D};
+    bool m_orbitTumbles = true;    // this orbit turns the view: not an orthographic axis view's
     bool m_orbitReversed = false;  // this drag began upside down, so turns the other way
-    bool m_panning = false;
     double m_panDepth = kDefaultOrbitDistance;  // this pan's panDepthAt(), where it began
     bool m_dragging = false;
     bool m_toolEditActive = false;  // between toolEditStarted() and toolEditFinished()

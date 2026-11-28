@@ -133,6 +133,47 @@ USDCC_TEST(settings_definitions) {
           "and a list of folders");
 }
 
+// A mouse binding (usdcc/core/mouse_binding.h), and a definition's own rule.
+USDCC_TEST(settings_mouse_binding_and_refuses) {
+    Settings settings;
+    SettingType type{};
+    CHECK(usdcc::core::parseSettingType("mouse", &type) && type == SettingType::MouseBinding &&
+              usdcc::core::settingTypeName(SettingType::MouseBinding) == "mouse",
+          "the type has a name");
+    CHECK(!settings.define({.key = "A/bad", .category = "A", .type = SettingType::MouseBinding, .defaultValue = std::string("Alt")}),
+          "a default that's no binding is refused");
+    int refusals = 0;
+    CHECK(settings.define({.key = "A/drag",
+                           .category = "A",
+                           .type = SettingType::MouseBinding,
+                           .defaultValue = std::string("middle"),
+                           .refuses =
+                               [&refusals](const usdcc::core::SettingValue& value) {
+                                   ++refusals;
+                                   return std::get<std::string>(value) == "Left" ? std::string("Not the left button.") : std::string();
+                               }}),
+          "a mouse binding");
+    CHECK(settings.get<std::string>("A/drag") == "Middle", "the default is stored as a binding is written");
+    CHECK(settings.setValue("A/drag", std::string("shift + ALT+right")) && settings.get<std::string>("A/drag") == "Shift+Alt+Right",
+          "so is a value");
+    CHECK(!settings.setValue("A/drag", std::string("Alt+Wheel")) && !settings.setValue("A/drag", 3),
+          "what's no binding is refused");
+    int changes = 0;
+    auto connection = settings.changed.connect([&changes](const std::string&) { ++changes; });
+    CHECK(!settings.setValue("A/drag", std::string("Left")) && settings.get<std::string>("A/drag") == "Shift+Alt+Right" && changes == 0,
+          "and what the definition refuses, with nothing changed");
+    CHECK(settings.setValue("A/drag", std::string("")) && settings.get<std::string>("A/drag").empty() && changes == 1,
+          "nothing is a binding to nothing");
+    refusals = 0;
+    CHECK(settings.setValue("A/drag", std::string("Middle")) && refusals == 0, "the default isn't asked about");
+
+    // A stored value the definition refuses is the default.
+    auto backend = std::make_unique<usdcc::core::MemorySettingsBackend>();
+    backend->write(*settings.definition("A/drag"), std::string("Left"));
+    settings.setBackend(std::move(backend));
+    CHECK(settings.get<std::string>("A/drag") == "Middle", "a stored value that is refused falls back to the default");
+}
+
 USDCC_TEST(settings_folder_list) {
     Settings settings;
     CHECK(settings.define({.key = "A/folders", .category = "A", .type = SettingType::FolderList, .defaultValue = std::string(),

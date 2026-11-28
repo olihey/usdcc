@@ -362,10 +362,19 @@ void CurveView::paintEvent(QPaintEvent*) {
 }
 
 void CurveView::mousePressEvent(QMouseEvent* event) {
+    // One drag at a time: another button during it isn't another. With no other button
+    // down the drag's release was lost, and this press starts afresh.
+    if (m_drag != Drag::None && (event->buttons() & ~event->button())) {
+        event->accept();
+        return;
+    }
+    m_drag = Drag::None;
+    m_navigation.cancel();
     m_pressPosition = m_currentPosition = event->position();
     m_offset = m_delta = 0.0;
-    if (event->button() == Qt::MiddleButton) {
-        m_drag = Drag::Pan;
+    // What Settings > Navigation binds pans and zooms, before anything under the cursor.
+    if (m_navigation.press(event) != usdcc::ui::NavigationAction::None) {
+        m_drag = Drag::Navigate;
         event->accept();
         return;
     }
@@ -393,16 +402,9 @@ void CurveView::mousePressEvent(QMouseEvent* event) {
 }
 
 void CurveView::mouseMoveEvent(QMouseEvent* event) {
-    const QPointF previous = m_currentPosition;
     m_currentPosition = event->position();
     switch (m_drag) {
-        case Drag::Pan: {
-            axis().pan(m_currentPosition.x() - previous.x());
-            const double shift = valueAt(previous.y()) - valueAt(m_currentPosition.y());
-            setValueRange(m_valueBottom + shift, m_valueTop + shift);
-            m_panel->setTimeAxisRange(m_axis.range());
-            break;
-        }
+        case Drag::Navigate: navigate(m_navigation.move(event)); break;
         case Drag::Move:
             m_offset = std::round(axis().timeAt(m_currentPosition.x()) - axis().timeAt(m_pressPosition.x()));
             m_delta = valueAt(m_currentPosition.y()) - valueAt(m_pressPosition.y());
@@ -416,6 +418,12 @@ void CurveView::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void CurveView::mouseReleaseEvent(QMouseEvent* event) {
+    if (m_drag == Drag::Navigate) {
+        // Another button's release leaves the drag going.
+        if (m_navigation.release(event)) m_drag = Drag::None;
+        event->accept();
+        return;
+    }
     const Drag drag = m_drag;
     m_drag = Drag::None;
     switch (drag) {
@@ -446,25 +454,57 @@ void CurveView::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void CurveView::wheelEvent(QWheelEvent* event) {
-    const double steps = event->angleDelta().y() / 120.0;
-    const double factor = std::pow(0.85, steps);
-    const QPointF at = event->position();
-    // Ctrl: time only; Shift: values only; otherwise both, about the cursor.
-    if (!(event->modifiers() & Qt::ShiftModifier)) {
-        axis().zoom(factor, at.x());
-        m_panel->setTimeAxisRange(m_axis.range());
-    }
-    if (!(event->modifiers() & Qt::ControlModifier)) {
-        const double anchor = valueAt(at.y());
-        setValueRange(anchor + (m_valueBottom - anchor) * factor, anchor + (m_valueTop - anchor) * factor);
-    }
+    navigate(m_navigation.wheel(event));
     event->accept();
+}
+
+bool CurveView::event(QEvent* event) {
+    // The key that frames is this view's while it has the focus.
+    if (usdcc::ui::claimFrameKey(event)) return true;
+    // No menu for a right button that navigates (Alt+Right zooms in the usdcc scheme).
+    if (m_navigation.takeContextMenu(event)) return true;
+    // A pinch zooms, as the wheel does.
+    if (const usdcc::ui::NavigationStep step = m_navigation.gesture(event)) {
+        navigate(step);
+        return true;
+    }
+    return QWidget::event(event);
+}
+
+void CurveView::navigate(const usdcc::ui::NavigationStep& step) {
+    switch (step.action) {
+        case usdcc::ui::NavigationAction::Pan: {
+            axis().pan(step.delta.x());
+            const double shift = valueAt(0.0) - valueAt(step.delta.y());
+            setValueRange(m_valueBottom + shift, m_valueTop + shift);
+            m_panel->setTimeAxisRange(m_axis.range());
+            break;
+        }
+        case usdcc::ui::NavigationAction::Zoom: {
+            // The wheel with Ctrl: time only; with Shift: values only; otherwise both. A
+            // zoom drag's sideways part is the time's, the rest the values'.
+            const double timeSteps = step.modifiers.testFlag(Qt::ShiftModifier) ? 0.0 : step.zoomAxes.x();
+            const double valueSteps = step.modifiers.testFlag(Qt::ControlModifier) ? 0.0 : step.zoomAxes.y();
+            if (timeSteps != 0.0) {
+                axis().zoom(usdcc::ui::navigationZoomFactor(timeSteps), step.anchor.x());
+                m_panel->setTimeAxisRange(m_axis.range());
+            }
+            if (valueSteps != 0.0) {
+                const double factor = usdcc::ui::navigationZoomFactor(valueSteps);
+                const double anchor = valueAt(step.anchor.y());
+                setValueRange(anchor + (m_valueBottom - anchor) * factor, anchor + (m_valueTop - anchor) * factor);
+            }
+            break;
+        }
+        default: return;
+    }
+    update();
 }
 
 void CurveView::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         m_panel->deletePicked();
-    } else if (event->key() == Qt::Key_F && event->modifiers() == Qt::NoModifier) {
+    } else if (usdcc::ui::isFrameKey(event)) {
         m_panel->frameAll();
     } else {
         QWidget::keyPressEvent(event);

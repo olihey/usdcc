@@ -17,7 +17,9 @@ A plugin can add its own settings; they get a page in the dialog:
 
 Types: "bool", "int", "float", "string", "choice" (one of `choices`),
 "color" ("#rrggbb"), "shortcut" (key text such as "W" or "Ctrl+Shift+S",
-"" for none) and "folder" (a path, "" for none, with a Browse button).
+"" for none), "mouse" (a mouse button with modifiers such as "Alt+Left" or
+"Shift+Middle", "" for none) and "folder" (a path, "" for none, with a
+Browse button).
 
 Needs the running app.
 """
