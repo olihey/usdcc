@@ -3,13 +3,18 @@
 Building the Arnold pack (hdArnold and its three sibling plugins, `deps/usd-plugins/arnold.json`)
 in CI, without the Arnold SDK ever reaching the public repository.
 
-**Status (2026-11-26): set up and working.** The private repository `olihey/usdcc-arnold` holds
+**Status (2026-11-28): set up and working, and published as a download in the app.** The pin
+says `"publish": true` since then, on the maintainer's decision, with the question to Autodesk
+(phase 4) still to be sent: §6, "Published". The packs for it are copied by hand from the
+private release to `olihey/usdcc`'s OpenUSD release; the workflow doesn't do that yet (phase 5).
+
+**As it was set up (2026-11-26).** The private repository `olihey/usdcc-arnold` holds
 the three trimmed 7.5.4.2 SDKs and a workflow, run by hand, that builds the pack for Windows x64,
 macOS arm64 and Linux x64 with this repository's tools and pin, refuses a pack holding any SDK
 file, checks each over CI's OpenUSD, rendering a frame with Arnold on each of the three, and keeps
 them in a private release named as that OpenUSD asset (`deps/usd-70c45e83b-76ce049f`). The macOS
 and Linux packs also render in usdcc's viewport. The pack stays
-`local`: `deps-usd-plugins.yml` leaves it out and nothing of it is published. What's left:
+`local`: `deps-usd-plugins.yml` leaves it out. What's left:
 phase 4, asking Autodesk (§7).
 
 | Phase | State |
@@ -18,7 +23,7 @@ phase 4, asking Autodesk (§7).
 | 2. The workflow, all three platforms, each rendering a frame | Done |
 | 3. A CI-built pack in usdcc | Done on macOS and Linux (x86-64, in a container); Windows not tried in usdcc |
 | 4. Ask Autodesk: CI download, and publishing the plugins | Open, for the maintainer |
-| 5. Publish as an optional pack | Only after 4 |
+| 5. Publish as a download in the app | Done 2026-11-28, before 4; the copy to the public release is by hand |
 
 ## 1. Decisions
 
@@ -155,7 +160,7 @@ published `optional` sets.)
 | 5 | What starts a build | By hand. Later also from `olihey/usdcc`'s `deps-usd.yml` when an OpenUSD asset is published (a `repository_dispatch` with a token that may only start that workflow) |
 | 6 | Keep packs for how long | All of them, as releases: an older usdcc tag's pins name an older pack, as for the public packs |
 | 7 | Cost: private repositories pay for Actions minutes beyond the plan's allowance, and macOS and Windows minutes count several times a Linux minute | Small: the build takes about a minute plus fetching OpenUSD (238 MB) and the SDK. Check GitHub's current pricing before setting it up |
-| 8 | Should the pack keep `licenses/usd-plugins/arnold/arnold-sdk/EULA.txt` | Yes while it is private (it says on what terms the user's own Arnold runs). Drop it if the pack is ever published without SDK files: shipping the SDK's EULA suggests the SDK is in it |
+| 8 | Should the pack keep `licenses/usd-plugins/arnold/arnold-sdk/EULA.txt` | **Dropped (2026-11-28)**, with publishing: shipping the SDK's EULA suggests the SDK is in it. The pin has no `licenses` entry any more |
 
 ## 6. Licences (read 2026-11-26)
 
@@ -176,6 +181,13 @@ published `optional` sets.)
    CI download and publishes them, without the core, for 7.4 and 7.5 (release 1.7.7.0).
 
 Not legal advice: what is above is what the texts say, read by us.
+
+**Published (2026-11-28).** The maintainer decided to publish the plugins before asking: the
+EULA's grant for Developed Applications and Gaffer's releases weigh more than a literal reading
+of §13(b). The question of point 3 is still worth Autodesk's written answer, and still goes to
+them; a no takes the packs off the releases again and sets the pin back. What is published is
+the four plugins and arnold-usd's `LICENSE.md`, built from Apache-2.0 source: no SDK file, no
+header, not the SDK's `EULA.txt`.
 
 ## 7. Phases
 
@@ -211,11 +223,24 @@ Not legal advice: what is above is what the texts say, read by us.
    Python was turned on in a build configured without it ([BUILD_OPTIONS.md](BUILD_OPTIONS.md) §10).
 4. **Ask Autodesk** (you): the CI download (§5 item 2), and in the same message whether usdcc may
    publish hdArnold binaries, Apache-2.0, built against the SDK, without the core (§6.3).
-5. **Only if Autodesk agrees in writing:** the pin's `set` becomes `optional` with `"publish":
-   true`; the private workflow's last step also uploads the zip to `olihey/usdcc`'s OpenUSD asset
-   release (a token that may only write releases there), and it ships as an optional pack
-   ([USD_PLUGINS.md](USD_PLUGINS.md) §10) with a note that it needs Arnold from Autodesk. Or, with
-   Autodesk's CI download, the build moves into `deps-usd-plugins.yml` itself, as Gaffer's is.
+5. **Publish.** *Planned as "only if Autodesk agrees in writing"; done 2026-11-28 on the
+   maintainer's decision, before phase 4 (§6, "Published").* The pin stays in the `local` set,
+   so `deps-usd-plugins.yml` still never builds it and no other pack is renamed, and says
+   `"publish": true`: `tools/fetch_usd.py --optional` then wants its zip in `olihey/usdcc`'s
+   OpenUSD asset release, as `release.yml` runs it, and `tools/deploy.py --pack-folders` writes
+   it as a pack usdcc installs itself ([USD_PLUGINS.md](USD_PLUGINS.md) §10), whose description
+   says it needs Arnold from Autodesk. Not as an archive to unpack over usdcc, nor a second disk
+   image. After a change to the pin, its patch, `build_usd_plugin.py`, `usd_plugin_asset.py` or
+   the OpenUSD pin:
+   1. run `arnold.yml` here with the `olihey/usdcc` ref (`master`, once the change is merged);
+   2. copy the three zips to the public release, by hand for now:
+      `gh release download <tag> --repo olihey/usdcc-arnold --pattern '<the three names>'`, then
+      `gh release upload <tag> <the zips> --repo olihey/usdcc`. `release.yml` fails at its start
+      until they are there, and names the zip it misses.
+
+   Still to do: the workflow's own last step doing 2 (a token that may only write releases of
+   `olihey/usdcc`). Or, with Autodesk's CI download, the build moves into
+   `deps-usd-plugins.yml` itself, as Gaffer's is.
 6. **Linux x64** (2026-11-26): the pin lists it, `enableArnold()` loads `bin/libai.so`, and the
    workflow has an `ubuntu-24.04` job. **In usdcc (2026-11-27):** in an x86-64 Ubuntu 24.04 container
    on the Mac (Colima, Rosetta), usdcc built from `claude/packs-in-app` (`e074fa3`) against CI's

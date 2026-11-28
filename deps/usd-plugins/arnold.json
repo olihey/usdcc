@@ -21,13 +21,10 @@
             {"linux-x64": ["-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-as-needed", "-DCMAKE_MODULE_LINKER_FLAGS=-Wl,--no-as-needed"]}],
   "install_prefix": "plugin/arnold",
   "preloaded": {"linux-x64": ["libai.so"]},
-  "licenses": {
-    "arnold-sdk": ["{arnold}/EULA.txt"]
-  },
   "platforms": ["win64", "macos-arm64", "linux-x64"],
   "license": "Apache-2.0",
   "set": "local",
-  "publish": false,
+  "publish": true,
   "check": {
     "preload": {"win64": ["{arnold}/bin/ai.dll"], "macos-arm64": ["{arnold}/bin/libai.dylib"],
                 "linux-x64": ["{arnold}/bin/libai.so"]},

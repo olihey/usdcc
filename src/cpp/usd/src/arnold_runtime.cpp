@@ -91,9 +91,11 @@ ArnoldStatus enableArnold(const std::string& arnoldFolder, const std::string& us
     const std::filesystem::path root = std::filesystem::u8path(usdRoot.empty() ? usdRootFolder() : usdRoot);
     const std::filesystem::path plugins = root / "plugin" / "arnold";
     if (!std::filesystem::is_regular_file(plugins / "plugInfo.json")) {
+        status.noPlugins = true;
         status.message = "Settings > Renderers names an Arnold folder, but this usdcc has no Arnold plugins (no " +
                          utf8(plugins / "plugInfo.json") +
-                         "). Build them with tools/build_usd_plugin.py arnold (docs/USD_PLUGINS.md)";
+                         "). Install the Arnold pack in View > Plugins > Packs, or build them with "
+                         "tools/build_usd_plugin.py arnold (docs/USD_PLUGINS.md)";
         return status;
     }
     status.pluginFolder = utf8(plugins);

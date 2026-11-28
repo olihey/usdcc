@@ -3,6 +3,7 @@
 // become environment variables.
 #include "test_harness.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/core/settings.h"
 #include "usdcc/usd/arnold_runtime.h"
 #include "usdcc/usd/usd_environment.h"
@@ -19,7 +20,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 using namespace usdcc::usd;
 
@@ -33,6 +37,24 @@ const UsdRuntimeInfo::Row* row(const UsdRuntimeInfo& info, const std::string& se
     }
     return nullptr;
 }
+
+// What was logged, to count the records that say something.
+struct Collect : usdcc::core::LogSink {
+    std::mutex mutex;
+    std::vector<std::string> messages;
+    void onRecord(const usdcc::core::LogRecord& record) override {
+        std::lock_guard lock(mutex);
+        messages.push_back(record.message);
+    }
+    int count(const std::string& text) {
+        std::lock_guard lock(mutex);
+        int n = 0;
+        for (const std::string& message : messages) {
+            if (message.find(text) != std::string::npos) ++n;
+        }
+        return n;
+    }
+};
 }  // namespace
 
 USDCC_TEST(usd_runtime_info) {
@@ -246,15 +268,43 @@ USDCC_TEST(arnold_runtime) {
 #else
     const char* const coreName = "bin/libai.so";
 #endif
-    CHECK(!noPack.enabled && noPack.message.find("no Arnold plugins") != std::string::npos,
+    CHECK(!noPack.enabled && noPack.noPlugins && noPack.message.find("no Arnold plugins") != std::string::npos,
           "no pack: %s", noPack.message.c_str());
+    CHECK(noPack.message.find("View > Plugins > Packs") != std::string::npos, "and where to get one: %s", noPack.message.c_str());
     std::filesystem::create_directories(fake / "usd" / "plugin" / "arnold");
     std::filesystem::create_directories(fake / "usd" / "usd-plugins");
     std::ofstream(fake / "usd" / "plugin" / "arnold" / "plugInfo.json") << R"({"Includes": ["*/resources/"]})";
     std::ofstream(fake / "usd" / "usd-plugins" / "arnold.json") << R"({"pack": "arnold", "version": "7.5.4.0"})";
     const ArnoldStatus noCore = enableArnold((fake / "arnold").generic_string(), fakeRoot);
-    CHECK(!noCore.enabled && noCore.packVersion == "7.5.4.0" && noCore.message.find(coreName) != std::string::npos,
+    CHECK(!noCore.enabled && !noCore.noPlugins && noCore.packVersion == "7.5.4.0" &&
+              noCore.message.find(coreName) != std::string::npos,
           "the pack's version read, and no Arnold core: %s", noCore.message.c_str());
+
+    // A pack usdcc downloaded is laid out the same, in its own folder (docs/USD_PLUGINS.md §10):
+    // it gets its turn only when the settings named an Arnold folder and OpenUSD's own
+    // root had no plugins for it.
+    CHECK(!enableArnoldPack(fakeRoot), "no pack is tried when the settings weren't applied with an Arnold folder");
+    usdcc::core::Settings packSettings;
+    defineUsdEnvironmentSettings(packSettings);
+    packSettings.setValue(kUsdArnoldFolderKey, (fake / "arnold").generic_string());
+    const auto sink = std::make_shared<Collect>();
+    Collect& captured = *sink;
+    usdcc::core::LogHub::instance().addSink(sink, false);
+    applyUsdEnvironmentSettings(packSettings);
+    if (std::filesystem::is_regular_file(root / "plugin" / "arnold" / "plugInfo.json")) {
+        // This OpenUSD has an Arnold pack of its own (a local build): that one is used.
+        CHECK(!enableArnoldPack(fakeRoot), "the pack beside OpenUSD comes first");
+    } else {
+        CHECK(captured.count("no Arnold plugins") == 0, "nothing said yet: a downloaded pack may have them");
+        CHECK(!enableArnoldPack(fakeRoot), "the pack is tried, and Arnold stays off without a core");
+        CHECK(captured.count(coreName) == 1, "which is what the log says, for the pack's folder");
+        CHECK(!enableArnoldPack(fakeRoot), "once: a second call does nothing");
+        CHECK(captured.count(coreName) == 1, "and says nothing");
+        applyUsdEnvironmentSettings(packSettings);
+        CHECK(!enableArnoldPack(""), "no pack either");
+        CHECK(captured.count("no Arnold plugins") == 1, "then the folder is said to have no plugins to go with");
+    }
+    usdcc::core::LogHub::instance().removeSink(sink.get());
     CHECK(PXR_NS::ArchGetEnv("PXR_PLUGINPATH_NAME") == before, "the plugin path left alone when Arnold stays off");
     std::filesystem::remove_all(fake);
 }

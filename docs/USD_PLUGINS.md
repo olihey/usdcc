@@ -10,8 +10,10 @@ deploy with it, are built and checked locally (phase 8). Phase 3, Gatling, is bu
 and Linux and renders in usdcc's viewport; CI builds it but doesn't publish it (§5).
 Phase 7, Arnold, renders in usdcc's viewport on Windows and macOS (arm64) when Settings >
 Renderers > Arnold names an Arnold folder. It is a `local` pack: `olihey/usdcc`'s CI never builds
-it, but a private repository's does, for Windows x64, macOS arm64 and Linux x64, and keeps the packs
-there, unpublished ([ARNOLD_CI.md](ARNOLD_CI.md)).
+it, but a private repository's does, for Windows x64, macOS arm64 and Linux x64
+([ARNOLD_CI.md](ARNOLD_CI.md)). Since 2026-11-28 its pin says `"publish": true`: the plugins,
+without anything of the Arnold SDK, are a download in the app (§5, §10), on the maintainer's
+decision and before Autodesk has answered. No release has run with it yet.
 Phase 6, Aurora, was tried locally (2026-11-23): hdAurora **builds against our OpenUSD** with a
 small patch, no Autodesk fork needed, and registers in usdcc, but its renderer fails to start
 there; no pin yet (§7 phase 6). Optional packs are installed in the app, and updated with it
@@ -138,8 +140,11 @@ Notes:
   - **Where it is.** The pack installs into `plugin/arnold` (`install_prefix`, with
     `-DPREFIX_PLUGINS=.`), beside OpenUSD's `plugin/usd`, whose `plugInfo.json` only
     includes its own subfolders. Built with `--install`, or copied over the OpenUSD
-    install, it is in `<OpenUSD>/plugin/arnold`; a deploy would have it in
-    `<deploy>/plugin/arnold`, but `tools/deploy.py` leaves `local` packs out (§5).
+    install, it is in `<OpenUSD>/plugin/arnold`. No deploy has it: `tools/deploy.py` writes
+    it as a pack usdcc downloads (§10), which keeps the same `plugin/arnold` in the pack's
+    own folder, `<user data>/packs/<version>-<platform>/arnold/`. That pack's
+    `usdcc-plugin.json` names no USD folder, so the plugin manager registers nothing of
+    it at the scan.
   - **Turning it on.** Settings > Renderers > Arnold > Arnold folder (`USD/arnoldFolder`),
     from the next start: an Arnold SDK or install, the folder with `bin/ai.dll`
     (`bin/libai.dylib` on macOS, `bin/libai.so` on Linux). Once
@@ -148,7 +153,12 @@ Notes:
     `applyUsdEnvironmentSettings()`, then:
     1. finds the pack in `plugin/arnold` next to the folder OpenUSD's libraries were
        loaded from, and reads which Arnold it was built for from
-       `usd-plugins/arnold.json` (the pin's `version`);
+       `usd-plugins/arnold.json` (the pin's `version`). Where there is none, the pack
+       usdcc downloaded gets its turn once the packs are made loadable
+       (`enableArnoldPack()`, from `pluginOptions()` in the app and in usdcc_node), with
+       the same steps under the pack's folder; a pack beside OpenUSD, a local build's,
+       comes first. Only when neither is there does the log say that the Arnold folder
+       has no plugins to go with;
     2. loads `bin/ai.dll` by its full path (`LOAD_WITH_ALTERED_SEARCH_PATH`), so its own
        DLLs come from its own folder and nothing goes on `PATH`. That folder has Qt 6
        DLLs of its own (3ds Max's copy and the SDK both do). On macOS and Linux
@@ -361,11 +371,14 @@ and after `deps-usd.yml` has run, since a new OpenUSD gives every pack a new nam
    keep it with the workflow run for two weeks (§5). The pack's earlier zips stay there: an
    older usdcc tag's pins name them, and `release.yml` can be run again for that tag.
 
-A pack marked `local` (§5) is built only when its SDK is there (a secret URL, or the
-self-hosted runner) and is kept as a workflow artifact, never published. Arnold's is built in a
-private repository, `olihey/usdcc-arnold`, that holds the trimmed SDKs and runs the build with
-these tools and this repository's pin, so the public one never touches the SDK; its packs are
-release assets there, named as here ([ARNOLD_CI.md](ARNOLD_CI.md)).
+A pack marked `local` (§5) is never built by this workflow: its SDK isn't here.
+Arnold's is built in a private repository, `olihey/usdcc-arnold`, that holds the trimmed
+SDKs and runs the build with these tools and this repository's pin, so the public one never
+touches the SDK; its packs are release assets there, named as here
+([ARNOLD_CI.md](ARNOLD_CI.md)). A `local` pin with `"publish": true` (Arnold's, the only
+one) has its zip copied from there to the OpenUSD asset's release, where
+`tools/fetch_usd.py --optional` finds it as it finds the optional set's. For a `local` pin
+"publish" is false unless it says true.
 
 ### `build.yml`, `release.yml`, `tools/deploy.py`
 
@@ -433,7 +446,7 @@ How an optional pack ships (Linux, and macOS in the last point; on Windows only 
 - On macOS `--optional-packs DIR` makes `DIR/<pack>/<deploy's name>/usdcc.app`, a copy of the
   deployed bundle with the pack in it, checked and signed as a whole: files unpacked over a signed
   bundle break its signature. The job makes a disk image of each, and starts usdcc from it.
-| `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never published | `arnold`, `usdfbx`, `usdsbsar` |
+| `local` | Built on a machine that has the SDK, or a private repository's CI (Arnold, [ARNOLD_CI.md](ARNOLD_CI.md)); never by this repository's. Not published, unless its pin says `"publish": true`: then the plugins, never the SDK, are a download usdcc installs itself (§10) and nothing else: no archive to unpack over usdcc, no second disk image | `arnold` (published since 2026-11-28, Windows x64, Linux x64, macOS arm64), `usdfbx`, `usdsbsar` |
 
 - **Gatling is GPL-3.0-or-later.** Loaded into usdcc's process it makes the whole a combined
   work, the question the Blender mesh tools already raised ([RELEASE.md](RELEASE.md) §6). It
@@ -501,15 +514,26 @@ How an optional pack ships (Linux, and macOS in the last point; on Windows only 
 - **Arnold, FBX and Substance** need SDKs that can't be republished. Whether a plugin
   built against them may be published without the SDK is a question for their licence
   texts (§8).
-- **Arnold's SDK licence** (`EULA.txt` in the SDK, which the pack carries in
-  `licenses/usd-plugins/arnold/arnold-sdk/`) is more open than that: it lets the SDK be
+- **Arnold's SDK licence** (`EULA.txt` in the SDK; the pack carried it in
+  `licenses/usd-plugins/arnold/arnold-sdk/` until it was published) is more open than that: it lets the SDK be
   distributed "as an integrated part of" an application, only embedded in it, only to
   those the application is licensed to, under terms "no less protective" of Autodesk
   than its Terms of Use, and renders from it have the watermark. It refers to Autodesk's
   general Terms of Use, read on 2026-11-26 with the rest ([ARNOLD_CI.md](ARNOLD_CI.md) §6).
   usdcc's BSD-3-Clause doesn't meet the "no less protective" condition by itself, so the core
   is never shipped; the plugins alone could be, as Gaffer ships its own, once Autodesk confirms
-  it in writing. Until then the pack stays `local`.
+  it in writing.
+
+  **Published all the same (2026-11-28), on the maintainer's decision:** the plugins as a
+  download in the app, on the strength of the EULA's own grant and of Gaffer's precedent,
+  while the question to Autodesk ([ARNOLD_CI.md](ARNOLD_CI.md) §7 phase 4) is still to be
+  sent. If Autodesk says no, the pin goes back to `"publish": false` and the packs are taken
+  off the releases. What keeps it to the plugins:
+  - the pack has no file of the SDK: the private workflow refuses one that does, and the
+    pin no longer asks for the SDK's `EULA.txt`, which suggested the SDK was in it;
+  - it is `local` still, so this repository's CI never has the SDK;
+  - usdcc registers its plugins only with the user's own Arnold, named in Settings, and
+    says in the pack's description that it needs one.
 - **Standard packs are Apache-2.0**, but each brings libraries of its own (Cycles: OpenVDB,
   Open Image Denoise; Aurora: Slang, the DirectX shader compiler's `dxil.dll`). Step 5 of
   the build collects their licences, and a pack isn't `standard` until that list is read.
@@ -803,7 +827,8 @@ How an optional pack ships (Linux, and macOS in the last point; on Windows only 
 7. **Arnold**, as a `local` pack.
    *Built, and checked locally on Windows, then macOS. Not built by this repository's CI
    (`local`); since 2026-11-26 built and checked for Windows x64, macOS arm64 and Linux x64 by
-   a private repository's ([ARNOLD_CI.md](ARNOLD_CI.md)).*
+   a private repository's ([ARNOLD_CI.md](ARNOLD_CI.md)). Published as a download in the app
+   since 2026-11-28 (§5, §10).*
    - *The SDK. 3ds Max 2027's Arnold (MAXtoA) has the core, 7.5.2, but no headers and no
      `ai.lib`, and its own `hdArnold.dll` is built against 3ds Max's OpenUSD
      (`3dsmax_usd.dll`, oneTBB's `tbb12.dll`), so none of it can be used here. The SDK
@@ -928,7 +953,7 @@ yet, MATERIAL_EDITOR.md §3.4), volumes, Linux and macOS in the app (their packs
 |---|---|---|
 | 1 | Do the plugins build against 26.08 from `typhoon/main` at all? Gatling and Adobe's are proven; arnold-usd names 25.11 as its newest | Try each locally before its phase; carry small fixes as patches in `deps/usd-plugins/` |
 | 2 | May usdcc publish a GPL-3.0 Gatling pack as a separate download? | **Reviewed (2026-11-27, §5):** not for the standard release, which ships the RTX and V-Ray integrations and not the combination's source. Yes as part of the GPL-3.0 configuration (Blender's), whose tools and source lock now include it; that configuration's renewed review for the current OpenUSD pin is still to do |
-| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | No: `local` only. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word before publishing. The FBX SDK's licence is still to read |
+| 3 | May a `usdfbx` or hdArnold built against the vendor's SDK be published without the SDK? | `usdfbx`: no, `local` only; the FBX SDK's licence is still to read. For Arnold, read on 2026-11-26 ([ARNOLD_CI.md](ARNOLD_CI.md) §6): its EULA and Autodesk's Terms of Use don't forbid the plugins without the core, Gaffer publishes its own so, and only the Terms' §13(b) is worth Autodesk's written word. **Published 2026-11-28 without that word yet** (§5), the maintainer's decision; the question still goes to Autodesk |
 | 4 | Does hdAurora build against a stock OpenUSD? | **Yes** (2026-11-23), with a three-change patch (§7 phase 6). Whether it renders in usdcc is still open |
 | 5 | Switch OpenUSD to oneTBB? | **Yes** (2026-11-23): usdcc built against it and all its tests pass (§7 phase 4) |
 | 6 | Are the Releases page's `deps/...` entries getting too many (RELEASE.md §7 item 2)? | Packs add assets to existing releases, not new releases, so no |
@@ -964,7 +989,9 @@ parts were tried by hand before (§10.6). The release workflow's new steps haven
 a dry run is next. The archives to unpack over usdcc and the second disk image (§5) stay
 until a release has shown that this works. Cycles is the first Windows optional pack
 (published 2026-11-27, §5), so the first release after it is also the first to run these
-Windows steps with a real pack.
+Windows steps with a real pack. Arnold's plugins join it (2026-11-28): the first pack of
+the `local` set that is published, the first that isn't a whole renderer, and one the
+release can't load, as it has no Arnold.
 
 ### 10.1 Decisions
 
@@ -1067,6 +1094,15 @@ How they are made:
   usdcc (`--install-packs`, into a test profile), starts it and checks that OpenUSD registered
   the pack from the data folder, that the plugins its pin's `check` names load and its
   renderers are listed, and removes it again. `release.yml` runs the three in each platform's job.
+- **A published pack of the `local` set (Arnold)** is written by `--pack-folders` too, and by
+  nothing else: on Linux it is deployed and checked with the optional ones and then leaves
+  `--optional-packs`' folder empty, on macOS its binaries are signed in a copy of the bundle
+  that is deleted again, so neither an archive to unpack nor a disk image is made of it. Its
+  plugins are in `plugin/arnold`, not `plugin/usd`, so its `usdcc-plugin.json` has `"usd": []`
+  (§3, Arnold). The library its pin's `check.preload` names (Arnold's core) is the user's, so
+  the macOS check doesn't look for it in the bundle, and `check_pack_install.py` checks only
+  that the pack is in the store, complete, and that OpenUSD registered nothing from it: no
+  runner of this repository has an Arnold.
 - `tools/make_test_pack.py <folder> --version V ...` makes a tiny pack without binaries (a
   codeless schema, the prim type `UsdccHelloThing`) with archives and indexes for the versions
   given, to try all of this without a release.

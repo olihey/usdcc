@@ -135,14 +135,24 @@ usdcc::scripting::PluginManager::Options pluginOptions(const QStringList& plugin
                                                        usdcc::scripting::PackStore& packs) {
     usdcc::scripting::PluginManager::Options options =
         usdcc::scripting::PluginManager::defaultOptions(pluginFolders(pluginPaths), enabled);
-    if (!enabled || options.packsFolder.empty()) return options;
-    for (const usdcc::scripting::InstalledPack& pack : packs.prepare()) {
-        if (pack.removed) {
-            options.packsRemoved.insert(pack.record.name);
-        } else if (!pack.problem.empty()) {
-            options.packsRefused[pack.record.name] = pack.problem;
+    std::string arnoldPack;
+    if (enabled && !options.packsFolder.empty()) {
+        for (const usdcc::scripting::InstalledPack& pack : packs.prepare()) {
+            if (pack.removed) {
+                options.packsRemoved.insert(pack.record.name);
+            } else if (!pack.problem.empty()) {
+                options.packsRefused[pack.record.name] = pack.problem;
+            } else if (pack.record.name == "arnold") {
+                const std::u8string folder = pack.folder.generic_u8string();
+                arnoldPack.assign(folder.begin(), folder.end());
+            }
         }
     }
+    // The Arnold pack's plugins aren't in a folder OpenUSD is given at the scan, as the
+    // others' are: they start Arnold's core, so they are registered here, and only when
+    // Settings > Renderers names an Arnold folder (docs/USD_PLUGINS.md §3). Without a
+    // pack too, as this is also what says that the folder has no plugins to go with.
+    usdcc::usd::enableArnoldPack(arnoldPack);
     return options;
 }
 
