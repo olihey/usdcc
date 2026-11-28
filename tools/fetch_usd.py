@@ -188,7 +188,7 @@ def main(argv=None):
                         help="a pack that isn't published is an error, not a warning")
     parser.add_argument("--optional", action="store_true",
                         help="also the published packs of the optional set (MoonRay), which a release ships as "
-                             "downloads of their own (tools/deploy.py --optional-packs)")
+                             "downloads usdcc installs itself (tools/deploy.py --optional-packs and --pack-folders)")
     parser.add_argument("--zips", type=Path, help="look for the zips in this folder before downloading")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY") or DEFAULT_REPOSITORY,
                         help=f"the GitHub repository whose releases hold them (default: {DEFAULT_REPOSITORY})")

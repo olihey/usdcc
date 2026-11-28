@@ -120,8 +120,9 @@ attaches `usdcc-<version>-linux-x64.tar.xz`, whose folder runs from wherever it 
 unpacked (`./usdcc`), and `usdcc-<version>-linux-x64-symbols.tar.xz`, the `.debug` files of
 usdcc's own binaries: unpacked in the same place, each lands next to its binary, where gdb
 finds it ([CI.md](CI.md) §8). On x64 it also attaches each USD plugin pack of the optional
-set as `usdcc-<version>-linux-x64-<pack>.tar.xz` (MoonRay's, about 214 MB), unpacked over the
-usdcc folder by those who want it ([USD_PLUGINS.md](USD_PLUGINS.md) §5). Each job runs twice, x64 and arm64 (`windows-arm64` on
+set as `usdcc-<version>-linux-x64-pack-<pack>.tar.xz` (MoonRay's, about 200 MB), which usdcc
+downloads and installs itself ([USD_PLUGINS.md](USD_PLUGINS.md) §10); the archive to unpack
+over the usdcc folder by hand is gone since 2026-11-28 (§5 there). Each job runs twice, x64 and arm64 (`windows-arm64` on
 `windows-11-arm`, `linux-arm64` on `ubuntu-24.04-arm`), and `arm64` takes `x64`'s place in
 the arm64 files' names ([ARM64_RELEASES.md](ARM64_RELEASES.md)).
 
@@ -130,8 +131,9 @@ that installs update from ([UPDATES.md](UPDATES.md) §9). This hasn't run yet.
 
 The `macos` job attaches `usdcc-<version>-macos-arm64.dmg`, with `usdcc.app` and a link to
 Applications, and the dSYMs of usdcc's own binaries. And
-`usdcc-<version>-macos-arm64-<pack>.dmg` for each optional USD plugin pack, usdcc with the pack
-(MoonRay's, [USD_PLUGINS.md](USD_PLUGINS.md) §5). It has not run yet (2026-11-23).
+`usdcc-<version>-macos-arm64-pack-<pack>.tar.xz` for each optional USD plugin pack, which usdcc
+installs itself ([USD_PLUGINS.md](USD_PLUGINS.md) §10); the second disk image, usdcc with the
+pack, is gone since 2026-11-28 (§5 there). It has not run yet (2026-11-23).
 `tools/deploy.py` makes the bundle and checks it, `tools/ci/split_dsym.py` takes the symbols
 out, and the smoke test runs a copy from the disk image.
 

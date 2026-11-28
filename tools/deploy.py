@@ -65,12 +65,13 @@ folder runs from wherever it is unpacked.
 
 --optional-packs DIR (Linux and macOS): the packs of the optional set in the install
 (MoonRay) are deployed too and checked with the rest, then moved to
-DIR/<pack>/<destination's name>/, laid out as the deploy is. Unpacked over a
-deploy, each adds its pack; release.yml attaches each as a download of its own.
-A pack's files under plugin/ keep the RUNPATHs its build gave them, which are
-relative to an OpenUSD install laid out as the deploy is. On macOS
-DIR/<pack>/<destination's name>/ has a whole usdcc.app with the pack in it instead:
-files unpacked into a signed bundle would break its signature.
+DIR/<pack>/<destination's name>/, laid out as the deploy is. That folder isn't
+shipped: --pack-folders makes from it the pack usdcc downloads and installs, which
+is the only way a release has it. A pack's files under plugin/ keep the RUNPATHs
+its build gave them, which are relative to an OpenUSD install laid out as the
+deploy is. On macOS DIR/<pack>/<destination's name>/ has a whole usdcc.app with the
+pack in it instead, checked and signed as one, so each of the pack's binaries has
+its own signature when --pack-folders takes them from it.
 
     python tools/deploy.py                       into .\\deploy
     python tools/deploy.py D:\\dist\\usdcc --configuration Release
@@ -423,7 +424,8 @@ def main(argv=None):
                              "configure external runtime roots on the target")
     parser.add_argument("--optional-packs", metavar="DIR",
                         help="also deploy the optional set's USD plugin packs, each into DIR/<pack>/<name>/: on Linux "
-                             "to be unpacked over the deploy, on macOS a usdcc.app with it (docs/USD_PLUGINS.md section 5)")
+                             "its checked files, on macOS a usdcc.app with it, signed; neither is shipped, "
+                             "--pack-folders takes the packs from them (docs/USD_PLUGINS.md section 5)")
     parser.add_argument("--pack-folders", metavar="DIR",
                         help="also write the optional set's packs as usdcc installs one it downloads, DIR/<pack>/, for "
                              "tools/ci/pack_index.py (docs/USD_PLUGINS.md section 10); on Linux and macOS with "
@@ -1389,7 +1391,7 @@ def deploy_linux(args):
                 parent.rmdir()
                 parent = parent.parent
         size = sum(file.stat().st_size for file in target.rglob("*") if file.is_file() and not file.is_symlink())
-        print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), to unpack over the deploy")
+        print(f"  {pack}: {target} ({size / 2**20:,.0f} MB), checked in the deploy and moved out of it")
         # And as usdcc installs it when it downloads it itself (docs/USD_PLUGINS.md section 10).
         if args.pack_folders:
             _pack_folder(pack, target, names, Path(_full(args.pack_folders)) / pack, optional_packs[pack].get("version", ""),
@@ -1465,9 +1467,9 @@ def _macos_problems(contents, files):
 
 
 def _macos_optional_pack(pack, manifest, usd_install, app, target, identity):
-    """A copy of the signed `app`, as `target`, with an optional pack in it. A pack can't be
-    unpacked over a bundle: its files would break the signature, and macOS would call a
-    downloaded usdcc.app damaged."""
+    """A copy of the signed `app`, as `target`, with an optional pack in it: where the pack
+    is checked and each of its binaries signed, for the folder usdcc installs
+    (_pack_folder). The copy itself isn't shipped."""
     from _macho import ENTITLEMENTS, is_macho, sign, sign_app
     if target.parent.exists():
         remove_tree(target.parent)
