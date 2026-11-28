@@ -177,9 +177,13 @@ one of the same direction is lost when the two are merged (§3.4).
   area is the *viewport area*. On switching, that entry stands for one viewport per open stage, at that
   place in the tab order (§7). A file with none, or with two, is refused with a warning naming the file.
 - **Any number of `"stage": "current"` viewports**, anywhere, including in the viewport area.
-- **A panel type that isn't registered** (its plugin is off) is left out, with an info line in the log. An
-  area left with no tabs is dropped, and a split left with one child becomes that child. The workspace's
-  menu entry says so in its tooltip ("Needs V-Ray Render, which isn't loaded").
+- **A panel type that isn't registered** (its plugin is off, or a later version of the app dropped it) is
+  left out. An area left with no tabs is dropped, and a split left with one child becomes that child. The
+  workspace's menu entry says so in its tooltip ("Needs vrayRender, which isn't loaded: left out."), by the
+  type's id: the registry doesn't know a type's name once it's gone. Switching to it shows **one warning
+  toast**, titled with the workspace's name and naming every type left out, which is its line in the log
+  too (`WorkspaceController::applyDefinition()`, [NOTIFICATIONS.md](NOTIFICATIONS.md)); the switch itself
+  succeeds. The file isn't changed, so the panel is back with the next switch once its type is registered.
 - A type may appear more than once (two Outliners): each entry gets a panel of its own.
 - Sizes are shares of the parent split, not pixels; panels' own minimum sizes still apply.
 - A file that doesn't parse, or breaks a rule, isn't listed. The log says which file and why; a studio
@@ -533,7 +537,8 @@ reason, [SETTINGS.md](SETTINGS.md) §4).
   disabled items.
 - `usdcc.app.workspaces()` gives each one's `group`.
 - Each entry's tooltip: the description, then where its file is.
-- A workspace that needs a missing panel type is listed, its tooltip saying what's missing.
+- A workspace that needs a missing panel type is listed, its tooltip saying what's missing; choosing it
+  lays it out without that panel and says so in a toast (§3.4).
 - **The same menu is View > Workspace**, the View menu's first entry, for a window whose title bar is out of
   reach (full screen) or for the keyboard. And a view panel's tab menu has it as **Workspace**, right
   under Close (and Close Others) (`ViewPanel::setTabWorkspaceMenu()`, set in main.cpp).
@@ -805,6 +810,13 @@ All four phases and 2b, on 2026-11-15.
   Plugins collapsed under it, the Log at the bottom). Viewport Only's `"Plugins"` was the wrong name; the
   panel's objectName is `pluginManagerPanel` (a name is now also matched against the title).
 - Choosing the active workspace again lays it out as it is now, not as it was last left (§6.3).
+
+### 10.3 Changes on 2026-11-28
+
+- Switching to a workspace that names panel types that aren't registered shows one warning toast naming
+  them (§3.4), from the menu, a shortcut or `usdcc.app.set_workspace()` alike. Before, only an info line in
+  the log and the menu entry's tooltip said so. `workspace::apply()` no longer logs them itself: it gives
+  them in `ApplyResult::missingTypes`, and the controller says it once for the switch.
 
 ## 11. Open questions
 

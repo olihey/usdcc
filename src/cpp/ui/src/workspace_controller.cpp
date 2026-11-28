@@ -95,6 +95,21 @@ bool WorkspaceController::applyDefinition(const workspace::Definition& definitio
         }
         return false;
     }
+    if (!result.missingTypes.isEmpty()) {
+        // One toast for the switch, which is its line in the log too: the workspace is laid
+        // out without them, and this says why a panel isn't where its file has it. The same
+        // switch again while the toast is up counts on it (×2).
+        const std::string types = result.missingTypes.join(QStringLiteral(", ")).toStdString();
+        const std::string body =
+            result.missingTypes.size() == 1
+                ? "The panel type " + types + " isn't loaded (a plugin that isn't on?), so it's left out."
+                : "The panel types " + types + " aren't loaded (plugins that aren't on?), so they're left out.";
+        USDCC_LOG_TOAST_AS(core::LogLevel::Warning, "usdcc.workspaces",
+                           (core::ToastRequest{.kind = core::ToastKind::Warning,
+                                               .title = definition.name.toStdString(),
+                                               .body = body}),
+                           "Workspace \"{}\": {}", definition.id.toStdString(), body);
+    }
     if (!m_chosen) {
         m_chosen = true;
         QSettings settings = appSettings();

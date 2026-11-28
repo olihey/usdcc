@@ -6,12 +6,14 @@
 #include "test_harness.h"
 #include "test_settings.h"
 
+#include "usdcc/core/log.h"
 #include "usdcc/tools/tool_set.h"
 #include "usdcc/ui/log_panel.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/scale_controller.h"
 #include "usdcc/ui/settings.h"
 #include "usdcc/ui/side_panel.h"
+#include "usdcc/ui/toast_manager.h"
 #include "usdcc/ui/view_panel_registry.h"
 #include "usdcc/ui/workspace.h"
 #include "usdcc/ui/workspace_applier.h"
@@ -54,6 +56,8 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 using usdcc::ui::MainWindow;
 using usdcc::ui::ViewPanel;
@@ -169,6 +173,26 @@ const char* kThreeColumns = R"({
             {"tabs": [{"panel": "viewport"}]},
             {"tabs": [{"panel": "attributes"}]}]},
         {"tabs": [{"panel": "viewport", "stage": "current", "camera": {"view": "top"}}]}]}})";
+
+// The toasts posted to the log's hub from "usdcc.workspaces" while it exists.
+struct WorkspaceToasts {
+    struct Sink : usdcc::core::LogSink {
+        std::mutex mutex;
+        std::vector<usdcc::core::LogRecord> records;
+        void onRecord(const usdcc::core::LogRecord& record) override {
+            if (!record.toast || record.category != "usdcc.workspaces") return;
+            std::lock_guard lock(mutex);
+            records.push_back(record);
+        }
+    };
+    std::shared_ptr<Sink> sink = std::make_shared<Sink>();
+    WorkspaceToasts() { usdcc::core::LogHub::instance().addSink(sink, false); }
+    ~WorkspaceToasts() { usdcc::core::LogHub::instance().removeSink(sink.get()); }
+    std::vector<usdcc::core::LogRecord> records() const {
+        std::lock_guard lock(sink->mutex);
+        return sink->records;
+    }
+};
 
 }  // namespace
 
@@ -664,6 +688,61 @@ USDCC_TEST(workspace_controller_and_button) {
 // Switching lays a workspace out as its file says every time: what was changed in the
 // window since, a panel closed or a divider dragged, isn't kept. And the arrangements an
 // earlier version remembered are removed.
+// A workspace naming panel types that aren't registered (a plugin that's off, a type a
+// later version dropped) is laid out without them, and one toast says which.
+USDCC_TEST(workspace_switch_says_what_it_left_out) {
+    App app;
+    QTemporaryDir user;
+    QTemporaryDir shipped;
+    write(shipped.filePath("default.json"), workspaceText("default", "Default", "Scene", 10));
+    write(shipped.filePath("render.json"),
+          R"({"format": "usdcc-workspace", "version": 1, "id": "render", "name": "Render",
+              "collapsed": [{"panel": "rtx", "area": "right"}],
+              "layout": {"split": "horizontal", "items": [
+                  {"tabs": [{"panel": "outliner"}, {"panel": "vray"}], "current": 1},
+                  {"tabs": [{"panel": "viewport"}]},
+                  {"tabs": [{"panel": "vray"}]}]}})");
+    write(shipped.filePath("one.json"),
+          R"({"format": "usdcc-workspace", "version": 1, "id": "one", "name": "One",
+              "layout": {"tabs": [{"panel": "viewport"}, {"panel": "vray"}]}})");
+    WorkspaceLibrary library({user.path(), shipped.path(), false});
+    WorkspaceController controller(app.context(), &library);
+    WorkspaceToasts toasts;
+
+    QString error;
+    CHECK(controller.switchTo(QStringLiteral("render"), &error), "switched all the same: %s", qPrintable(error));
+    CHECK(controller.currentId() == "render", "and it's the active one");
+    QStringList types;
+    for (const ViewPanel* panel : openPanels(app.window.dockManager())) types << typeOf(panel);
+    types.sort();
+    CHECK(types == QStringList({QStringLiteral("outliner"), QStringLiteral("viewport")}), "laid out without them: %s",
+          qPrintable(types.join(',')));
+
+    std::vector<usdcc::core::LogRecord> records = toasts.records();
+    CHECK(records.size() == 1, "one toast for the switch, not one a type: %d", int(records.size()));
+    if (records.size() == 1) {
+        const usdcc::core::LogRecord& record = records.front();
+        CHECK(record.level == usdcc::core::LogLevel::Warning && record.toast->kind == usdcc::core::ToastKind::Warning,
+              "a warning");
+        CHECK(record.toast->title == "Render", "titled with the workspace's name: %s", record.toast->title.c_str());
+        CHECK(record.toast->body.find("types vray, rtx aren't loaded") != std::string::npos, "naming each type once: %s",
+              record.toast->body.c_str());
+        CHECK(record.message.find("\"render\"") != std::string::npos, "the log's line has the workspace's id: %s",
+              record.message.c_str());
+    }
+    waitFor([&app] { return !app.window.toasts()->visibleToasts().isEmpty(); }, 2000);
+    CHECK(app.window.toasts()->visibleToasts().size() == 1, "and it shows in the window: %d",
+          int(app.window.toasts()->visibleToasts().size()));
+
+    CHECK(controller.switchTo(QStringLiteral("one"), &error), "switched: %s", qPrintable(error));
+    records = toasts.records();
+    CHECK(records.size() == 2 && records.back().toast->body.find("type vray isn't loaded") != std::string::npos,
+          "one type reads as one: %s", records.empty() ? "" : records.back().toast->body.c_str());
+
+    CHECK(controller.switchTo(QStringLiteral("default"), &error), "switched: %s", qPrintable(error));
+    CHECK(toasts.records().size() == 2, "none for a workspace with all its panels");
+}
+
 USDCC_TEST(workspace_switching_always_follows_the_file) {
     App app;
     ads::CDockManager* docks = app.window.dockManager();
