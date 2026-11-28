@@ -1,6 +1,5 @@
 #include "usdcc/ui/workspace_applier.h"
 
-#include "usdcc/core/log.h"
 #include "usdcc/ui/main_window.h"
 #include "usdcc/ui/panel_maximizer.h"
 #include "usdcc/ui/scaled_metrics.h"
@@ -304,11 +303,7 @@ ApplyResult apply(const Definition& definition, const ApplyContext& context) {
     usdcc::usd::StageManager& stageManager = *context.stages;
 
     const Node layout = pruned(definition.layout, [&registry](const QString& type) { return registry.find(type) != nullptr; },
-                               &result.missingTypes);
-    for (const QString& type : result.missingTypes) {
-        USDCC_LOG_INFO("usdcc.workspaces", "Workspace \"{}\" names the panel type \"{}\", which isn't loaded; left out",
-                       definition.id.toStdString(), type.toStdString());
-    }
+                               &result.missingTypes);  // said by the caller (WorkspaceController's toast)
 
     // Leave a maximized panel first: its restore puts the layout back.
     window->panelMaximizer()->restore();
