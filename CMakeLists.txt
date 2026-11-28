@@ -102,6 +102,13 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
+# The Qt found below has cmake/ports-macos' patches, or the configure stops here: a build
+# that shares another checkout's vcpkg_installed doesn't build it (docs/MACOS.md §2).
+if(CMAKE_HOST_APPLE)
+    include(UsdccOverlayPorts)
+    usdcc_check_overlay_ports("${CMAKE_SOURCE_DIR}/cmake/ports-macos")
+endif()
+
 # OpenGL component: only needed for QOpenGLFunctions_1_1 (legacy
 # immediate-mode drawing), used by HydraViewportWindow to render M5's gizmo
 # overlays directly into the same Compatibility-profile GL context Storm
